@@ -1,0 +1,135 @@
+#!/bin/bash
+# dotbackup — backup/restore dotfiles + Claude config to iCloud
+# Usage: dotbackup          (backup with diff preview)
+#        dotbackup restore  (restore to new Mac)
+#        dotbackup diff     (show what changed since last backup)
+#        dotbackup hook     (install auto-backup on shell exit)
+
+TOOLKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BACKUP_DIR="$TOOLKIT_DIR/dotfiles"
+ACTION="${1:-backup}"
+
+G='\033[0;32m' Y='\033[0;33m' R='\033[0;31m' D='\033[2m' B='\033[1m' N='\033[0m'
+
+DOTFILES=("$HOME/.zshrc" "$HOME/.gitconfig" "$HOME/.gitignore_global" "$HOME/.vimrc" "$HOME/.tmux.conf")
+CLAUDE_ITEMS=("$HOME/.claude/agents" "$HOME/.claude/commands" "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json")
+
+show_diff() {
+    echo -e "${B}Changes since last backup:${N}\n"
+    local changes=0
+    for f in "${DOTFILES[@]}"; do
+        local name=$(basename "$f")
+        local backed="$BACKUP_DIR/$name"
+        if [[ -f "$f" && -f "$backed" ]]; then
+            if ! diff -q "$f" "$backed" &>/dev/null; then
+                echo -e "  ${Y}~${N} $name"
+                diff --unified=3 "$backed" "$f" 2>/dev/null | head -20 | sed 's/^/    /'
+                echo ""; ((changes++))
+            fi
+        elif [[ -f "$f" && ! -f "$backed" ]]; then
+            echo -e "  ${G}+${N} $name (new — not in backup)"
+            ((changes++))
+        fi
+    done
+    (( changes == 0 )) && echo -e "  ${G}✓ All dotfiles match backup${N}"
+    echo ""
+}
+
+do_backup() {
+    mkdir -p "$BACKUP_DIR"
+    echo -e "${B}Backing up dotfiles...${N}\n"
+    for f in "${DOTFILES[@]}"; do
+        [[ -f "$f" ]] || continue
+        local name=$(basename "$f")
+        local dest="$BACKUP_DIR/$name"
+        if [[ -f "$dest" ]] && ! diff -q "$f" "$dest" &>/dev/null; then
+            echo -e "  ${Y}~${N} $name (changed)"
+            diff --unified=2 "$dest" "$f" 2>/dev/null | head -10 | sed 's/^/      /'
+            read -r -p "    Overwrite? [Y/n] " yn
+            [[ "$yn" =~ ^[nN] ]] && { echo "    Skipped."; continue; }
+        fi
+        cp "$f" "$dest"
+        echo -e "  ${G}✓${N} $name"
+    done
+    echo ""
+    mkdir -p "$BACKUP_DIR/claude"
+    for item in "${CLAUDE_ITEMS[@]}"; do
+        [[ -e "$item" ]] || continue
+        local name=$(basename "$item")
+        if [[ -d "$item" ]]; then
+            rsync -a --delete "$item/" "$BACKUP_DIR/claude/$name/" 2>/dev/null
+        else
+            cp "$item" "$BACKUP_DIR/claude/$name" 2>/dev/null
+        fi
+        echo -e "  ${G}✓${N} claude/$name"
+    done
+    if command -v brew &>/dev/null; then
+        echo ""
+        brew bundle dump --force --file="$TOOLKIT_DIR/Brewfile" 2>/dev/null
+        echo -e "  ${G}✓${N} Brewfile exported"
+    fi
+    date +%s > "$BACKUP_DIR/.last-backup"
+    echo -e "\n${G}Backup complete!${N}"
+}
+
+do_restore() {
+    [[ -d "$BACKUP_DIR" ]] || { echo -e "${R}No backup found at $BACKUP_DIR${N}"; return 1; }
+    local ts=$(date +%Y%m%d-%H%M%S)
+    echo -e "${B}Restoring dotfiles...${N}"
+    echo -e "${Y}Safety: current files saved as .bak-$ts${N}\n"
+    for f in "${DOTFILES[@]}"; do
+        local name=$(basename "$f")
+        local src="$BACKUP_DIR/$name"
+        [[ -f "$src" ]] || continue
+        if [[ -f "$f" ]]; then
+            if diff -q "$f" "$src" &>/dev/null; then
+                echo -e "  ${G}✓${N} $name (already matches)"; continue
+            fi
+            cp "$f" "${f}.bak-${ts}"
+        fi
+        mkdir -p "$(dirname "$f")"
+        cp "$src" "$f"
+        echo -e "  ${G}✓${N} $name restored"
+    done
+    if [[ -d "$BACKUP_DIR/claude" ]]; then
+        echo ""
+        mkdir -p "$HOME/.claude"
+        for item in "$BACKUP_DIR/claude"/*; do
+            local name=$(basename "$item")
+            if [[ -d "$item" ]]; then
+                rsync -a "$item/" "$HOME/.claude/$name/" 2>/dev/null
+            else
+                cp "$item" "$HOME/.claude/$name" 2>/dev/null
+            fi
+            echo -e "  ${G}✓${N} claude/$name"
+        done
+    fi
+    if [[ -f "$TOOLKIT_DIR/Brewfile" ]]; then
+        echo ""
+        read -r -p "Restore brew packages from Brewfile? [y/N] " yn
+        [[ "$yn" =~ ^[yY] ]] && brew bundle --file="$TOOLKIT_DIR/Brewfile"
+    fi
+    echo -e "\n${G}Restore complete!${N}"
+}
+
+do_hook() {
+    local marker="# toolkit-dotbackup-hook"
+    if grep -q "$marker" "$HOME/.zshrc" 2>/dev/null; then
+        echo -e "${G}Auto-backup hook already installed.${N}"; return
+    fi
+    cat >> "$HOME/.zshrc" << 'HOOK'
+
+# toolkit-dotbackup-hook
+zshexit() { bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/dotbackup" 2>/dev/null; }
+HOOK
+    echo -e "${G}✓ Auto-backup hook installed in .zshrc${N}"
+    echo -e "${D}Dotfiles will auto-backup when you close a terminal.${N}"
+}
+
+case "$ACTION" in
+    backup)  do_backup ;;
+    restore) do_restore ;;
+    diff)    show_diff ;;
+    hook)    do_hook ;;
+    *)       echo "Usage: dotbackup [backup|restore|diff|hook]" ;;
+esac

@@ -1,0 +1,41 @@
+# Secrets — NEVER commit these
+env.sh
+dotfiles/.zshrc
+
+# macOS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Temp files
+/tmp/
+*.tmp
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Editor
+.vscode/
+.idea/
+.cursor/
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+
+# Secrets and credentials
+.env
+*.pem
+*.key
+credentials.*
+
+# Deploy and local config
+deploy.sh

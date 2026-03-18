@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# claudeme — launch a Claude coding session with a chosen model (with descriptions)
+set -euo pipefail
+
+DEFAULT_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-6}"
+
+MODELS=(
+  "claude-sonnet-4-6"
+  "claude-opus-4-6"
+  "claude-haiku-4-5"
+)
+
+declare -A MODEL_DESC=(
+  ["claude-sonnet-4-6"]="Best balance of speed + intelligence; ideal default for coding."
+  ["claude-opus-4-6"]="Deepest reasoning; best for hard problems, architecture, debugging."
+  ["claude-haiku-4-5"]="Fastest and cheapest; great for quick edits, scripts, small tasks."
+)
+
+SESSION_NAME=""
+WORKDIR=""
+
+command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [-m model] [-n session_name] [-d directory] [--] [extra args]
+EOF
+}
+
+pick_model_interactive() {
+  local lines=()
+  for id in "${MODELS[@]}"; do
+    lines+=("${id}:::${MODEL_DESC[$id]}")
+  done
+
+  if command_exists fzf; then
+    local picked
+    picked="$(printf "%s\n" "${lines[@]}" \
+      | sed 's/:::/\t/' \
+      | fzf --prompt="Pick Claude model > " \
+            --header="Model\tWhat it's good for" \
+            --with-nth=1,2 \
+            --height=12 --layout=reverse --border \
+      | awk -F'\t' '{print $1}')"
+    echo "$picked"
+  else
+    echo "Pick a model:"
+    local i=1
+    for id in "${MODELS[@]}"; do
+      printf "  %d) %-18s %s\n" "$i" "$id" "${MODEL_DESC[$id]}"
+      ((i++))
+    done
+    echo "  c) Custom..."
+    echo ""
+    read -r -p "Enter choice (1-${#MODELS[@]} or 'c'): " choice
+    case "$choice" in
+      [1-9]*) local idx=$((choice-1)); if (( idx>=0 && idx<${#MODELS[@]} )); then echo "${MODELS[$idx]}"; fi ;;
+      c|C) read -r -p "Enter custom model id: " custom; echo "$custom" ;;
+      *) echo "" ;;
+    esac
+  fi
+}
+
+MODEL=""
+while getopts ":m:n:d:h" opt; do
+  case "$opt" in
+    m) MODEL="$OPTARG" ;;
+    n) SESSION_NAME="$OPTARG" ;;
+    d) WORKDIR="$OPTARG" ;;
+    h) usage; exit 0 ;;
+    \?) echo "Unknown option: -$OPTARG" >&2; usage; exit 2 ;;
+    :)  echo "Option -$OPTARG requires an argument." >&2; usage; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+EXTRA_ARGS=("$@")
+
+if [[ -z "$MODEL" ]]; then
+  MODEL="$(pick_model_interactive)"
+  MODEL="${MODEL:-$DEFAULT_MODEL}"
+fi
+
+SESSION_NAME="${SESSION_NAME:-$(basename "$(pwd)")-$(date +%Y%m%d-%H%M)}"
+WORKDIR="${WORKDIR:-$(pwd)}"
+
+if ! command_exists aicoder && ! command_exists claude; then
+  echo "Neither 'aicoder' nor 'claude' CLI found in PATH." >&2
+  exit 127
+fi
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  echo "Warning: ANTHROPIC_API_KEY not set." >&2
+fi
+
+echo "Starting session:"
+echo "  Model:   $MODEL"
+echo "  Session: $SESSION_NAME"
+echo "  Dir:     $WORKDIR"
+echo ""
+
+if command_exists aicoder; then
+  exec aicoder --model "$MODEL" --session "$SESSION_NAME" --dir "$WORKDIR" "${EXTRA_ARGS[@]}"
+else
+  exec claude code --model "$MODEL" --cwd "$WORKDIR" --name "$SESSION_NAME" "${EXTRA_ARGS[@]}"
+fi

@@ -1,0 +1,402 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		00D185605AC1FA252BD8A6CC /* ProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 789B86EC06D31C20065CE63E /* ProjectDetailView.swift */; };
+		02D2AB65031B4DF4DFC84B0C /* WebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77801B3877A75D573588A9B6 /* WebSocketClient.swift */; };
+		0D83338F838D25322D21DD99 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C68CC58E7CB9343D8768943B /* ConnectView.swift */; };
+		1E1B12D3B1FB9DF5FEF02B37 /* KMacPilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDF6C956A9E6CA0E44981752 /* KMacPilotApp.swift */; };
+		3BFD23D3B5B1A25DEFCA2F24 /* FileBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29B6AE3EA29A4F369893B21E /* FileBrowserView.swift */; };
+		3F2B7097B07400FB81A62519 /* SessionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CEF3807692FE79D3F6100A /* SessionDetailView.swift */; };
+		4971CAA0B178EA780736B63D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 03B3377E851A5717E931B8CA /* Assets.xcassets */; };
+		7309B61CA01D38B4477350F0 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11C0F793E97A2A48907A59B7 /* MainTabView.swift */; };
+		79A509D203E4300B52459783 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894CA30891199AFCAFDD3618 /* SettingsView.swift */; };
+		8298038D610787DC733629DA /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CCBD1433CD22B19DD9F3621 /* Models.swift */; };
+		8B7A9C7BFF9AE65CDEE6B3E7 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A3940C2EF792636B560DBFD /* TerminalView.swift */; };
+		995F791B44C0B286F16EB56C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AB05E2AFEC0D36433173320 /* AppState.swift */; };
+		A22DEB01C97C3633CABD62E0 /* TaskStartSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D11CF5148376A8AB5FECED0 /* TaskStartSheet.swift */; };
+		AC4CF16E520749ACAAF02638 /* SessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA32EB1A68AA8AFB51E7B944 /* SessionsView.swift */; };
+		B34DB16CCE19C2A08DBDC2E0 /* ToolkitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB55FDF3E6402E54838B71AA /* ToolkitView.swift */; };
+		C45E460F31082EDFFDEF3F84 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 434B8F4356373401A2205AC1 /* ProjectsView.swift */; };
+		C8389AB9148DAF959A7C6207 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0E1E92D64754098A6E90B99 /* DashboardView.swift */; };
+		E9D36C002F977844FEEFC37F /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2FEEEF0DCF5AB3C36CBE3BD /* APIClient.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		03B3377E851A5717E931B8CA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		03F15777B39453BD6905E3E1 /* KMacPilot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KMacPilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		11C0F793E97A2A48907A59B7 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		1D11CF5148376A8AB5FECED0 /* TaskStartSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStartSheet.swift; sourceTree = "<group>"; };
+		29B6AE3EA29A4F369893B21E /* FileBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBrowserView.swift; sourceTree = "<group>"; };
+		434B8F4356373401A2205AC1 /* ProjectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
+		5CCBD1433CD22B19DD9F3621 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		6AB05E2AFEC0D36433173320 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		77801B3877A75D573588A9B6 /* WebSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketClient.swift; sourceTree = "<group>"; };
+		789B86EC06D31C20065CE63E /* ProjectDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailView.swift; sourceTree = "<group>"; };
+		894CA30891199AFCAFDD3618 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		92CEF3807692FE79D3F6100A /* SessionDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDetailView.swift; sourceTree = "<group>"; };
+		9A3940C2EF792636B560DBFD /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		A0E1E92D64754098A6E90B99 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		C68CC58E7CB9343D8768943B /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
+		DB55FDF3E6402E54838B71AA /* ToolkitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolkitView.swift; sourceTree = "<group>"; };
+		DDF6C956A9E6CA0E44981752 /* KMacPilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KMacPilotApp.swift; sourceTree = "<group>"; };
+		EA32EB1A68AA8AFB51E7B944 /* SessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsView.swift; sourceTree = "<group>"; };
+		F2FEEEF0DCF5AB3C36CBE3BD /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		072639B951735E4D848F56B3 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				C68CC58E7CB9343D8768943B /* ConnectView.swift */,
+				A0E1E92D64754098A6E90B99 /* DashboardView.swift */,
+				29B6AE3EA29A4F369893B21E /* FileBrowserView.swift */,
+				11C0F793E97A2A48907A59B7 /* MainTabView.swift */,
+				789B86EC06D31C20065CE63E /* ProjectDetailView.swift */,
+				434B8F4356373401A2205AC1 /* ProjectsView.swift */,
+				92CEF3807692FE79D3F6100A /* SessionDetailView.swift */,
+				EA32EB1A68AA8AFB51E7B944 /* SessionsView.swift */,
+				894CA30891199AFCAFDD3618 /* SettingsView.swift */,
+				1D11CF5148376A8AB5FECED0 /* TaskStartSheet.swift */,
+				9A3940C2EF792636B560DBFD /* TerminalView.swift */,
+				DB55FDF3E6402E54838B71AA /* ToolkitView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		40CF97BDC65EC5CD85891B1C /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				F2FEEEF0DCF5AB3C36CBE3BD /* APIClient.swift */,
+				6AB05E2AFEC0D36433173320 /* AppState.swift */,
+				77801B3877A75D573588A9B6 /* WebSocketClient.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		63564A9BFD41B3990DA00566 = {
+			isa = PBXGroup;
+			children = (
+				A943C7879A89DF7249C8E8D7 /* KMacPilot */,
+				91EB6E6FCD34ECA2415C6848 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		91EB6E6FCD34ECA2415C6848 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				03F15777B39453BD6905E3E1 /* KMacPilot.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A943C7879A89DF7249C8E8D7 /* KMacPilot */ = {
+			isa = PBXGroup;
+			children = (
+				03B3377E851A5717E931B8CA /* Assets.xcassets */,
+				DDF6C956A9E6CA0E44981752 /* KMacPilotApp.swift */,
+				D79B7DE057FD76A065555A02 /* Models */,
+				40CF97BDC65EC5CD85891B1C /* Services */,
+				072639B951735E4D848F56B3 /* Views */,
+			);
+			path = KMacPilot;
+			sourceTree = "<group>";
+		};
+		D79B7DE057FD76A065555A02 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				5CCBD1433CD22B19DD9F3621 /* Models.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		CC44F2DDAD111EA7F3376929 /* KMacPilot */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5CF2953100D54AF440682E4E /* Build configuration list for PBXNativeTarget "KMacPilot" */;
+			buildPhases = (
+				BB38D3E8E9AC1C0CB6911D9A /* Sources */,
+				71E9D4A368926F1DF3CE71BF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = KMacPilot;
+			packageProductDependencies = (
+			);
+			productName = KMacPilot;
+			productReference = 03F15777B39453BD6905E3E1 /* KMacPilot.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		24020D5D1E6DBE819A59D035 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					CC44F2DDAD111EA7F3376929 = {
+						DevelopmentTeam = "";
+					};
+				};
+			};
+			buildConfigurationList = E3BF783315A6C5893EFF3E6B /* Build configuration list for PBXProject "KMacPilot" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 63564A9BFD41B3990DA00566;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 91EB6E6FCD34ECA2415C6848 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CC44F2DDAD111EA7F3376929 /* KMacPilot */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		71E9D4A368926F1DF3CE71BF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4971CAA0B178EA780736B63D /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BB38D3E8E9AC1C0CB6911D9A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E9D36C002F977844FEEFC37F /* APIClient.swift in Sources */,
+				995F791B44C0B286F16EB56C /* AppState.swift in Sources */,
+				0D83338F838D25322D21DD99 /* ConnectView.swift in Sources */,
+				C8389AB9148DAF959A7C6207 /* DashboardView.swift in Sources */,
+				3BFD23D3B5B1A25DEFCA2F24 /* FileBrowserView.swift in Sources */,
+				1E1B12D3B1FB9DF5FEF02B37 /* KMacPilotApp.swift in Sources */,
+				7309B61CA01D38B4477350F0 /* MainTabView.swift in Sources */,
+				8298038D610787DC733629DA /* Models.swift in Sources */,
+				00D185605AC1FA252BD8A6CC /* ProjectDetailView.swift in Sources */,
+				C45E460F31082EDFFDEF3F84 /* ProjectsView.swift in Sources */,
+				3F2B7097B07400FB81A62519 /* SessionDetailView.swift in Sources */,
+				AC4CF16E520749ACAAF02638 /* SessionsView.swift in Sources */,
+				79A509D203E4300B52459783 /* SettingsView.swift in Sources */,
+				A22DEB01C97C3633CABD62E0 /* TaskStartSheet.swift in Sources */,
+				8B7A9C7BFF9AE65CDEE6B3E7 /* TerminalView.swift in Sources */,
+				B34DB16CCE19C2A08DBDC2E0 /* ToolkitView.swift in Sources */,
+				02D2AB65031B4DF4DFC84B0C /* WebSocketClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		4742EBE58B489B2E7E9F186C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "KMac Pilot";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kmac.pilot;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		9CB9697EE367F410F2E97539 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		B64C43DE466DC31B8371A51D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D5F86CB7511E0F6CBF294D24 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "KMac Pilot";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kmac.pilot;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5CF2953100D54AF440682E4E /* Build configuration list for PBXNativeTarget "KMacPilot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4742EBE58B489B2E7E9F186C /* Debug */,
+				D5F86CB7511E0F6CBF294D24 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E3BF783315A6C5893EFF3E6B /* Build configuration list for PBXProject "KMacPilot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B64C43DE466DC31B8371A51D /* Debug */,
+				9CB9697EE367F410F2E97539 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 24020D5D1E6DBE819A59D035 /* Project object */;
+}

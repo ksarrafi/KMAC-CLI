@@ -1,0 +1,121 @@
+#!/bin/bash
+# project — fzf project launcher with rich context
+# Usage: project                (pick project, then action)
+#        project FlightPrep     (go straight to it)
+#        project -c FlightPrep  (open in Claude)
+#        project -x FlightPrep  (open in Cursor agent)
+
+PROJECTS_DIR="$HOME/Projects"
+ACTION=""
+PROJECT_NAME=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c|--claude) ACTION="claude"; shift ;;
+        -x|--cursor) ACTION="cursor"; shift ;;
+        -h|--help) echo "Usage: project [-c|-x] [name]"; exit 0 ;;
+        *) PROJECT_NAME="$1"; shift ;;
+    esac
+done
+
+# Pick project
+if [[ -z "$PROJECT_NAME" ]]; then
+    if command -v fzf &>/dev/null; then
+        PROJECT_NAME=$(ls -d "$PROJECTS_DIR"/*/ 2>/dev/null \
+            | while read d; do
+                name=$(basename "$d")
+                branch=$(git -C "$d" branch --show-current 2>/dev/null || echo "-")
+                last=$(git -C "$d" log -1 --format="%ar" 2>/dev/null || echo "no git")
+                printf "%-20s %-15s %s\n" "$name" "$branch" "$last"
+            done \
+            | fzf --prompt="Project > " --height=15 --layout=reverse --border \
+                  --header="Name                 Branch          Last commit" \
+            | awk '{print $1}')
+    else
+        echo "Projects:"
+        echo ""
+        i=1; dirs=()
+        for d in "$PROJECTS_DIR"/*/; do
+            name=$(basename "$d")
+            dirs+=("$name")
+            branch=$(git -C "$d" branch --show-current 2>/dev/null || echo "-")
+            printf "  %2d) %-20s %s\n" "$i" "$name" "$branch"
+            ((i++))
+        done
+        echo ""
+        read -r -p "Choose [1-${#dirs[@]}]: " pick
+        if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#dirs[@]} )); then
+            PROJECT_NAME="${dirs[$((pick-1))]}"
+        fi
+    fi
+fi
+
+[[ -z "$PROJECT_NAME" ]] && { echo "No project selected."; exit 1; }
+
+PROJECT_PATH="$PROJECTS_DIR/$PROJECT_NAME"
+[[ ! -d "$PROJECT_PATH" ]] && { echo "Not found: $PROJECT_PATH"; exit 1; }
+
+# Show project dashboard
+if [[ -z "$ACTION" ]]; then
+    echo ""
+    echo -e "\033[1m$PROJECT_NAME\033[0m"
+    echo ""
+
+    # Git info
+    if [[ -d "$PROJECT_PATH/.git" ]]; then
+        BRANCH=$(git -C "$PROJECT_PATH" branch --show-current 2>/dev/null)
+        LAST=$(git -C "$PROJECT_PATH" log -1 --format="%ar — %s" 2>/dev/null)
+        DIRTY=$(git -C "$PROJECT_PATH" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+        BRANCHES=$(git -C "$PROJECT_PATH" branch --list 2>/dev/null | wc -l | tr -d ' ')
+
+        echo "  Branch:   $BRANCH  ($BRANCHES total)"
+        echo "  Last:     $LAST"
+        [[ "$DIRTY" -gt 0 ]] && echo -e "  Changes:  \033[33m$DIRTY uncommitted file(s)\033[0m"
+
+        # Recent branches
+        echo ""
+        echo "  Recent branches:"
+        git -C "$PROJECT_PATH" branch --sort=-committerdate --list 2>/dev/null | head -5 | while read b; do
+            echo "    $b"
+        done
+    fi
+
+    # Check for running services
+    echo ""
+    echo "  Services:"
+    local found_svc=false
+    # Check common dev ports
+    for port in 3000 3001 5000 5173 8000 8080 4200; do
+        local pid_on_port=$(lsof -ti :"$port" 2>/dev/null | head -1)
+        if [[ -n "$pid_on_port" ]]; then
+            local pname=$(ps -p "$pid_on_port" -o comm= 2>/dev/null)
+            echo -e "    \033[32m●\033[0m :$port  ($pname)"
+            found_svc=true
+        fi
+    done
+    $found_svc || echo -e "    \033[2m○ No dev servers detected\033[0m"
+
+    # Check for CLAUDE.md
+    [[ -f "$PROJECT_PATH/CLAUDE.md" ]] && echo -e "\n  \033[32m✓\033[0m CLAUDE.md found"
+
+    echo ""
+    echo "  1) Claude Code    2) Cursor Agent    3) cd    4) IDE    5) AI Review"
+    echo ""
+    read -r -p "Action [1-5]: " act
+    case "$act" in
+        1) ACTION="claude" ;;
+        2) ACTION="cursor" ;;
+        3) ACTION="cd" ;;
+        4) ACTION="ide" ;;
+        5) ACTION="review" ;;
+        *) ACTION="cd" ;;
+    esac
+fi
+
+case "$ACTION" in
+    claude)  echo "Starting Claude Code..."; cd "$PROJECT_PATH" && exec claude ;;
+    cursor)  echo "Starting Cursor Agent..."; cd "$PROJECT_PATH" && exec cursor agent ;;
+    ide)     code "$PROJECT_PATH" 2>/dev/null || cursor "$PROJECT_PATH" 2>/dev/null || open "$PROJECT_PATH" ;;
+    review)  cd "$PROJECT_PATH" && exec bash "$(echo ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/scripts/review)" ;;
+    cd|*)    echo "cd $PROJECT_PATH"; cd "$PROJECT_PATH" && exec $SHELL ;;
+esac

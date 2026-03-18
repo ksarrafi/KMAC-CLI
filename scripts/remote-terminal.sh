@@ -1,0 +1,188 @@
+#!/bin/bash
+# remote-terminal.sh — Sourceable remote terminal functions
+
+remote-terminal() {
+    local pid_dir="/tmp/remote-terminal"
+    local ttyd_pidfile="$pid_dir/ttyd.pid"
+    local caddy_pidfile="$pid_dir/caddy.pid"
+    local ngrok_pidfile="$pid_dir/ngrok.pid"
+    local caddyfile="$pid_dir/Caddyfile"
+
+    # ── dependency check ──
+    local missing=()
+    local dep
+    for dep in ttyd ngrok caddy qrencode tmux; do
+        command -v "$dep" &>/dev/null || missing+=("$dep")
+    done
+    if (( ${#missing[@]} )); then
+        echo "Error: missing dependencies: ${missing[*]}"
+        echo "Install with:  brew install ${missing[*]}"
+        return 1
+    fi
+
+    # ── idempotency: bail if already running ──
+    if [[ -f "$ttyd_pidfile" ]] && kill -0 "$(cat "$ttyd_pidfile")" 2>/dev/null; then
+        echo "remote-terminal is already running (ttyd PID $(cat "$ttyd_pidfile"))."
+        echo "Run stop-remote-terminal first."
+        return 1
+    fi
+
+    mkdir -p "$pid_dir"
+
+    # ── cleanup helper (kills whatever has been started so far) ──
+    _rt_cleanup() {
+        echo "Error: $1"
+        echo "Cleaning up partially started services..."
+        local pf
+        for pf in "$ttyd_pidfile" "$caddy_pidfile" "$ngrok_pidfile"; do
+            if [[ -f "$pf" ]]; then
+                kill "$(cat "$pf")" 2>/dev/null
+                rm -f "$pf"
+            fi
+        done
+        rm -f "$caddyfile"
+    }
+
+    # ── credentials (from Keychain) ──
+    local RT_USER="user"
+    local RT_PASS
+    RT_PASS=$(security find-generic-password -s "toolkit-rt-password" -w 2>/dev/null)
+    if [[ -z "$RT_PASS" ]]; then
+        echo "No remote-terminal password found in Keychain."
+        echo "Set one with: security add-generic-password -s toolkit-rt-password -a \$USER -w"
+        read -r -s -p "Or enter a password now: " RT_PASS; echo ""
+        if [[ -n "$RT_PASS" ]]; then
+            security add-generic-password -s "toolkit-rt-password" -a "$USER" -w "$RT_PASS" 2>/dev/null
+            echo "Saved to Keychain for next time."
+        else
+            return 1
+        fi
+    fi
+
+    # ── tmux session ──
+    if ! tmux has-session -t remote 2>/dev/null; then
+        tmux new-session -d -s remote || { _rt_cleanup "Failed to create tmux session 'remote'"; return 1; }
+        echo "Created new tmux session 'remote'."
+    else
+        echo "Reusing existing tmux session 'remote'."
+    fi
+
+    # ── ttyd ──
+    ttyd --writable -p 7681 tmux attach -t remote &>/dev/null &
+    echo $! > "$ttyd_pidfile"
+    sleep 1
+    if ! kill -0 "$(cat "$ttyd_pidfile")" 2>/dev/null; then
+        _rt_cleanup "ttyd failed to start on port 7681 (port already in use?)"; return 1
+    fi
+    echo "Started ttyd (PID $(cat "$ttyd_pidfile")) on :7681"
+
+    # ── caddy: hash password & write config ──
+    local HASHED
+    HASHED=$(caddy hash-password --plaintext "$RT_PASS" 2>/dev/null)
+    if [[ -z "$HASHED" ]]; then
+        _rt_cleanup "caddy hash-password failed"; return 1
+    fi
+
+    cat > "$caddyfile" <<EOF
+:7682 {
+    reverse_proxy localhost:7681
+    basic_auth {
+        $RT_USER $HASHED
+    }
+}
+EOF
+
+    caddy run --config "$caddyfile" &>/dev/null &
+    echo $! > "$caddy_pidfile"
+    sleep 1
+    if ! kill -0 "$(cat "$caddy_pidfile")" 2>/dev/null; then
+        _rt_cleanup "Caddy failed to start on port 7682"; return 1
+    fi
+    echo "Started Caddy (PID $(cat "$caddy_pidfile")) on :7682"
+
+    # ── ngrok ──
+    if [[ -n "${NGROK_DOMAIN:-}" ]]; then
+        ngrok http 7682 --url="$NGROK_DOMAIN" &>/dev/null &
+    else
+        ngrok http 7682 &>/dev/null &
+    fi
+    echo $! > "$ngrok_pidfile"
+    sleep 2
+    if ! kill -0 "$(cat "$ngrok_pidfile")" 2>/dev/null; then
+        _rt_cleanup "ngrok failed to start"; return 1
+    fi
+    echo "Started ngrok (PID $(cat "$ngrok_pidfile"))"
+
+    # ── poll ngrok API for the public URL ──
+    local url="" elapsed=0
+    echo "Waiting for ngrok tunnel..."
+    while (( elapsed < 15 )); do
+        url=$(curl -sf http://localhost:4040/api/tunnels 2>/dev/null \
+            | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
+        [[ -n "$url" ]] && break
+        sleep 1
+        (( elapsed++ ))
+    done
+    if [[ -z "$url" ]]; then
+        _rt_cleanup "Timed out waiting for ngrok tunnel after 15 s"; return 1
+    fi
+
+    # ── print results ──
+    echo ""
+    echo "============================================"
+    echo "  Remote Terminal is live!"
+    echo "============================================"
+    echo "  URL:      $url"
+    echo "  Username: $RT_USER"
+    echo "  Password: $RT_PASS"
+    echo "============================================"
+    echo ""
+    qrencode -t UTF8 "$url"
+}
+
+stop-remote-terminal() {
+    local pid_dir="/tmp/remote-terminal"
+    local stopped=()
+    local svc pf pid
+
+    # ── kill by PID file ──
+    for svc in ngrok caddy ttyd; do
+        pf="$pid_dir/${svc}.pid"
+        if [[ -f "$pf" ]]; then
+            pid=$(cat "$pf")
+            if kill "$pid" 2>/dev/null; then
+                stopped+=("$svc (PID $pid)")
+            fi
+            rm -f "$pf"
+        fi
+    done
+
+    # ── fallback: targeted pkill ──
+    pkill -f 'ttyd -p 7681' 2>/dev/null
+    pkill -f 'caddy run --config /tmp/remote-terminal' 2>/dev/null
+    pkill -f 'ngrok http 7682' 2>/dev/null
+
+    # ── clean up runtime files ──
+    rm -f "$pid_dir/Caddyfile"
+
+    # ── optionally kill tmux session ──
+    if tmux has-session -t remote 2>/dev/null; then
+        echo "Warning: tmux session 'remote' still exists."
+        echo -n "Kill it? [y/N] "
+        local ans
+        read -r ans
+        if [[ "$ans" =~ ^[Yy]$ ]]; then
+            tmux kill-session -t remote
+            stopped+=("tmux session 'remote'")
+        else
+            echo "Leaving tmux session 'remote' alive."
+        fi
+    fi
+
+    # ── summary ──
+    if (( ${#stopped[@]} )); then
+        echo "Stopped: ${stopped[*]}"
+    else
+        echo "No remote-terminal services were running."
+    fi
+}

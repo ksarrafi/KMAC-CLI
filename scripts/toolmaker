@@ -1,0 +1,303 @@
+#!/bin/bash
+# toolmaker — AI-powered tool builder for the toolkit
+# Describe what you want, AI builds it, you iterate, it installs.
+# Usage: toolmaker              (interactive)
+#        toolmaker "description" (one-shot)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLKIT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/_ui.sh" 2>/dev/null
+source "$SCRIPT_DIR/_auth-helper.sh"
+
+G='\033[0;32m' Y='\033[0;33m' R='\033[0;31m' C='\033[0;36m'
+B='\033[1m' D='\033[2m' M='\033[0;35m' NC='\033[0m'
+
+DRAFT_FILE="/tmp/toolkit-toolmaker-draft.sh"
+TOOL_NAME=""
+TOOL_DESC=""
+TOOL_TYPE=""  # plugin or script
+TOOL_KEY=""
+
+# ─── Gather Spec ──────────────────────────────────────────────────────────
+
+gather_spec() {
+    echo ""
+    title_box "Tool Maker" "🔧"
+    echo -e "${D}Describe what you want and AI will build it for you.${NC}"
+    echo ""
+
+    if [[ -n "$1" ]]; then
+        TOOL_DESC="$1"
+        echo -e "${B}Idea:${NC} $TOOL_DESC"
+    else
+        echo -e "${B}What should this tool do?${NC}"
+        echo -e "${D}Be as specific as you want — what it takes as input, what it outputs,${NC}"
+        echo -e "${D}any flags or options. The more detail, the better the first draft.${NC}"
+        echo ""
+        echo -e "${D}(Multi-line: type your description, then press Enter twice when done)${NC}"
+        echo ""
+        TOOL_DESC=""
+        local empty_count=0
+        while IFS= read -r line; do
+            if [[ -z "$line" ]]; then
+                ((empty_count++))
+                (( empty_count >= 1 )) && break
+            else
+                empty_count=0
+                TOOL_DESC+="$line"$'\n'
+            fi
+        done
+        TOOL_DESC=$(echo "$TOOL_DESC" | sed 's/[[:space:]]*$//')
+    fi
+
+    if [[ -z "$TOOL_DESC" ]]; then
+        echo -e "${R}No description provided.${NC}"
+        return 1
+    fi
+
+    echo ""
+    echo -e "${B}Where should it live?${NC}"
+    echo -e "  ${G}p${NC}) Plugin ${D}(appears in menu Plugins section, letter shortcut)${NC}"
+    echo -e "  ${G}s${NC}) Script ${D}(toolkit subcommand, e.g. 'toolkit mytool')${NC}"
+    echo ""
+    read -r -n1 -p "  > " type_choice; echo ""
+    case "$type_choice" in
+        p|P) TOOL_TYPE="plugin" ;;
+        *)   TOOL_TYPE="script" ;;
+    esac
+
+    echo ""
+    read -r -p "  Tool name (lowercase, no spaces): " TOOL_NAME
+    TOOL_NAME=$(echo "$TOOL_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+
+    if [[ "$TOOL_TYPE" == "plugin" ]]; then
+        echo ""
+        read -r -n1 -p "  Menu shortcut key (single letter/number): " TOOL_KEY; echo ""
+    fi
+}
+
+# ─── Generate Code ────────────────────────────────────────────────────────
+
+generate_code() {
+    _ensure_claude_auth || return 1
+
+    local existing_tools
+    existing_tools=$(ls "$TOOLKIT_DIR/scripts" 2>/dev/null | tr '\n' ', ')
+
+    local context=""
+    if [[ "$TOOL_TYPE" == "plugin" ]]; then
+        context="Generate a bash PLUGIN script. It MUST start with these header comments:
+# TOOLKIT_NAME: <Human-readable name>
+# TOOLKIT_DESC: <One-line description>
+# TOOLKIT_KEY: ${TOOL_KEY}
+
+The plugin will be in the plugins/ directory and executed standalone."
+    else
+        context="Generate a bash SCRIPT. It will be in the scripts/ directory.
+It can source the auth helper with:
+  source \"\$(cd \"\$(dirname \"\${BASH_SOURCE[0]}\")\" && pwd)/_auth-helper.sh\"
+if it needs Claude AI. The _claude_ask function is then available."
+    fi
+
+    local prompt="You are building a CLI tool for a macOS developer toolkit.
+
+EXISTING TOOLS: ${existing_tools}
+TOOL NAME: ${TOOL_NAME}
+TOOL TYPE: ${TOOL_TYPE}
+${context}
+
+USER'S REQUEST:
+${TOOL_DESC}
+
+RULES:
+- Write a complete, production-quality bash script
+- Start with #!/bin/bash
+- Use color output (ANSI escape codes) for a polished look
+- Include a usage/help section triggered by -h or --help
+- Handle errors gracefully — never crash silently
+- Use read -r -n1 for menu prompts (single keypress, consistent with toolkit)
+- If it needs AI, source _auth-helper.sh and use _claude_ask
+- Keep it focused — one tool, one job, done well
+- Add helpful comments but don't over-comment
+- If it needs external tools, check they exist first with command -v
+
+Output ONLY the script. No explanation, no markdown fences, just the raw bash script."
+
+    local code
+    code=$(_claude_ask "$prompt" "claude-sonnet-4-6" 8192 "Building tool")
+
+    if [[ -z "$code" ]]; then
+        echo -e "${R}AI returned empty response.${NC}"
+        return 1
+    fi
+
+    # Clean up: strip any markdown fences the AI might add despite instructions
+    code=$(echo "$code" | sed '/^```/d')
+
+    echo "$code" > "$DRAFT_FILE"
+}
+
+# ─── Review & Iterate ────────────────────────────────────────────────────
+
+show_draft() {
+    echo ""
+    echo -e "${B}${C}━━━ Draft: ${TOOL_NAME} ━━━${NC}"
+    echo ""
+    if command -v bat &>/dev/null; then
+        bat --style=numbers --language=bash --theme="Monokai Extended" "$DRAFT_FILE"
+    else
+        cat -n "$DRAFT_FILE"
+    fi
+    echo ""
+    echo -e "${C}━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+syntax_check() {
+    local result
+    result=$(bash -n "$DRAFT_FILE" 2>&1)
+    if [[ $? -eq 0 ]]; then
+        echo -e "  ${G}✓${NC} Syntax check passed"
+        return 0
+    else
+        echo -e "  ${R}✗${NC} Syntax error:"
+        echo "$result" | sed 's/^/    /'
+        return 1
+    fi
+}
+
+iterate_loop() {
+    while true; do
+        show_draft
+        syntax_check
+        echo ""
+        echo -e "  ${G}y${NC}) Looks good — install it"
+        echo -e "  ${G}e${NC}) Edit — tell AI what to change"
+        echo -e "  ${G}r${NC}) Regenerate from scratch"
+        echo -e "  ${G}o${NC}) Open in \$EDITOR"
+        echo -e "  ${G}t${NC}) Test run it"
+        echo -e "  ${G}m${NC}) Back (discard)"
+        echo ""
+        read -r -n1 -p "  > " choice; echo ""
+
+        case "$choice" in
+            y|Y)
+                install_tool
+                return
+                ;;
+            e|E)
+                echo ""
+                echo -e "${B}What should change?${NC}"
+                read -r -p "  > " feedback
+                [[ -z "$feedback" ]] && continue
+
+                _ensure_claude_auth || continue
+                local current_code
+                current_code=$(cat "$DRAFT_FILE")
+
+                local edit_prompt="Here is a bash script:
+
+${current_code}
+
+The user wants this change: ${feedback}
+
+Output ONLY the complete updated script. No explanation, no markdown fences."
+
+                local updated
+                updated=$(_claude_ask "$edit_prompt" "claude-sonnet-4-6" 8192 "Revising tool")
+                if [[ -n "$updated" ]]; then
+                    updated=$(echo "$updated" | sed '/^```/d')
+                    echo "$updated" > "$DRAFT_FILE"
+                    echo -e "${G}✓ Updated${NC}"
+                else
+                    echo -e "${R}AI returned empty — keeping previous version${NC}"
+                fi
+                ;;
+            r|R)
+                echo -e "${D}Regenerating...${NC}"
+                generate_code
+                ;;
+            o|O)
+                ${EDITOR:-vim} "$DRAFT_FILE"
+                ;;
+            t|T)
+                echo ""
+                echo -e "${D}─── Test Run ───${NC}"
+                if syntax_check; then
+                    bash "$DRAFT_FILE" --help 2>&1 || bash "$DRAFT_FILE" 2>&1 | head -30
+                fi
+                echo -e "${D}─── End Test ───${NC}"
+                echo ""
+                echo -e -n "${D}Press any key to continue...${NC}"; read -r -n1
+                ;;
+            m|M)
+                echo -e "${D}Discarded.${NC}"
+                rm -f "$DRAFT_FILE"
+                return
+                ;;
+        esac
+    done
+}
+
+# ─── Install ──────────────────────────────────────────────────────────────
+
+install_tool() {
+    if ! syntax_check; then
+        echo -e "${R}Can't install — syntax errors. Fix with 'e' first.${NC}"
+        iterate_loop
+        return
+    fi
+
+    local dest
+    if [[ "$TOOL_TYPE" == "plugin" ]]; then
+        dest="$TOOLKIT_DIR/plugins/${TOOL_NAME}.sh"
+    else
+        dest="$TOOLKIT_DIR/scripts/${TOOL_NAME}"
+    fi
+
+    cp "$DRAFT_FILE" "$dest"
+    chmod +x "$dest"
+
+    echo ""
+    echo -e "${G}${B}✓ Installed!${NC}"
+    echo -e "  ${D}Location: ${dest}${NC}"
+
+    if [[ "$TOOL_TYPE" == "plugin" ]]; then
+        echo -e "  ${D}Menu key:  ${TOOL_KEY}${NC}"
+        echo -e "  ${D}It will appear in the Plugins section of the toolkit menu.${NC}"
+    else
+        echo -e "  ${D}Run it:    toolkit ${TOOL_NAME}${NC}"
+
+        # Offer to add to subcommand router
+        echo ""
+        echo -e "  ${G}a${NC}) Add to toolkit subcommand router (so 'toolkit ${TOOL_NAME}' works)"
+        echo -e "  ${G}s${NC}) Skip (run directly from scripts/)"
+        echo ""
+        read -r -n1 -p "  > " add_choice; echo ""
+
+        if [[ "$add_choice" =~ ^[aA]$ ]]; then
+            # Symlink to ~/bin
+            if [[ -d "$HOME/bin" ]]; then
+                ln -sf "$dest" "$HOME/bin/${TOOL_NAME}"
+                echo -e "  ${G}✓${NC} Symlinked to ~/bin/${TOOL_NAME}"
+            fi
+            echo -e "  ${Y}Note:${NC} Add this to the 'case' in toolkit.sh subcommand router:"
+            echo -e "  ${D}${TOOL_NAME}) exec bash \"\$SCRIPTS_DIR/${TOOL_NAME}\" \"\$@\" ;;${NC}"
+        fi
+    fi
+
+    rm -f "$DRAFT_FILE"
+    echo ""
+    echo -e "${G}Done! Your new tool is ready.${NC}"
+}
+
+# ─── Main ─────────────────────────────────────────────────────────────────
+
+main() {
+    gather_spec "$1" || return 1
+    echo ""
+    echo -e "${D}Building ${TOOL_NAME}...${NC}"
+    generate_code || return 1
+    iterate_loop
+}
+
+main "$*"

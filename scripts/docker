@@ -1,0 +1,957 @@
+#!/bin/bash
+# docker — Docker Engine + MCP integrated management
+# Usage: docker-mgr [dashboard|crashes|disk|cleanup|mcp|compose]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+source "$SCRIPT_DIR/_auth-helper.sh" 2>/dev/null
+
+# ─── Docker Socket Discovery ────────────────────────────────────────────────
+
+_DOCKER_SOCK=""
+for sock in "$HOME/.docker/run/docker.sock" /var/run/docker.sock; do
+    [[ -S "$sock" ]] && { _DOCKER_SOCK="$sock"; break; }
+done
+
+_HAS_MCP=false
+docker mcp --version &>/dev/null && _HAS_MCP=true
+
+# ─── Engine API Helpers ──────────────────────────────────────────────────────
+
+_api() {
+    local endpoint="$1" method="${2:-GET}"
+    if [[ -z "$_DOCKER_SOCK" ]]; then
+        echo "{}"
+        return 1
+    fi
+    curl -s --max-time 5 --unix-socket "$_DOCKER_SOCK" \
+        -X "$method" "http://localhost${endpoint}" 2>/dev/null
+}
+
+_api_json() {
+    _api "$@" | python3 -c "
+import sys,json
+try:
+    d = json.load(sys.stdin)
+    print(json.dumps(d, indent=2))
+except:
+    print('{}')
+" 2>/dev/null
+}
+
+_py() {
+    python3 -c "$1" 2>/dev/null
+}
+
+_docker_ok() {
+    if [[ -z "$_DOCKER_SOCK" ]]; then
+        echo -e "  ${RED}Docker socket not found.${NC}"
+        echo -e "  ${DIM}Is Docker Desktop running?${NC}"
+        return 1
+    fi
+    local v
+    v=$(_api "/version" | _py "import sys,json; print(json.load(sys.stdin).get('Version',''))")
+    if [[ -z "$v" ]]; then
+        echo -e "  ${RED}Docker Engine not responding.${NC}"
+        echo -e "  ${DIM}Try restarting Docker Desktop.${NC}"
+        return 1
+    fi
+    return 0
+}
+
+# ─── Spinner ─────────────────────────────────────────────────────────────────
+
+_SPIN_CHARS=('⣾' '⣽' '⣻' '⢿' '⡿' '⣟' '⣯' '⣷')
+_SPIN_N=8
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 1. HEALTH DASHBOARD — live stats via Engine API
+# ═════════════════════════════════════════════════════════════════════════════
+
+do_dashboard() {
+    title_box "Docker Health Dashboard" "🐳"
+    _docker_ok || return
+
+    # System overview via /info — parse all fields in one python call
+    local info_parsed
+    info_parsed=$(_api "/info" | python3 -c "
+import sys,json
+d = json.load(sys.stdin)
+print(d.get('ContainersRunning',0))
+print(d.get('ContainersPaused',0))
+print(d.get('ContainersStopped',0))
+print(d.get('Images',0))
+print(d.get('NCPU',0))
+print(f'{d.get(\"MemTotal\",0)/(1024**3):.1f}')
+print(d.get('OperatingSystem','?'))
+print(d.get('KernelVersion','?'))
+" 2>/dev/null)
+
+    local running paused stopped images cpus mem_gb os kernel
+    { read -r running; read -r paused; read -r stopped; read -r images
+      read -r cpus; read -r mem_gb; read -r os; read -r kernel; } <<< "$info_parsed"
+
+    echo -e "  ${BOLD}Engine${NC}   ${DIM}${os} • kernel ${kernel}${NC}"
+    echo -e "  ${BOLD}Host${NC}     ${DIM}${cpus} CPUs • ${mem_gb} GB RAM${NC}"
+    echo ""
+    echo -e "  Containers: ${GREEN}${running} running${NC}  ${YELLOW}${paused} paused${NC}  ${RED}${stopped} stopped${NC}  │  Images: ${BOLD}${images}${NC}"
+    echo ""
+
+    if [[ "$running" == "0" ]]; then
+        echo -e "  ${DIM}No running containers to monitor.${NC}"
+        return
+    fi
+
+    # Per-container health via /containers/json + /containers/{id}/stats
+    echo -e "  ${BOLD}Container Health${NC}"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..72})${NC}"
+    printf "  %-3s %-24s %-10s %-9s %-12s %-10s %s\n" "#" "NAME" "HEALTH" "CPU %" "MEMORY" "NET I/O" "UPTIME"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..72})${NC}"
+
+    local containers idx=0 alerts=""
+    containers=$(_api "/containers/json")
+
+    echo "$containers" | _py "
+import sys, json
+cs = json.load(sys.stdin)
+for c in cs:
+    print(c['Id'][:12] + '|' + c['Names'][0].lstrip('/') + '|' + c.get('Status',''))
+" | while IFS='|' read -r cid name status; do
+        ((idx++))
+
+        # Health status from inspect
+        local health
+        health=$(_api "/containers/$cid/json" | _py "
+import sys,json
+d = json.load(sys.stdin)
+h = d.get('State',{}).get('Health',{}).get('Status','none')
+print(h)")
+
+        local badge=""
+        case "$health" in
+            healthy)   badge="${GREEN}● healthy${NC}  " ;;
+            unhealthy) badge="${RED}● unhealth${NC} " ;;
+            starting)  badge="${YELLOW}● starting${NC} " ;;
+            *)         badge="${BLUE}○ none${NC}     " ;;
+        esac
+
+        # Stats (single shot)
+        local stats
+        stats=$(_api "/containers/$cid/stats?stream=false")
+
+        local cpu_pct mem_usage net_rx net_tx
+        read -r cpu_pct mem_usage net_rx net_tx < <(echo "$stats" | _py "
+import sys,json
+s = json.load(sys.stdin)
+# CPU %
+cpu_delta = s.get('cpu_stats',{}).get('cpu_usage',{}).get('total_usage',0) - s.get('precpu_stats',{}).get('cpu_usage',{}).get('total_usage',0)
+sys_delta = s.get('cpu_stats',{}).get('system_cpu_usage',0) - s.get('precpu_stats',{}).get('system_cpu_usage',0)
+ncpu = len(s.get('cpu_stats',{}).get('cpu_usage',{}).get('percpu_usage',[0]))
+cpu_pct = (cpu_delta / sys_delta * ncpu * 100) if sys_delta > 0 else 0.0
+# Memory
+mem = s.get('memory_stats',{}).get('usage',0)
+if mem >= 1073741824: mem_h = f'{mem/1073741824:.1f}G'
+elif mem >= 1048576: mem_h = f'{mem/1048576:.0f}M'
+else: mem_h = f'{mem/1024:.0f}K'
+# Network
+nets = s.get('networks',{})
+rx = sum(v.get('rx_bytes',0) for v in nets.values())
+tx = sum(v.get('tx_bytes',0) for v in nets.values())
+def h(b):
+    if b >= 1073741824: return f'{b/1073741824:.1f}G'
+    if b >= 1048576: return f'{b/1048576:.0f}M'
+    return f'{b/1024:.0f}K'
+print(f'{cpu_pct:.1f} {mem_h} {h(rx)} {h(tx)}')")
+
+        # Trim uptime from status
+        local uptime="${status#Up }"
+
+        local cpu_color="$GREEN"
+        local cpu_num="${cpu_pct%.*}"
+        (( cpu_num > 80 )) && cpu_color="$RED"
+        (( cpu_num > 50 && cpu_num <= 80 )) && cpu_color="$YELLOW"
+
+        printf "  ${DIM}%2d${NC}  %-24s %b ${cpu_color}%-9s${NC} %-12s %-10s %s\n" \
+            "$idx" "$name" "$badge" "${cpu_pct}%" "$mem_usage" "${net_rx}↓${net_tx}↑" "$uptime"
+
+        if (( cpu_num > 80 )); then
+            alerts+="  ${RED}⚠${NC}  ${BOLD}${name}${NC}: CPU at ${cpu_pct}%\n"
+        fi
+    done
+
+    if [[ -n "$alerts" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}${BOLD}Alerts${NC}"
+        echo -e "$alerts"
+    fi
+
+    echo ""
+    # Docker disk summary
+    echo -e "  ${BOLD}Disk Usage${NC}"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..50})${NC}"
+    docker system df --format "table {{.Type}}\t{{.TotalCount}}\t{{.Size}}\t{{.Reclaimable}}" 2>/dev/null | while IFS= read -r line; do
+        echo "  $line"
+    done
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 2. CRASH DETECTIVE — analyze exited containers via Engine API
+# ═════════════════════════════════════════════════════════════════════════════
+
+do_crashes() {
+    title_box "Crash Detective" "🔍"
+    _docker_ok || return
+
+    local exited
+    exited=$(_api "/containers/json?all=true&filters=%7B%22status%22%3A%5B%22exited%22%5D%7D")
+
+    local count
+    count=$(echo "$exited" | _py "import sys,json; print(len(json.load(sys.stdin)))")
+
+    if [[ "$count" == "0" ]]; then
+        echo -e "  ${GREEN}✓ No crashed containers. All clear!${NC}"
+        return
+    fi
+
+    echo -e "  Found ${RED}${count}${NC} exited container(s):"
+    echo ""
+
+    local oom_count=0 err_count=0 clean_count=0
+    local all_names=""
+
+    echo "$exited" | _py "
+import sys,json
+cs = json.load(sys.stdin)
+for c in cs:
+    print(c['Id'][:12])
+" | while IFS= read -r cid; do
+        local inspect_data
+        inspect_data=$(_api "/containers/$cid/json")
+
+        local name exit_code oom_killed image finished reason badge
+        read -r name exit_code oom_killed image finished < <(echo "$inspect_data" | _py "
+import sys,json
+d = json.load(sys.stdin)
+name = d.get('Name','?').lstrip('/')
+ec = d.get('State',{}).get('ExitCode',0)
+oom = d.get('State',{}).get('OOMKilled',False)
+img = d.get('Config',{}).get('Image','?')
+fin = d.get('State',{}).get('FinishedAt','?')[:19].replace('T',' ')
+print(f'{name} {ec} {oom} {img} {fin}')")
+
+        if [[ "$oom_killed" == "True" ]]; then
+            badge="${RED}☠ OOM KILLED${NC}"
+            reason="Out of memory — increase container memory limit"
+        elif [[ "$exit_code" == "137" ]]; then
+            badge="${RED}⚡ SIGKILL(137)${NC}"
+            reason="Killed by signal — likely OOM or manual kill"
+        elif [[ "$exit_code" == "139" ]]; then
+            badge="${RED}💥 SEGFAULT(139)${NC}"
+            reason="Segmentation fault in application"
+        elif [[ "$exit_code" == "1" ]]; then
+            badge="${YELLOW}✗ ERROR(1)${NC}"
+            reason="Application error — check logs"
+        elif [[ "$exit_code" == "0" ]]; then
+            badge="${GREEN}✓ CLEAN(0)${NC}"
+            reason="Exited normally"
+        else
+            badge="${YELLOW}? EXIT(${exit_code})${NC}"
+            reason="Unexpected exit code"
+        fi
+
+        printf "  %b\n" "$badge"
+        printf "    Name:    ${BOLD}%s${NC}\n" "$name"
+        printf "    Image:   ${DIM}%s${NC}\n" "$image"
+        printf "    Exited:  ${DIM}%s${NC}\n" "$finished"
+        printf "    Reason:  %s\n" "$reason"
+        echo ""
+        all_names+="$name "
+    done
+
+    echo -e "  ${DIM}$(printf '─%.0s' {1..50})${NC}"
+    echo ""
+    echo -e "  ${BOLD}Actions:${NC}"
+    echo -e "   ${GREEN}l${NC})  View logs for a container"
+    echo -e "   ${GREEN}r${NC})  Restart a stopped container"
+    echo -e "   ${GREEN}c${NC})  Clean up all stopped containers"
+    echo -e "   ${GREEN}m${NC})  Back"
+    echo ""
+    read -r -p "  > " action
+
+    case "$action" in
+        l)
+            echo ""
+            read -r -p "  Container name: " cname
+            if [[ -n "$cname" ]]; then
+                echo ""
+                echo -e "  ${BOLD}Last 60 lines from ${cname}:${NC}"
+                echo -e "  ${DIM}$(printf '─%.0s' {1..50})${NC}"
+                docker logs --tail 60 "$cname" 2>&1 | while IFS= read -r line; do
+                    echo "  $line"
+                done
+            fi
+            ;;
+        r)
+            echo ""
+            read -r -p "  Container name: " cname
+            if [[ -n "$cname" ]]; then
+                echo -e "  ${DIM}Restarting ${cname}...${NC}"
+                docker start "$cname" 2>&1
+                echo -e "  ${GREEN}✓ Started${NC}"
+            fi
+            ;;
+        c)
+            echo ""
+            docker container prune -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
+            echo -e "  ${GREEN}✓ Cleaned up stopped containers${NC}"
+            ;;
+    esac
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 3. DISK MONITOR — detailed Docker disk analysis via Engine API
+# ═════════════════════════════════════════════════════════════════════════════
+
+do_disk() {
+    title_box "Docker Disk Monitor" "💾"
+    _docker_ok || return
+
+    local i=0
+
+    # Host disk context
+    echo -e "  ${BOLD}Host Disk${NC}"
+    local disk_line
+    disk_line=$(df -h / 2>/dev/null | tail -1)
+    local pct
+    pct=$(echo "$disk_line" | awk '{print $5}' | tr -d '%')
+    local used total avail
+    used=$(echo "$disk_line" | awk '{print $3}')
+    total=$(echo "$disk_line" | awk '{print $2}')
+    avail=$(echo "$disk_line" | awk '{print $4}')
+
+    local bar_w=40 filled=$(( pct * 40 / 100 )) empty=$(( 40 - pct * 40 / 100 ))
+    local bar="" bar_color="$GREEN"
+    (( pct > 80 )) && bar_color="$RED"
+    (( pct > 60 && pct <= 80 )) && bar_color="$YELLOW"
+    for (( b=0; b<filled; b++ )); do bar+="▇"; done
+    for (( b=0; b<empty; b++ )); do bar+="░"; done
+
+    printf "  ${bar_color}%s${NC} %s%%  (%s used / %s total, %s free)\n\n" "$bar" "$pct" "$used" "$total" "$avail"
+
+    # Docker resource usage via system df
+    echo -e "  ${BOLD}Docker Resources${NC}"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+    docker system df 2>/dev/null | while IFS= read -r line; do echo "  $line"; done
+    echo ""
+
+    # Largest images
+    echo -e "  ${BOLD}Largest Images (top 10)${NC}"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+    printf "  ${DIM}%-12s  %-42s  %s${NC}\n" "SIZE" "REPOSITORY:TAG" "IMAGE ID"
+    docker images --format "{{.Size}}\t{{.Repository}}:{{.Tag}}\t{{.ID}}" 2>/dev/null | sort -hr | head -10 | while IFS=$'\t' read -r sz repo id; do
+        printf "  %-12s  %-42s  ${DIM}%s${NC}\n" "$sz" "$repo" "$id"
+    done
+    echo ""
+
+    # Volumes
+    local vol_count
+    vol_count=$(docker volume ls -q 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$vol_count" -gt 0 ]]; then
+        echo -e "  ${BOLD}Volumes (${vol_count})${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+        docker system df -v 2>/dev/null | awk '/VOLUME NAME/,/^$/' | head -12 | while IFS= read -r line; do echo "  $line"; done
+        echo ""
+    fi
+
+    # Reclaimable
+    local dangling_imgs dangling_vols stopped
+    dangling_imgs=$(docker images -f "dangling=true" -q 2>/dev/null | wc -l | tr -d ' ')
+    dangling_vols=$(docker volume ls -f "dangling=true" -q 2>/dev/null | wc -l | tr -d ' ')
+    stopped=$(docker ps -a -f status=exited -q 2>/dev/null | wc -l | tr -d ' ')
+
+    if (( dangling_imgs > 0 || dangling_vols > 0 || stopped > 0 )); then
+        echo -e "  ${BOLD}Reclaimable${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..40})${NC}"
+        (( dangling_imgs > 0 )) && echo -e "  ${YELLOW}${dangling_imgs} dangling image(s)${NC}"
+        (( dangling_vols > 0 )) && echo -e "  ${YELLOW}${dangling_vols} unused volume(s)${NC}"
+        (( stopped > 0 ))       && echo -e "  ${YELLOW}${stopped} stopped container(s)${NC}"
+        echo ""
+        echo -e "  Clean all reclaimable resources? (y/N)"
+        read -r -p "  > " yn
+        if [[ "$yn" == [yY]* ]]; then
+            echo ""
+            docker system prune -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
+            echo ""
+            echo -e "  ${GREEN}✓ Cleanup complete${NC}"
+        fi
+    else
+        echo -e "  ${GREEN}✓ No dangling resources — disk is clean${NC}"
+    fi
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 4. AUTO-CLEANUP SCHEDULER
+# ═════════════════════════════════════════════════════════════════════════════
+
+CLEANUP_SCRIPT="$HOME/cleanup-docker.sh"
+CLEANUP_LOG="$HOME/.docker-cleanup.log"
+
+do_scheduler() {
+    title_box "Auto-Cleanup Scheduler" "⏰"
+
+    local script_exists=false cron_exists=false cron_schedule=""
+    [[ -f "$CLEANUP_SCRIPT" ]] && script_exists=true
+    if crontab -l 2>/dev/null | grep -q "cleanup-docker.sh"; then
+        cron_exists=true
+        cron_schedule=$(crontab -l 2>/dev/null | grep "cleanup-docker.sh" | awk '{print $1,$2,$3,$4,$5}')
+    fi
+
+    echo -e "  ${BOLD}Current State${NC}"
+    if $script_exists; then
+        echo -e "  ${GREEN}●${NC} Cleanup script installed at ${DIM}${CLEANUP_SCRIPT}${NC}"
+    else
+        echo -e "  ${RED}●${NC} No cleanup script installed"
+    fi
+    if $cron_exists; then
+        echo -e "  ${GREEN}●${NC} Scheduled: ${BOLD}${cron_schedule}${NC}"
+    else
+        echo -e "  ${RED}●${NC} Not scheduled in crontab"
+    fi
+    if [[ -f "$CLEANUP_LOG" ]]; then
+        local last_run
+        last_run=$(grep "^=== Docker Cleanup" "$CLEANUP_LOG" 2>/dev/null | tail -1 | sed 's/=== Docker Cleanup //' | sed 's/ ===//')
+        [[ -n "$last_run" ]] && echo -e "  ${DIM}Last run: ${last_run}${NC}"
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}Options${NC}"
+    echo -e "   ${GREEN}1${NC})  Install weekly cleanup (Sunday 2 AM)"
+    echo -e "   ${GREEN}2${NC})  Install daily cleanup (3 AM)"
+    echo -e "   ${GREEN}3${NC})  Run cleanup now"
+    echo -e "   ${GREEN}4${NC})  View recent cleanup log"
+    echo -e "   ${GREEN}5${NC})  Disable auto-cleanup"
+    echo -e "   ${GREEN}m${NC})  Back"
+    echo ""
+    read -r -p "  > " choice
+
+    case "$choice" in
+        1) _install_cleanup; _set_cron "0 2 * * 0" "Weekly (Sunday 2 AM)" ;;
+        2) _install_cleanup; _set_cron "0 3 * * *" "Daily (3 AM)" ;;
+        3)
+            _install_cleanup
+            echo ""
+            echo -e "  ${DIM}Running cleanup...${NC}"
+            bash "$CLEANUP_SCRIPT"
+            echo -e "  ${GREEN}✓ Done. Check log: ${CLEANUP_LOG}${NC}"
+            ;;
+        4)
+            if [[ -f "$CLEANUP_LOG" ]]; then
+                echo ""
+                tail -40 "$CLEANUP_LOG" | while IFS= read -r line; do echo "  $line"; done
+            else
+                echo -e "  ${DIM}No cleanup log yet.${NC}"
+            fi
+            ;;
+        5)
+            if $cron_exists; then
+                crontab -l 2>/dev/null | grep -v "cleanup-docker.sh" | crontab -
+                echo -e "  ${GREEN}✓ Auto-cleanup disabled${NC}"
+            else
+                echo -e "  ${DIM}Nothing to disable.${NC}"
+            fi
+            ;;
+    esac
+}
+
+_install_cleanup() {
+    cat > "$CLEANUP_SCRIPT" << 'EOF'
+#!/bin/bash
+LOG="$HOME/.docker-cleanup.log"
+echo "=== Docker Cleanup $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG"
+if ! docker info > /dev/null 2>&1; then
+    echo "Docker not running, skipping." >> "$LOG"
+    exit 0
+fi
+echo "--- Before ---" >> "$LOG"
+docker system df >> "$LOG" 2>&1
+docker container prune -f >> "$LOG" 2>&1
+docker image prune -f >> "$LOG" 2>&1
+docker volume prune -f >> "$LOG" 2>&1
+docker builder prune -f --filter "until=168h" >> "$LOG" 2>&1
+echo "--- After ---" >> "$LOG"
+docker system df >> "$LOG" 2>&1
+echo "" >> "$LOG"
+EOF
+    chmod +x "$CLEANUP_SCRIPT"
+    echo -e "  ${GREEN}✓ Cleanup script installed${NC}"
+}
+
+_set_cron() {
+    local schedule="$1" label="$2"
+    ( crontab -l 2>/dev/null | grep -v "cleanup-docker.sh"; echo "$schedule $CLEANUP_SCRIPT" ) | crontab -
+    echo -e "  ${GREEN}✓ Scheduled: ${label}${NC}"
+    echo -e "  ${DIM}Logs go to ${CLEANUP_LOG}${NC}"
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 5. COMPOSE MANAGEMENT
+# ═════════════════════════════════════════════════════════════════════════════
+
+do_compose() {
+    title_box "Compose Deployments" "🚀"
+    _docker_ok || return
+
+    # Find running compose projects
+    local projects
+    projects=$(docker compose ls --format json 2>/dev/null)
+
+    if [[ -n "$projects" && "$projects" != "[]" ]]; then
+        echo -e "  ${BOLD}Active Compose Projects${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+        echo "$projects" | _py "
+import sys,json
+ps = json.load(sys.stdin)
+for i,p in enumerate(ps,1):
+    status = p.get('Status','?')
+    name = p.get('Name','?')
+    cf = p.get('ConfigFiles','?')
+    print(f'  {i:2d})  {name:25s}  {status}')
+    print(f'       \033[2m{cf}\033[0m')
+"
+    else
+        echo -e "  ${DIM}No active Compose projects found.${NC}"
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}Actions${NC}"
+    echo -e "   ${GREEN}l${NC})  View logs for a project"
+    echo -e "   ${GREEN}s${NC})  Stop a project"
+    echo -e "   ${GREEN}r${NC})  Restart a project"
+    echo -e "   ${GREEN}u${NC})  Start a project from compose file"
+    echo -e "   ${GREEN}m${NC})  Back"
+    echo ""
+    read -r -p "  > " action
+
+    case "$action" in
+        l)
+            read -r -p "  Project name: " pname
+            [[ -n "$pname" ]] && docker compose -p "$pname" logs --tail 50 2>&1 | while IFS= read -r line; do echo "  $line"; done
+            ;;
+        s)
+            read -r -p "  Project name: " pname
+            if [[ -n "$pname" ]]; then
+                docker compose -p "$pname" stop 2>&1
+                echo -e "  ${GREEN}✓ Stopped${NC}"
+            fi
+            ;;
+        r)
+            read -r -p "  Project name: " pname
+            if [[ -n "$pname" ]]; then
+                docker compose -p "$pname" restart 2>&1
+                echo -e "  ${GREEN}✓ Restarted${NC}"
+            fi
+            ;;
+        u)
+            read -r -p "  Path to docker-compose.yml: " cpath
+            if [[ -f "$cpath" ]]; then
+                docker compose -f "$cpath" up -d 2>&1
+                echo -e "  ${GREEN}✓ Started${NC}"
+            else
+                echo -e "  ${RED}File not found: ${cpath}${NC}"
+            fi
+            ;;
+    esac
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 6. DOCKER MCP INTEGRATION
+# ═════════════════════════════════════════════════════════════════════════════
+
+do_mcp() {
+    title_box "Docker MCP Toolkit" "🤖"
+
+    if ! $_HAS_MCP; then
+        echo -e "  ${YELLOW}Docker MCP is not installed.${NC}"
+        echo -e "  ${DIM}Requires Docker Desktop 4.62+ with MCP Toolkit enabled.${NC}"
+        echo -e "  ${DIM}Enable in Docker Desktop → Settings → Beta features → MCP Toolkit${NC}"
+        return
+    fi
+
+    local mcp_ver
+    mcp_ver=$(docker mcp --version 2>&1)
+    echo -e "  ${DIM}MCP Gateway ${mcp_ver}${NC}"
+    echo ""
+
+    # List available tools
+    echo -e "  ${BOLD}Available Tools${NC}"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..50})${NC}"
+    docker mcp tools ls 2>&1 | while IFS= read -r line; do echo "  $line"; done
+    echo ""
+
+    # Catalog stats
+    local catalog_count
+    catalog_count=$(docker mcp catalog show 2>&1 | head -3 | grep -o '[0-9]* servers' | head -1)
+    [[ -n "$catalog_count" ]] && echo -e "  ${DIM}Catalog: ${catalog_count} available${NC}"
+    echo ""
+
+    echo -e "  ${BOLD}Actions${NC}"
+    echo -e "   ${GREEN}1${NC})  Search MCP catalog"
+    echo -e "   ${GREEN}2${NC})  Browse catalog categories"
+    echo -e "   ${GREEN}3${NC})  Manage profiles"
+    echo -e "   ${GREEN}4${NC})  Connect client (Cursor, Claude, VS Code)"
+    echo -e "   ${GREEN}5${NC})  AI-assisted Docker troubleshoot"
+    echo -e "   ${GREEN}m${NC})  Back"
+    echo ""
+    read -r -p "  > " action
+
+    case "$action" in
+        1) _mcp_search ;;
+        2) _mcp_browse ;;
+        3) _mcp_profiles ;;
+        4) _mcp_connect ;;
+        5) _mcp_troubleshoot ;;
+    esac
+}
+
+_mcp_search() {
+    echo ""
+    read -r -p "  Search for MCP server: " query
+    [[ -z "$query" ]] && return
+
+    echo ""
+    local results
+    results=$(docker mcp tools call mcp-find "query=$query" 2>&1)
+
+    echo "$results" | python3 -c "
+import sys
+raw = sys.stdin.read()
+idx = raw.find('{')
+if idx < 0:
+    print('  No results found.')
+    sys.exit()
+import json
+data = json.loads(raw[idx:])
+servers = data.get('servers', [])
+total = data.get('total_matches', len(servers))
+print(f'  Found {total} server(s):')
+print()
+for s in servers:
+    name = s.get('name','?')
+    desc = s.get('description','')[:80]
+    print(f'  \033[1m{name}\033[0m')
+    print(f'  \033[2m{desc}\033[0m')
+    print()
+" 2>/dev/null
+    echo -e "  ${DIM}Add to profile: docker mcp profile server add <profile> --server catalog://docker-mcp/<name>${NC}"
+}
+
+_mcp_browse() {
+    echo ""
+    echo -e "  ${BOLD}Catalog Servers${NC} (first 30)"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..50})${NC}"
+    docker mcp catalog show 2>&1 | head -80 | while IFS= read -r line; do echo "  $line"; done
+    echo ""
+    echo -e "  ${DIM}Full catalog: docker mcp catalog show${NC}"
+}
+
+_mcp_profiles() {
+    echo ""
+    echo -e "  ${BOLD}MCP Profiles${NC}"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..40})${NC}"
+    docker mcp profile list 2>&1 | while IFS= read -r line; do echo "  $line"; done
+    echo ""
+    echo -e "  ${BOLD}Actions${NC}"
+    echo -e "   ${GREEN}c${NC})  Create new profile"
+    echo -e "   ${GREEN}s${NC})  Show profile details"
+    echo -e "   ${GREEN}m${NC})  Back"
+    echo ""
+    read -r -p "  > " paction
+    case "$paction" in
+        c)
+            read -r -p "  Profile name: " pname
+            [[ -n "$pname" ]] && docker mcp profile create --name "$pname" 2>&1 && echo -e "  ${GREEN}✓ Created profile: ${pname}${NC}"
+            ;;
+        s)
+            read -r -p "  Profile name: " pname
+            [[ -n "$pname" ]] && docker mcp profile show "$pname" 2>&1 | while IFS= read -r line; do echo "  $line"; done
+            ;;
+    esac
+}
+
+_mcp_connect() {
+    echo ""
+    echo -e "  ${BOLD}Connect MCP to AI Client${NC}"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..40})${NC}"
+    echo ""
+    echo -e "   ${GREEN}1${NC})  Cursor"
+    echo -e "   ${GREEN}2${NC})  Claude Desktop"
+    echo -e "   ${GREEN}3${NC})  VS Code"
+    echo -e "   ${GREEN}4${NC})  Custom (show config)"
+    echo ""
+    read -r -p "  > " client_choice
+
+    local profile_name
+    read -r -p "  Profile name (default): " profile_name
+    profile_name="${profile_name:-default}"
+
+    case "$client_choice" in
+        1)
+            docker mcp client connect cursor --profile "$profile_name" 2>&1
+            echo -e "  ${GREEN}✓ Connected Cursor to profile '${profile_name}'${NC}"
+            ;;
+        2)
+            docker mcp client connect claude-desktop --profile "$profile_name" 2>&1
+            echo -e "  ${GREEN}✓ Connected Claude Desktop to profile '${profile_name}'${NC}"
+            ;;
+        3)
+            docker mcp client connect vscode --profile "$profile_name" 2>&1
+            echo -e "  ${GREEN}✓ Connected VS Code to profile '${profile_name}'${NC}"
+            ;;
+        4)
+            echo ""
+            echo -e "  ${BOLD}Add this to your MCP client config:${NC}"
+            echo ""
+            echo -e "  ${CYAN}{${NC}"
+            echo -e "  ${CYAN}  \"mcpServers\": {${NC}"
+            echo -e "  ${CYAN}    \"MCP_DOCKER\": {${NC}"
+            echo -e "  ${CYAN}      \"command\": \"docker\",${NC}"
+            echo -e "  ${CYAN}      \"args\": [\"mcp\", \"gateway\", \"run\", \"--profile\", \"${profile_name}\"]${NC}"
+            echo -e "  ${CYAN}    }${NC}"
+            echo -e "  ${CYAN}  }${NC}"
+            echo -e "  ${CYAN}}${NC}"
+            ;;
+    esac
+}
+
+_mcp_troubleshoot() {
+    _docker_ok || return
+
+    if ! type _ensure_claude_auth &>/dev/null || ! _ensure_claude_auth 2>/dev/null; then
+        echo -e "  ${YELLOW}AI troubleshooting requires an Anthropic API key.${NC}"
+        echo -e "  ${DIM}Set up: toolkit → Secrets (.) → add ANTHROPIC_API_KEY${NC}"
+        return
+    fi
+
+    echo ""
+    echo -e "  ${DIM}Gathering Docker state for AI analysis...${NC}"
+
+    # Collect diagnostic data
+    local diag=""
+    diag+="DOCKER VERSION: $(docker version --format 'Client={{.Client.Version}} Server={{.Server.Version}}' 2>&1)"$'\n'
+    diag+="SYSTEM DF:"$'\n'
+    diag+="$(docker system df 2>&1)"$'\n'
+    diag+="CONTAINERS:"$'\n'
+    diag+="$(docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}' 2>&1)"$'\n'
+
+    # Check for crashed containers
+    local crashed
+    crashed=$(docker ps -a -f status=exited --format '{{.Names}}: exit={{.Status}}' 2>&1)
+    [[ -n "$crashed" ]] && diag+="CRASHED:"$'\n'"$crashed"$'\n'
+
+    # Get logs from unhealthy containers
+    docker ps --filter health=unhealthy --format '{{.Names}}' 2>/dev/null | while read -r name; do
+        diag+="UNHEALTHY LOGS ($name):"$'\n'
+        diag+="$(docker logs --tail 20 "$name" 2>&1)"$'\n'
+    done
+
+    local prompt="You are a Docker expert. Analyze this Docker system state and provide:
+1. A brief health summary (1-2 sentences)
+2. Any issues or warnings found
+3. Specific recommendations to fix issues or improve performance
+4. Disk cleanup suggestions if relevant
+
+Docker State:
+${diag}
+
+Be concise and actionable. Format with clear headers."
+
+    local analysis
+    analysis=$(_claude_ask "$prompt" "claude-haiku-4-5" 2048 "Analyzing Docker")
+
+    echo ""
+    echo -e "  ${BOLD}AI Docker Analysis${NC}"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..50})${NC}"
+    echo ""
+    echo "$analysis" | while IFS= read -r line; do echo "  $line"; done
+    echo ""
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 7. QUICK ACTIONS
+# ═════════════════════════════════════════════════════════════════════════════
+
+do_quick_clean() {
+    title_box "Quick Cleanup" "🧹"
+    _docker_ok || return
+
+    echo -e "  ${BOLD}What to clean?${NC}"
+    echo ""
+    echo -e "   ${GREEN}1${NC})  Stopped containers only"
+    echo -e "   ${GREEN}2${NC})  Unused images only"
+    echo -e "   ${GREEN}3${NC})  Unused volumes only"
+    echo -e "   ${GREEN}4${NC})  Build cache (older than 1 week)"
+    echo -e "   ${GREEN}5${NC})  Full cleanup (everything unused)"
+    echo -e "   ${GREEN}m${NC})  Back"
+    echo ""
+    read -r -p "  > " choice
+
+    case "$choice" in
+        1)
+            docker container prune -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
+            echo -e "  ${GREEN}✓ Containers cleaned${NC}"
+            ;;
+        2)
+            echo -e "  ${YELLOW}This removes all unused images.${NC}"
+            read -r -p "  Continue? (y/N) " yn
+            [[ "$yn" == [yY]* ]] && docker image prune -a -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
+            ;;
+        3)
+            echo -e "  ${YELLOW}This removes all unused volumes.${NC}"
+            read -r -p "  Continue? (y/N) " yn
+            [[ "$yn" == [yY]* ]] && docker volume prune -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
+            ;;
+        4)
+            docker builder prune -f --filter "until=168h" 2>&1 | while IFS= read -r line; do echo "  $line"; done
+            echo -e "  ${GREEN}✓ Build cache cleaned${NC}"
+            ;;
+        5)
+            echo -e "  ${YELLOW}${BOLD}This removes ALL unused resources:${NC}"
+            echo -e "  ${DIM}stopped containers, unused images, volumes, build cache${NC}"
+            read -r -p "  Are you sure? (y/N) " yn
+            if [[ "$yn" == [yY]* ]]; then
+                docker system prune -a --volumes -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
+                echo ""
+                echo -e "  ${GREEN}✓ Full cleanup complete${NC}"
+                echo ""
+                docker system df 2>/dev/null | while IFS= read -r line; do echo "  $line"; done
+            fi
+            ;;
+    esac
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 8. RESTART DOCKER DESKTOP
+# ═════════════════════════════════════════════════════════════════════════════
+
+do_restart() {
+    title_box "Restart Docker Desktop" "🔄"
+
+    echo -e "  ${YELLOW}This will stop all running containers temporarily.${NC}"
+    read -r -p "  Continue? (y/N) " yn
+    [[ "$yn" != [yY]* ]] && return
+
+    echo -e "  ${DIM}Stopping Docker Desktop...${NC}"
+    osascript -e 'quit app "Docker"' 2>/dev/null || killall "Docker Desktop" 2>/dev/null || killall Docker 2>/dev/null
+
+    local wait=0
+    while pgrep -f "Docker.app" &>/dev/null && (( wait < 15 )); do
+        sleep 1
+        ((wait++))
+    done
+
+    # Force kill if still running
+    if pgrep -f "Docker.app" &>/dev/null; then
+        pkill -9 -f "Docker.app" 2>/dev/null
+        sleep 2
+    fi
+
+    echo -e "  ${DIM}Starting Docker Desktop...${NC}"
+    open -a Docker
+
+    echo -e "  ${DIM}Waiting for engine...${NC}"
+    local retries=0
+    while ! docker info &>/dev/null && (( retries < 60 )); do
+        sleep 2
+        ((retries++))
+        printf '\r  %s Waiting... (%ds)' "${_SPIN_CHARS[$((retries % _SPIN_N))]}" "$((retries * 2))"
+    done
+    printf '\r\033[2K'
+
+    if docker info &>/dev/null; then
+        echo -e "  ${GREEN}✓ Docker Desktop is running${NC}"
+        local v
+        v=$(docker version --format '{{.Server.Version}}' 2>/dev/null)
+        echo -e "  ${DIM}Engine: v${v}${NC}"
+    else
+        echo -e "  ${RED}Docker Desktop failed to start within 2 minutes.${NC}"
+    fi
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# INTERACTIVE MENU
+# ═════════════════════════════════════════════════════════════════════════════
+
+do_menu() {
+    while true; do
+        clear
+        echo ""
+        echo -e "  ${BOLD}${CYAN}Docker Manager${NC}  ${DIM}v3.0 — Engine API + MCP${NC}"
+        echo ""
+
+        # Quick status line
+        if _docker_ok 2>/dev/null; then
+            local running
+            running=$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')
+            local stopped
+            stopped=$(docker ps -a -f status=exited -q 2>/dev/null | wc -l | tr -d ' ')
+            echo -e "  ${GREEN}●${NC} Docker running  ${DIM}│${NC}  ${GREEN}${running}${NC} containers  ${DIM}│${NC}  ${stopped} stopped"
+        else
+            echo -e "  ${RED}●${NC} Docker not running"
+        fi
+        echo ""
+
+        echo -e "  ${DIM}── Monitor ──────────────────────────${NC}"
+        echo -e "   ${GREEN}1${NC})  Health Dashboard        ${DIM}live stats, health checks, alerts${NC}"
+        echo -e "   ${GREEN}2${NC})  Crash Detective          ${DIM}find OOM kills & crashes${NC}"
+        echo -e "   ${GREEN}3${NC})  Disk Monitor             ${DIM}images, volumes, reclaimable${NC}"
+        echo ""
+        echo -e "  ${DIM}── Manage ───────────────────────────${NC}"
+        echo -e "   ${GREEN}4${NC})  Compose Deployments      ${DIM}projects, logs, restart${NC}"
+        echo -e "   ${GREEN}5${NC})  Restart Docker Desktop"
+        echo ""
+        echo -e "  ${DIM}── Cleanup ──────────────────────────${NC}"
+        echo -e "   ${GREEN}6${NC})  Quick Cleanup            ${DIM}prune menus${NC}"
+        echo -e "   ${GREEN}7${NC})  Auto-Cleanup Scheduler   ${DIM}crontab setup${NC}"
+        echo ""
+        if $_HAS_MCP; then
+            echo -e "  ${DIM}── AI / MCP ─────────────────────────${NC}"
+            echo -e "   ${GREEN}8${NC})  MCP Toolkit             ${DIM}catalog, profiles, clients${NC}"
+        fi
+        echo ""
+        echo -e "   ${GREEN}q${NC})  Back to toolkit"
+        echo ""
+        read -r -p "  > " choice
+
+        case "$choice" in
+            1) do_dashboard ;;
+            2) do_crashes ;;
+            3) do_disk ;;
+            4) do_compose ;;
+            5) do_restart ;;
+            6) do_quick_clean ;;
+            7) do_scheduler ;;
+            8) $_HAS_MCP && do_mcp ;;
+            q|Q|"") return ;;
+            *) echo -e "  ${RED}Invalid choice${NC}" ;;
+        esac
+
+        echo ""
+        read -r -p "  Press Enter to continue..."
+    done
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CLI ENTRY POINT
+# ═════════════════════════════════════════════════════════════════════════════
+
+case "${1:-}" in
+    dashboard|health|status) do_dashboard; [[ -t 1 ]] && pause ;;
+    crashes|crash)           do_crashes; [[ -t 1 ]] && pause ;;
+    disk)                    do_disk; [[ -t 1 ]] && pause ;;
+    compose)                 do_compose; [[ -t 1 ]] && pause ;;
+    restart)                 do_restart; [[ -t 1 ]] && pause ;;
+    clean|cleanup)           do_quick_clean; [[ -t 1 ]] && pause ;;
+    scheduler|cron)          do_scheduler; [[ -t 1 ]] && pause ;;
+    mcp)                     do_mcp; [[ -t 1 ]] && pause ;;
+    *)                       do_menu ;;
+esac

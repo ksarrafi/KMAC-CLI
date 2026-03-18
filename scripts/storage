@@ -1,0 +1,1125 @@
+#!/bin/bash
+# storage — disk usage analyzer with iCloud migration support
+# Usage: storage [scan|big|clean|icloud|move]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+source "$SCRIPT_DIR/_auth-helper.sh" 2>/dev/null
+
+ICLOUD_ROOT="$(echo ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs 2>/dev/null)"
+ICLOUD_AVAIL=false
+[[ -d "$ICLOUD_ROOT" ]] && ICLOUD_AVAIL=true
+
+# ─── Helpers ────────────────────────────────────────────────────────────────
+
+human_size() {
+    local bytes=$1
+    if (( bytes >= 1073741824 )); then
+        printf "%.1f GB" "$(echo "scale=1; $bytes/1073741824" | bc)"
+    elif (( bytes >= 1048576 )); then
+        printf "%.1f MB" "$(echo "scale=1; $bytes/1048576" | bc)"
+    elif (( bytes >= 1024 )); then
+        printf "%.0f KB" "$(echo "scale=0; $bytes/1024" | bc)"
+    else
+        printf "%d B" "$bytes"
+    fi
+}
+
+bar_graph() {
+    local pct=$1 width=${2:-30}
+    local filled=$(( pct * width / 100 ))
+    local empty=$(( width - filled ))
+    local color="$GREEN"
+    (( pct > 70 )) && color="$YELLOW"
+    (( pct > 90 )) && color="$RED"
+    printf "${color}"
+    for (( i=0; i<filled; i++ )); do printf "█"; done
+    printf "${DIM}"
+    for (( i=0; i<empty; i++ )); do printf "░"; done
+    printf "${NC}"
+}
+
+dir_size_bytes() {
+    du -sk "$1" 2>/dev/null | awk '{print $1 * 1024}'
+}
+
+dir_size_human() {
+    du -sh "$1" 2>/dev/null | awk '{print $1}'
+}
+
+_SPIN_CHARS=('⣾' '⣽' '⣻' '⢿' '⡿' '⣟' '⣯' '⣷')
+_SPIN_N=8
+
+spinner() {
+    local pid=$1 msg="$2"
+    local i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        printf '\r\033[2K  \033[0;36m%s\033[0m %s ' "${_SPIN_CHARS[$i]}" "$msg"
+        i=$(( (i + 1) % _SPIN_N ))
+        sleep 0.08
+    done
+    wait "$pid" 2>/dev/null
+    printf '\r\033[2K  \033[0;32m✓\033[0m %s\n' "$msg"
+}
+
+# ─── Disk Overview ──────────────────────────────────────────────────────────
+
+do_overview() {
+    title_box "Disk Usage Overview" "💾"
+
+    local disk_info
+    disk_info=$(df -H / 2>/dev/null | awk 'NR==2')
+    local total used avail pct
+    total=$(echo "$disk_info" | awk '{print $2}')
+    used=$(echo "$disk_info" | awk '{print $3}')
+    avail=$(echo "$disk_info" | awk '{print $4}')
+    pct=$(echo "$disk_info" | awk '{gsub(/%/,""); print $5}')
+
+    echo -e "  ${BOLD}Macintosh HD${NC}"
+    echo ""
+    printf "  Total: %-10s  Used: %-10s  Free: %-10s\n" "$total" "$used" "$avail"
+    echo ""
+    printf "  [$(bar_graph "$pct" 40)] %s%%\n" "$pct"
+    echo ""
+
+    if (( pct > 90 )); then
+        echo -e "  ${RED}${BOLD}⚠  Critical: disk is ${pct}%% full!${NC}"
+    elif (( pct > 75 )); then
+        echo -e "  ${YELLOW}⚠  Warning: disk is ${pct}%% full${NC}"
+    else
+        echo -e "  ${GREEN}✓  Disk usage is healthy${NC}"
+    fi
+
+    local purgeable
+    purgeable=$(df -H / 2>/dev/null | awk 'NR==2 {print $5}')
+
+    # APFS purgeable space
+    local apfs_purg
+    apfs_purg=$(diskutil apfs list 2>/dev/null | grep -i "FileVault\|Purgeable" | head -3)
+    if [[ -n "$apfs_purg" ]]; then
+        echo ""
+        echo -e "  ${DIM}APFS reports additional purgeable space that macOS can reclaim automatically.${NC}"
+    fi
+    echo ""
+}
+
+# ─── Top Space Consumers ───────────────────────────────────────────────────
+
+do_scan() {
+    title_box "Top Space Consumers" "📊"
+
+    local tmpdir="/tmp/toolkit-storage-$$"
+    mkdir -p "$tmpdir"
+
+    local -a dirs=(
+        "$HOME/Downloads"
+        "$HOME/Documents"
+        "$HOME/Desktop"
+        "$HOME/Projects"
+        "$HOME/Developer"
+        "$HOME/Movies"
+        "$HOME/Music"
+        "$HOME/Pictures"
+        "$HOME/.local"
+        "$HOME/.cache"
+        "$HOME/.npm"
+        "$HOME/.cargo"
+        "$HOME/.rustup"
+        "$HOME/.docker"
+    )
+
+    local -a lib_dirs=(
+        "$HOME/Library/Caches"
+        "$HOME/Library/Application Support"
+        "$HOME/Library/Developer"
+        "$HOME/Library/Containers"
+        "$HOME/Library/Group Containers"
+        "$HOME/Library/Logs"
+        "$HOME/Library/Mail"
+    )
+
+    # Launch all du jobs in parallel
+    local -a pids=() all_dirs=()
+    for d in "${dirs[@]}" "${lib_dirs[@]}"; do
+        [[ -d "$d" ]] || continue
+        all_dirs+=("$d")
+        local fname="${d//\//_}"
+        ( du -sk "$d" 2>/dev/null | tail -1 | awk '{print $1}' > "$tmpdir/$fname" ) &
+        pids+=($!)
+    done
+
+    # Spinner while waiting (with 30s timeout)
+    local deadline=$(( $(date +%s) + 30 ))
+    local ci=0
+    local done_count=0 total_count=${#pids[@]}
+    while (( $(date +%s) < deadline )); do
+        done_count=0
+        local all_done=true
+        for p in "${pids[@]}"; do
+            if ! kill -0 "$p" 2>/dev/null; then
+                (( done_count++ ))
+            else
+                all_done=false
+            fi
+        done
+        $all_done && break
+        printf '\r\033[2K  \033[0;36m%s\033[0m Scanning directories... \033[2m(%d/%d)\033[0m ' "${_SPIN_CHARS[$ci]}" "$done_count" "$total_count"
+        ci=$(( (ci + 1) % _SPIN_N ))
+        sleep 0.1
+    done
+    for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
+    wait 2>/dev/null
+    printf '\r\033[2K  \033[0;32m✓\033[0m Scanned %d directories\n' "$total_count"
+
+    local -a results=()
+    for d in "${all_dirs[@]}"; do
+        local fname="${d//\//_}"
+        local sz=0
+        [[ -s "$tmpdir/$fname" ]] && sz=$(< "$tmpdir/$fname" tr -d '[:space:]')
+        [[ -z "$sz" || "$sz" == "0" ]] && continue
+        (( sz > 10240 )) && results+=("$sz|$d")
+    done
+    rm -rf "$tmpdir"
+
+    IFS=$'\n' sorted=($(printf '%s\n' "${results[@]}" | sort -t'|' -k1 -rn)); unset IFS
+
+    if (( ${#sorted[@]} == 0 )); then
+        echo -e "  ${DIM}No significant directories found.${NC}"
+        return
+    fi
+
+    printf "  ${BOLD}%-42s %10s${NC}\n" "Directory" "Size"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..52})${NC}"
+
+    local max_sz="${sorted[0]%%|*}"
+    local home_short
+    for entry in "${sorted[@]}"; do
+        local sz="${entry%%|*}" path="${entry#*|}"
+        home_short="${path/#$HOME/~}"
+        local sz_h
+        sz_h=$(human_size $(( sz * 1024 )))
+        local bar_w=$(( sz * 20 / max_sz ))
+        (( bar_w < 1 )) && bar_w=1
+        local bar=""
+        for (( i=0; i<bar_w; i++ )); do bar+="▇"; done
+        printf "  %-42s %10s  ${CYAN}%s${NC}\n" "$home_short" "$sz_h" "$bar"
+    done
+
+    echo ""
+}
+
+# ─── Find Big Files ─────────────────────────────────────────────────────────
+
+do_big_files() {
+    title_box "Largest Files" "🔍"
+
+    local min_mb=${1:-100}
+    local tmpfile="/tmp/toolkit-bigfiles-$$"
+    : > "$tmpfile"
+
+    # Scan each directory individually so we can show which one we're in
+    local -a search_dirs=(
+        "$HOME/Downloads"
+        "$HOME/Documents"
+        "$HOME/Desktop"
+        "$HOME/Projects"
+        "$HOME/Developer"
+        "$HOME/Movies"
+        "$HOME/Music"
+        "$HOME/Pictures"
+        "$HOME/Library"
+        "$HOME/.cursor"
+        "$HOME/.local"
+        "$HOME/.npm"
+        "$HOME/.cargo"
+        "$HOME/.rustup"
+        "$HOME/.docker"
+    )
+
+    local i=0 dir_n=0 dir_total=0
+    for d in "${search_dirs[@]}"; do [[ -d "$d" ]] && (( dir_total++ )); done
+
+    for d in "${search_dirs[@]}"; do
+        [[ -d "$d" ]] || continue
+        (( dir_n++ ))
+        local short="${d/#$HOME/~}"
+
+        find "$d" -xdev -type f -size +"${min_mb}M" \
+            -not -path "*/Library/CloudStorage/*" \
+            -not -path "*/.Trash/*" \
+            -not -path "*/node_modules/*" \
+            2>/dev/null >> "$tmpfile" &
+        local pid=$!
+
+        while kill -0 "$pid" 2>/dev/null; do
+            local found=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
+            printf '\r\033[2K  \033[0;36m%s\033[0m \033[2m[%d/%d]\033[0m Scanning \033[1m%-20s\033[0m \033[0;33m%s found\033[0m ' \
+                "${_SPIN_CHARS[$i]}" "$dir_n" "$dir_total" "$short" "${found:-0}"
+            i=$(( (i + 1) % _SPIN_N ))
+            sleep 0.1
+        done
+        wait "$pid" 2>/dev/null
+    done
+
+    local total_found=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
+    printf '\r\033[2K  \033[0;32m✓\033[0m Found \033[1m%s\033[0m files > %sMB\n' "${total_found:-0}" "$min_mb"
+
+    local results
+    results=$(cat "$tmpfile" 2>/dev/null)
+    rm -f "$tmpfile"
+
+    if [[ -z "$results" || "$total_found" == "0" ]]; then
+        return
+    fi
+
+    # Gather sizes — show progress per file
+    local sizefile="/tmp/toolkit-bigsizes-$$"
+    : > "$sizefile"
+    (
+        while IFS= read -r f; do
+            local sz
+            sz=$(stat -f%z "$f" 2>/dev/null || echo 0)
+            echo "$sz|$f"
+        done <<< "$results"
+    ) >> "$sizefile" &
+    local stat_pid=$!
+
+    i=0
+    while kill -0 "$stat_pid" 2>/dev/null; do
+        local done_n=$(wc -l < "$sizefile" 2>/dev/null | tr -d ' ')
+        printf '\r\033[2K  \033[0;36m%s\033[0m Reading file sizes... \033[2m(%s/%s)\033[0m ' \
+            "${_SPIN_CHARS[$i]}" "${done_n:-0}" "$total_found"
+        i=$(( (i + 1) % _SPIN_N ))
+        sleep 0.08
+    done
+    wait "$stat_pid" 2>/dev/null
+    printf '\r\033[2K  \033[0;32m✓\033[0m Sizes collected\n'
+
+    local -a entries=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && entries+=("$line")
+    done < "$sizefile"
+    rm -f "$sizefile"
+
+    IFS=$'\n' sorted=($(printf '%s\n' "${entries[@]}" | sort -t'|' -k1 -rn | head -30)); unset IFS
+
+    # ── Phase 3: Categorize files ──
+    local -a file_paths=() file_sizes=() file_cats=()
+    local -a cat_order=()
+    local cat_list=""
+
+    for entry in "${sorted[@]}"; do
+        local sz="${entry%%|*}" path="${entry#*|}"
+        file_sizes+=("$sz")
+        file_paths+=("$path")
+        local cat
+        cat=$(_categorize_file "$path")
+        file_cats+=("$cat")
+        if [[ "$cat_list" != *"|$cat|"* ]]; then
+            cat_order+=("$cat")
+            cat_list+="|$cat|"
+        fi
+    done
+
+    # Build category summaries for AI
+    local ai_summary=""
+    for cat in "${cat_order[@]}"; do
+        local count=0 total_bytes=0 sample=""
+        for (( fi=0; fi<${#file_paths[@]}; fi++ )); do
+            if [[ "${file_cats[$fi]}" == "$cat" ]]; then
+                (( count++ ))
+                (( total_bytes += file_sizes[fi] ))
+                [[ -z "$sample" ]] && sample="${file_paths[$fi]/#$HOME/~}"
+            fi
+        done
+        local total_h
+        total_h=$(human_size "$total_bytes")
+        ai_summary+="- ${cat}: ${count} files, ${total_h} total (e.g. ${sample})"$'\n'
+    done
+
+    # ── Phase 4: AI Analysis ──
+    local ai_result=""
+    local -a ai_descs=() ai_safety=() ai_tips=()
+
+    if type _ensure_claude_auth &>/dev/null && _ensure_claude_auth 2>/dev/null; then
+        local ai_prompt="You are a macOS disk cleanup advisor. Analyze these groups of large files found on a Mac.
+
+For each group, respond with EXACTLY this format (one block per group, separated by blank lines):
+GROUP: <exact group name>
+DESC: <1 sentence what these files are>
+SAFETY: <SAFE or CAUTION or KEEP>
+TIP: <1 sentence actionable advice>
+
+Groups:
+${ai_summary}
+Be concise. For SAFETY: SAFE means deletable without consequences, CAUTION means check first, KEEP means needed."
+
+        ai_result=$(_claude_ask "$ai_prompt" "claude-haiku-4-5" 1024 "Analyzing files")
+    fi
+
+    # Parse AI results into arrays (fall back to built-in descriptions)
+    for cat in "${cat_order[@]}"; do
+        local desc="" safety="" tip=""
+        if [[ -n "$ai_result" ]]; then
+            local block
+            block=$(echo "$ai_result" | awk -v g="$cat" '
+                /^GROUP:/ { found = (index($0, g) > 0) }
+                found && /^DESC:/ { sub(/^DESC: */, ""); print "DESC:" $0 }
+                found && /^SAFETY:/ { sub(/^SAFETY: */, ""); print "SAFETY:" $0 }
+                found && /^TIP:/ { sub(/^TIP: */, ""); print "TIP:" $0; found=0 }
+            ')
+            desc=$(echo "$block" | grep '^DESC:' | head -1 | sed 's/^DESC://')
+            safety=$(echo "$block" | grep '^SAFETY:' | head -1 | sed 's/^SAFETY://')
+            tip=$(echo "$block" | grep '^TIP:' | head -1 | sed 's/^TIP://')
+        fi
+        # Fallback descriptions if AI didn't respond
+        if [[ -z "$desc" ]]; then
+            case "$cat" in
+                *"Cursor"*"Chat"*)    desc="Conversation history DBs from Cursor AI editor"; safety="SAFE"; tip="Cursor recreates them on demand" ;;
+                *"Cursor"*"Project"*) desc="Cursor project index/cache databases"; safety="SAFE"; tip="Will be rebuilt when you open the project" ;;
+                *"Cursor"*"Track"*)   desc="AI usage analytics database"; safety="SAFE"; tip="Just tracking data, safe to remove" ;;
+                *"Cursor"*)           desc="Cursor IDE internal data files"; safety="CAUTION"; tip="Check before deleting" ;;
+                *"npm"*)              desc="npm package manager download cache"; safety="SAFE"; tip="Run 'npm cache clean --force' instead" ;;
+                *"Cargo"*|*"Rust"*)   desc="Rust toolchain and build cache"; safety="CAUTION"; tip="May need to redownload toolchains" ;;
+                *"Docker"*)           desc="Docker container and image data"; safety="CAUTION"; tip="Use 'docker system prune' for safe cleanup" ;;
+                *"Xcode"*|*"Developer Tools"*) desc="Xcode build artifacts and device support"; safety="SAFE"; tip="DerivedData is always safe to clear" ;;
+                *"Application Cache"*) desc="Cached data from various applications"; safety="SAFE"; tip="Apps will rebuild their caches" ;;
+                *"Disk Image"*)       desc="Downloaded installer images"; safety="SAFE"; tip="Delete after installation is done" ;;
+                *"Video"*)            desc="Video media files"; safety="CAUTION"; tip="Back up to iCloud before deleting" ;;
+                *"Archive"*)          desc="Compressed archives"; safety="CAUTION"; tip="Check contents before removing" ;;
+                *"Download"*)         desc="Files in your Downloads folder"; safety="CAUTION"; tip="Review old downloads periodically" ;;
+                *)                    desc="Miscellaneous large files"; safety="CAUTION"; tip="Review individually before removing" ;;
+            esac
+        fi
+        ai_descs+=("$desc")
+        ai_safety+=("$safety")
+        ai_tips+=("$tip")
+    done
+
+    # ── Phase 5: Display grouped results ──
+    echo ""
+    local global_idx=1
+    local -a display_paths=() display_sizes=()
+
+    for (( ci=0; ci<${#cat_order[@]}; ci++ )); do
+        local cat="${cat_order[$ci]}"
+        local desc="${ai_descs[$ci]}"
+        local safety="${ai_safety[$ci]}"
+        local tip="${ai_tips[$ci]}"
+        local cat_bytes=0 cat_count=0
+
+        for (( fi=0; fi<${#file_paths[@]}; fi++ )); do
+            [[ "${file_cats[$fi]}" == "$cat" ]] && { (( cat_bytes += file_sizes[fi] )); (( cat_count++ )); }
+        done
+        local cat_h
+        cat_h=$(human_size "$cat_bytes")
+
+        # Safety badge
+        local badge=""
+        case "$safety" in
+            *SAFE*)    badge="${GREEN}● SAFE TO DELETE${NC}" ;;
+            *CAUTION*) badge="${YELLOW}● CAUTION${NC}" ;;
+            *KEEP*)    badge="${RED}● KEEP${NC}" ;;
+        esac
+
+        echo -e "  ${BOLD}${cat}${NC}  ${DIM}(${cat_count} files, ${cat_h})${NC}  ${badge}"
+        echo -e "  ${DIM}${desc}${NC}"
+        [[ -n "$tip" ]] && echo -e "  ${CYAN}→ ${tip}${NC}"
+        echo ""
+
+        for (( fi=0; fi<${#file_paths[@]}; fi++ )); do
+            [[ "${file_cats[$fi]}" != "$cat" ]] && continue
+            local sz="${file_sizes[$fi]}"
+            local path="${file_paths[$fi]}"
+            local home_short="${path/#$HOME/~}"
+            local sz_h
+            sz_h=$(human_size "$sz")
+            local color="$NC"
+            (( sz > 1073741824 )) && color="$RED"
+            (( sz > 524288000 )) && color="$YELLOW"
+            printf "   ${GREEN}%2d${NC})  ${color}%-10s${NC}  %s\n" "$global_idx" "$sz_h" "$home_short"
+            display_paths+=("$path")
+            display_sizes+=("$sz")
+            (( global_idx++ ))
+        done
+        echo ""
+    done
+
+    # Write display data to temp file (line N = file #N)
+    local datafile="/tmp/toolkit-bigdata-$$"
+    : > "$datafile"
+    for (( di=0; di<${#display_paths[@]}; di++ )); do
+        echo "${display_sizes[$di]}|${display_paths[$di]}" >> "$datafile"
+    done
+
+    # ── Phase 6: Interactive actions ──
+    echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+    echo -e "  ${BOLD}Actions:${NC}"
+    echo -e "   ${GREEN}d${NC} ${BOLD}1,3,5${NC})    Delete selected files (comma-separated)"
+    echo -e "   ${GREEN}b${NC} ${BOLD}1,3,5${NC})    Backup selected to iCloud then delete"
+    echo -e "   ${GREEN}D${NC})          Delete all ${GREEN}SAFE TO DELETE${NC} files"
+    echo -e "   ${GREEN}m${NC})          Back"
+    echo ""
+    read -r -p "  > " action
+
+    case "$action" in
+        m|M|"") rm -f "$datafile"; return ;;
+        D)
+            local safe_total=0
+            for (( ci=0; ci<${#cat_order[@]}; ci++ )); do
+                [[ "${ai_safety[$ci]}" == *SAFE* ]] || continue
+                for (( fi=0; fi<${#file_paths[@]}; fi++ )); do
+                    [[ "${file_cats[$fi]}" == "${cat_order[$ci]}" ]] && (( safe_total += file_sizes[fi] ))
+                done
+            done
+            local safe_h; safe_h=$(human_size "$safe_total")
+            echo ""
+            echo -e "  ${YELLOW}This will delete all files marked SAFE TO DELETE (${safe_h}).${NC}"
+            read -r -p "  Are you sure? (y/N) " confirm
+            [[ "$confirm" != [yY]* ]] && { rm -f "$datafile"; return; }
+
+            echo ""
+            local freed=0 del_count=0
+            for (( ci=0; ci<${#cat_order[@]}; ci++ )); do
+                [[ "${ai_safety[$ci]}" == *SAFE* ]] || continue
+                local cat="${cat_order[$ci]}"
+                for (( fi=0; fi<${#file_paths[@]}; fi++ )); do
+                    [[ "${file_cats[$fi]}" != "$cat" ]] && continue
+                    local path="${file_paths[$fi]}"
+                    local sz="${file_sizes[$fi]}"
+                    echo -e "  ${DIM}Deleting ${path/#$HOME/~}${NC}"
+                    rm -f "$path" 2>/dev/null && { (( freed += sz )); (( del_count++ )); }
+                done
+            done
+            local freed_h; freed_h=$(human_size "$freed")
+            echo ""
+            echo -e "  ${GREEN}✓ Deleted ${del_count} files, freed ${freed_h}${NC}"
+            ;;
+        d\ *|d[0-9]*)
+            local nums="${action#d}"
+            nums="${nums#\ }"
+            _act_on_files "delete" "$nums" "$datafile"
+            ;;
+        b\ *|b[0-9]*)
+            local nums="${action#b}"
+            nums="${nums#\ }"
+            _act_on_files "backup" "$nums" "$datafile"
+            ;;
+    esac
+    rm -f "$datafile"
+}
+
+_categorize_file() {
+    local path="$1"
+    case "$path" in
+        */.cursor/chats/*)                  echo "Cursor IDE Chat History" ;;
+        */.cursor/projects/*)               echo "Cursor IDE Project Cache" ;;
+        */.cursor/ai-tracking/*)            echo "Cursor AI Tracking" ;;
+        */.cursor/*)                        echo "Cursor IDE Data" ;;
+        */X-Plane*/*)                       echo "X-Plane Flight Simulator" ;;
+        */.npm/*|*/npm-cache/*)             echo "npm Cache" ;;
+        */.cargo/*)                         echo "Rust/Cargo Cache" ;;
+        */.rustup/*)                        echo "Rust Toolchain" ;;
+        */.docker/*)                        echo "Docker Data" ;;
+        */Library/Developer/*)              echo "Developer Tools (Xcode)" ;;
+        */Library/Caches/*)                 echo "Application Caches" ;;
+        */Library/Application\ Support/*)   echo "Application Data" ;;
+        */Library/Containers/*)             echo "Sandboxed App Data" ;;
+        *.dmg|*.iso)                        echo "Disk Images" ;;
+        *.zip|*.tar*|*.gz|*.rar|*.7z)      echo "Archives" ;;
+        *.mp4|*.mov|*.avi|*.mkv|*.wmv)     echo "Videos" ;;
+        *.app/*)                            echo "Application Bundles" ;;
+        */Downloads/*)                      echo "Downloads" ;;
+        */Documents/*)                      echo "Documents" ;;
+        *)                                  echo "Other Files" ;;
+    esac
+}
+
+_act_on_files() {
+    local action="$1" nums="$2" data_file="$3"
+
+    echo ""
+    local freed=0 count=0
+    local IFS=','
+    for num in $nums; do
+        num=$(echo "$num" | tr -d ' ')
+        local idx=$((num))
+        local line
+        line=$(sed -n "${idx}p" "$data_file" 2>/dev/null)
+        [[ -z "$line" ]] && continue
+        local sz="${line%%|*}" path="${line#*|}"
+        [[ -z "$path" || ! -f "$path" ]] && continue
+        local short="${path/#$HOME/~}"
+
+        if [[ "$action" == "backup" ]]; then
+            local dest="$ICLOUD_ROOT/Storage-Backup"
+            mkdir -p "$dest" 2>/dev/null
+            local fname
+            fname=$(basename "$path")
+            echo -e "  ${DIM}Backing up ${short} → iCloud...${NC}"
+            if cp "$path" "$dest/$fname" 2>/dev/null; then
+                rm -f "$path" 2>/dev/null && { (( freed += sz )); (( count++ )); }
+            else
+                echo -e "  ${RED}Failed to backup ${short}${NC}"
+                continue
+            fi
+        else
+            echo -e "  ${DIM}Deleting ${short}${NC}"
+            rm -f "$path" 2>/dev/null && { (( freed += sz )); (( count++ )); }
+        fi
+    done
+
+    local freed_h; freed_h=$(human_size "$freed")
+    echo ""
+    if [[ "$action" == "backup" ]]; then
+        echo -e "  ${GREEN}✓ Backed up & removed ${count} files, freed ${freed_h}${NC}"
+        echo -e "  ${DIM}Backups saved to iCloud Drive/Storage-Backup/${NC}"
+    else
+        echo -e "  ${GREEN}✓ Deleted ${count} files, freed ${freed_h}${NC}"
+    fi
+}
+
+# ─── Cleanable Caches ──────────────────────────────────────────────────────
+
+do_clean() {
+    title_box "Cleanable Space" "🧹"
+
+    local total_reclaimable=0
+
+    # Parallel arrays instead of associative array (bash 3.2 compat)
+    local -a t_labels=(
+        "Xcode DerivedData"    "Xcode Archives"       "Xcode DeviceSupport"
+        "CocoaPods cache"      "Homebrew cache"        "npm cache"
+        "pip cache"            "Yarn cache"            "Gradle cache"
+        "System logs"          "User logs"             "User caches"
+        "Trash"                "Docker images"         "Android SDK"
+        "Simulators"
+    )
+    local -a t_paths=(
+        "$HOME/Library/Developer/Xcode/DerivedData"
+        "$HOME/Library/Developer/Xcode/Archives"
+        "$HOME/Library/Developer/Xcode/iOS DeviceSupport"
+        "$HOME/Library/Caches/CocoaPods"
+        "$(brew --cache 2>/dev/null || echo "$HOME/Library/Caches/Homebrew")"
+        "$HOME/.npm/_cacache"
+        "$HOME/Library/Caches/pip"
+        "$HOME/.yarn/cache"
+        "$HOME/.gradle/caches"
+        "/private/var/log"
+        "$HOME/Library/Logs"
+        "$HOME/Library/Caches"
+        "$HOME/.Trash"
+        "$HOME/Library/Containers/com.docker.docker/Data"
+        "$HOME/Library/Android/sdk"
+        "$HOME/Library/Developer/CoreSimulator"
+    )
+
+    # Scan all targets in parallel with progress counter
+    local tmpdir="/tmp/toolkit-clean-$$"
+    mkdir -p "$tmpdir"
+    local -a pids=() active_indices=()
+    local n_targets=${#t_labels[@]}
+
+    for (( ti=0; ti<n_targets; ti++ )); do
+        local path="${t_paths[$ti]}"
+        [[ -d "$path" ]] || continue
+        active_indices+=("$ti")
+        ( du -sk "$path" 2>/dev/null | awk '{print $1}' > "$tmpdir/$ti" ) &
+        pids+=($!)
+    done
+
+    local ci=0 total_jobs=${#pids[@]}
+    while true; do
+        local done_jobs=0 all_done=true
+        for p in "${pids[@]}"; do
+            if ! kill -0 "$p" 2>/dev/null; then
+                (( done_jobs++ ))
+            else
+                all_done=false
+            fi
+        done
+        $all_done && break
+        printf '\r\033[2K  \033[0;36m%s\033[0m Scanning caches & build artifacts... \033[2m(%d/%d)\033[0m ' \
+            "${_SPIN_CHARS[$ci]}" "$done_jobs" "$total_jobs"
+        ci=$(( (ci + 1) % _SPIN_N ))
+        sleep 0.1
+    done
+    wait 2>/dev/null
+    printf '\r\033[2K  \033[0;32m✓\033[0m Scanned \033[1m%d\033[0m locations\n' "$total_jobs"
+
+    local -a scan_results=()
+    for (( ti=0; ti<n_targets; ti++ )); do
+        [[ -s "$tmpdir/$ti" ]] || continue
+        local sz
+        sz=$(< "$tmpdir/$ti" tr -d '[:space:]')
+        [[ -z "$sz" || "$sz" == "0" ]] && continue
+        (( sz < 10240 )) && continue
+        scan_results+=("$sz|${t_labels[$ti]}|${t_paths[$ti]}")
+        (( total_reclaimable += sz ))
+    done
+    rm -rf "$tmpdir"
+
+    IFS=$'\n' sorted=($(printf '%s\n' "${scan_results[@]}" | sort -t'|' -k1 -rn)); unset IFS
+
+    echo ""
+    printf "  ${BOLD}%-12s  %-30s  %s${NC}\n" "Size" "Category" "Path"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..72})${NC}"
+
+    for entry in "${sorted[@]}"; do
+        local sz="${entry%%|*}"
+        local rest="${entry#*|}"
+        local label="${rest%%|*}" path="${rest#*|}"
+        local home_short="${path/#$HOME/~}"
+        local sz_h
+        sz_h=$(human_size $(( sz * 1024 )))
+        local color="$NC"
+        (( sz > 1048576 )) && color="$RED"
+        (( sz > 102400 && sz <= 1048576 )) && color="$YELLOW"
+        printf "  ${color}%-12s${NC}  %-30s  ${DIM}%s${NC}\n" "$sz_h" "$label" "$home_short"
+    done
+
+    echo ""
+    local total_h
+    total_h=$(human_size $(( total_reclaimable * 1024 )))
+    echo -e "  ${BOLD}Potentially reclaimable: ${YELLOW}${total_h}${NC}"
+    echo ""
+
+    echo -e "  ${BOLD}Quick clean actions:${NC}"
+    echo -e "   ${GREEN}1${NC})  Empty Trash"
+    echo -e "   ${GREEN}2${NC})  Clear Xcode DerivedData"
+    echo -e "   ${GREEN}3${NC})  Purge Homebrew cache"
+    echo -e "   ${GREEN}4${NC})  Clear npm cache"
+    echo -e "   ${GREEN}5${NC})  Clear pip cache"
+    echo -e "   ${GREEN}6${NC})  Clear system logs (sudo)"
+    echo -e "   ${GREEN}m${NC})  Back"
+    echo ""
+    read -r -n1 -p "  > " cc; echo ""
+
+    case "$cc" in
+        1)
+            echo ""
+            rm -rf "$HOME/.Trash/"* 2>/dev/null &
+            spinner $! "Emptying Trash..."
+            ;;
+        2)
+            local dd="$HOME/Library/Developer/Xcode/DerivedData"
+            if [[ -d "$dd" ]]; then
+                echo ""
+                rm -rf "$dd"/* 2>/dev/null &
+                spinner $! "Clearing DerivedData..."
+            else
+                echo -e "\n  ${DIM}No DerivedData found${NC}"
+            fi ;;
+        3)
+            echo ""
+            brew cleanup --prune=all 2>/dev/null &
+            spinner $! "Purging Homebrew cache..."
+            ;;
+        4)
+            echo ""
+            npm cache clean --force 2>/dev/null &
+            spinner $! "Clearing npm cache..."
+            ;;
+        5)
+            echo ""
+            pip cache purge 2>/dev/null &
+            spinner $! "Clearing pip cache..."
+            ;;
+        6)
+            echo -e "\n  Clearing system logs..."
+            sudo rm -rf /private/var/log/asl/*.asl 2>/dev/null
+            sudo rm -rf /private/var/log/*.gz 2>/dev/null
+            echo -e "  ${GREEN}✓ System logs cleared${NC}" ;;
+    esac
+}
+
+# ─── iCloud Analysis ────────────────────────────────────────────────────────
+
+do_icloud() {
+    title_box "iCloud Storage Analysis" "☁️"
+
+    if ! $ICLOUD_AVAIL; then
+        echo -e "  ${RED}✗ iCloud Drive not found${NC}"
+        echo -e "  ${DIM}Enable iCloud Drive in System Settings > Apple ID > iCloud${NC}"
+        return
+    fi
+
+    echo -e "  ${GREEN}✓${NC} iCloud Drive: ${DIM}${ICLOUD_ROOT/#$HOME/~}${NC}"
+    echo ""
+
+    # Pre-scan all candidate dirs in parallel with spinner
+    local -a ic_dirs=("$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads"
+        "$HOME/Movies" "$HOME/Pictures" "$HOME/Projects"
+        "$HOME/Archives" "$HOME/Backups" "$HOME/VMs" "$HOME/Virtual Machines" "$HOME/.docker")
+    local -a ic_labels=("Documents" "Desktop" "Downloads"
+        "Movies" "Pictures" "Projects"
+        "Archives" "Backups" "VMs" "Virtual Machines" ".docker")
+    local -a ic_descs=(
+        "Personal docs, PDFs, spreadsheets — ideal for iCloud"
+        "macOS can sync Desktop via iCloud (Settings > iCloud > Drive)"
+        "Archive old downloads to iCloud"
+        "Video files — great candidate for iCloud offloading"
+        "Photos & images — iCloud Photos may be better for .photoslibrary"
+        ""
+        "" "" "" "" ""
+    )
+
+    local tmpdir_ic="/tmp/toolkit-icloud-$$"
+    mkdir -p "$tmpdir_ic"
+    local -a ic_pids=()
+    for (( di=0; di<${#ic_dirs[@]}; di++ )); do
+        local d="${ic_dirs[$di]}"
+        [[ -d "$d" ]] || continue
+        ( du -sk "$d" 2>/dev/null | tail -1 | awk '{print $1}' > "$tmpdir_ic/$di.k";
+          du -sh "$d" 2>/dev/null | awk '{print $1}' > "$tmpdir_ic/$di.h" ) &
+        ic_pids+=($!)
+    done
+
+    local ci=0
+    while true; do
+        local all_done=true
+        for p in "${ic_pids[@]}"; do
+            kill -0 "$p" 2>/dev/null && { all_done=false; break; }
+        done
+        $all_done && break
+        printf '\r\033[2K  \033[0;36m%s\033[0m Analyzing iCloud migration candidates... ' "${_SPIN_CHARS[$ci]}"
+        ci=$(( (ci + 1) % _SPIN_N ))
+        sleep 0.1
+    done
+    wait 2>/dev/null
+    printf '\r\033[2K  \033[0;32m✓\033[0m Analysis complete\n'
+
+    echo ""
+    echo -e "  ${BOLD}Candidates for iCloud migration:${NC}"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..56})${NC}"
+    echo ""
+
+    local -a candidates=()
+    local -a cand_paths=()
+    local -a cand_labels=()
+    local idx=1
+
+    for (( di=0; di<${#ic_dirs[@]}; di++ )); do
+        local d="${ic_dirs[$di]}"
+        [[ -d "$d" ]] || continue
+        [[ -s "$tmpdir_ic/$di.k" ]] || continue
+        local sz_k sz
+        sz_k=$(< "$tmpdir_ic/$di.k" tr -d '[:space:]')
+        sz=$(< "$tmpdir_ic/$di.h" tr -d '[:space:]')
+        [[ -z "$sz_k" || "$sz_k" == "0" ]] && continue
+
+        local label="${ic_labels[$di]}"
+        local short="${d/#$HOME/~}"
+        local desc="${ic_descs[$di]}"
+
+        # Skip small misc dirs (< 100MB) except Documents/Desktop/Downloads/Projects
+        if (( di >= 3 && di != 5 && sz_k < 102400 )); then continue; fi
+        # Skip symlinks (already migrated)
+        [[ -L "$d" ]] && continue
+
+        printf "  ${GREEN}%d${NC})  %-28s ${BOLD}%s${NC}" "$idx" "$short" "$sz"
+        # Extra info for Downloads
+        if [[ "$label" == "Downloads" ]]; then
+            local old_count
+            old_count=$(find "$d" -maxdepth 1 -type f -mtime +30 2>/dev/null | wc -l | tr -d ' ')
+            printf "  ${DIM}(%s files older than 30 days)${NC}" "$old_count"
+        fi
+        echo ""
+        if [[ "$label" == "Projects" ]]; then
+            echo -e "      ${YELLOW}⚠  Caution: git repos + node_modules don't sync well to iCloud${NC}"
+            echo -e "      ${DIM}Consider archiving inactive projects instead${NC}"
+        elif [[ -n "$desc" ]]; then
+            echo -e "      ${DIM}${desc}${NC}"
+        fi
+        candidates+=("$idx")
+        cand_paths+=("$d")
+        cand_labels+=("$label")
+        ((idx++))
+    done
+    rm -rf "$tmpdir_ic"
+
+    echo ""
+    echo -e "  ${DIM}$(printf '─%.0s' {1..56})${NC}"
+    echo ""
+    echo -e "  ${BOLD}Options:${NC}"
+    echo -e "   ${GREEN}number${NC})  Move selected item to iCloud (with local symlink)"
+    echo -e "   ${GREEN}o${NC})       Optimize Mac Storage (opens System Settings)"
+    echo -e "   ${GREEN}m${NC})       Back"
+    echo ""
+    read -r -p "  > " ic_choice
+
+    case "$ic_choice" in
+        o|O)
+            echo -e "\n  Opening iCloud settings..."
+            open "x-apple.systempreferences:com.apple.preferences.AppleIDPrefPane" 2>/dev/null \
+                || open "x-apple.systempreferences:com.apple.SystemProfiler.AboutExtension" 2>/dev/null
+            ;;
+        m|M) return ;;
+        [0-9]*)
+            local sel_idx=-1
+            for i in "${!candidates[@]}"; do
+                if [[ "${candidates[$i]}" == "$ic_choice" ]]; then
+                    sel_idx=$i; break
+                fi
+            done
+            if (( sel_idx >= 0 )); then
+                do_move "${cand_paths[$sel_idx]}" "${cand_labels[$sel_idx]}"
+            else
+                echo -e "  ${RED}Invalid selection${NC}"
+            fi
+            ;;
+    esac
+}
+
+# ─── Move to iCloud ────────────────────────────────────────────────────────
+
+do_move() {
+    local src="$1" label="${2:-$(basename "$1")}"
+    local dest="$ICLOUD_ROOT/$label"
+    local src_short="${src/#$HOME/~}"
+    local dest_short="${dest/#$HOME/~}"
+
+    echo ""
+    echo -e "  ${BOLD}Move to iCloud: ${label}${NC}"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..50})${NC}"
+    echo ""
+    echo -e "  Source:      ${src_short}"
+    echo -e "  Destination: ${dest_short}"
+    echo ""
+
+    local sz; sz=$(du -sh "$src" 2>/dev/null | awk '{print $1}')
+    echo -e "  Size: ${BOLD}${sz}${NC}"
+    echo ""
+
+    if [[ -L "$src" ]]; then
+        echo -e "  ${YELLOW}⚠  This is already a symlink — possibly already migrated${NC}"
+        return
+    fi
+
+    if [[ -e "$dest" ]]; then
+        echo -e "  ${YELLOW}⚠  Destination already exists in iCloud${NC}"
+        echo -e "  ${DIM}${dest_short}${NC}"
+        echo ""
+        echo -e "  ${GREEN}s${NC}) Skip    ${GREEN}r${NC}) Replace (dangerous)    ${GREEN}m${NC}) Merge"
+        echo ""
+        read -r -n1 -p "  > " ow_ch; echo ""
+        case "$ow_ch" in
+            r|R) echo -e "  ${DIM}Removing existing iCloud copy...${NC}"; rm -rf "$dest" ;;
+            m|M)
+                echo -e "  ${DIM}rsync merge...${NC}"
+                rsync -a "$src/" "$dest/" 2>/dev/null
+                echo -e "\n  ${BOLD}Remove local copy and symlink?${NC}  ${GREEN}y${NC}/${RED}n${NC}"
+                read -r -n1 -p "  > " yn; echo ""
+                if [[ "$yn" == "y" || "$yn" == "Y" ]]; then
+                    rm -rf "$src"
+                    ln -s "$dest" "$src"
+                    echo -e "  ${GREEN}✓ Merged and symlinked: ${src_short} → ${dest_short}${NC}"
+                fi
+                return ;;
+            *) return ;;
+        esac
+    fi
+
+    echo -e "  This will:"
+    echo -e "    1. Copy ${BOLD}${src_short}${NC} → ${BOLD}iCloud Drive/${label}${NC}"
+    echo -e "    2. Remove the local original"
+    echo -e "    3. Create a symlink so apps still find it at ${src_short}"
+    echo ""
+    echo -e "  ${YELLOW}⚠  Files will upload to iCloud in the background.${NC}"
+    echo -e "  ${YELLOW}   macOS can evict them from local storage once uploaded.${NC}"
+    echo ""
+    echo -e "  ${BOLD}Proceed?${NC}  ${GREEN}y${NC}/${RED}n${NC}"
+    read -r -n1 -p "  > " yn; echo ""
+
+    if [[ "$yn" != "y" && "$yn" != "Y" ]]; then
+        echo -e "  ${DIM}Cancelled${NC}"
+        return
+    fi
+
+    echo ""
+    echo -e "  ${CYAN}Copying to iCloud...${NC}"
+    if rsync -a --progress "$src/" "$dest/" 2>/dev/null; then
+        echo ""
+        echo -e "  ${GREEN}✓ Copy complete${NC}"
+        echo -e "  ${DIM}Removing local original...${NC}"
+        rm -rf "$src"
+        ln -s "$dest" "$src"
+        echo -e "  ${GREEN}✓ Symlinked: ${src_short} → iCloud Drive/${label}${NC}"
+        echo ""
+        echo -e "  ${DIM}iCloud will now upload in background. macOS will optimize${NC}"
+        echo -e "  ${DIM}local storage automatically when space is needed.${NC}"
+    else
+        echo -e "  ${RED}✗ Copy failed — local data untouched${NC}"
+    fi
+}
+
+# ─── Node Modules Scanner ──────────────────────────────────────────────────
+
+do_node_modules() {
+    title_box "node_modules Cleanup" "📦"
+
+    # Find node_modules with live count
+    local tmpfile="/tmp/toolkit-nm-$$"
+    : > "$tmpfile"
+    find "$HOME/Projects" "$HOME/Developer" "$HOME/Desktop" "$HOME/Documents" \
+        -maxdepth 5 -name "node_modules" -type d -prune 2>/dev/null >> "$tmpfile" &
+    local nm_pid=$!
+
+    local i=0
+    while kill -0 "$nm_pid" 2>/dev/null; do
+        local found=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
+        printf '\r\033[2K  \033[0;36m%s\033[0m Scanning for node_modules... \033[1m%s found\033[0m ' \
+            "${_SPIN_CHARS[$i]}" "${found:-0}"
+        i=$(( (i + 1) % _SPIN_N ))
+        sleep 0.1
+    done
+    wait "$nm_pid" 2>/dev/null
+    local nm_total=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
+    printf '\r\033[2K  \033[0;32m✓\033[0m Found \033[1m%s\033[0m node_modules directories\n' "${nm_total:-0}"
+
+    local results
+    results=$(cat "$tmpfile" 2>/dev/null)
+    rm -f "$tmpfile"
+
+    if [[ -z "$results" ]]; then
+        return
+    fi
+
+    # Measure sizes with progress counter
+    local sizefile="/tmp/toolkit-nm-sizes-$$"
+    : > "$sizefile"
+    local total_kb=0
+    (
+        while IFS= read -r d; do
+            local sz
+            sz=$(du -sk "$d" 2>/dev/null | awk '{print $1}')
+            echo "$sz|$d"
+        done <<< "$results"
+    ) >> "$sizefile" &
+    local sz_pid=$!
+
+    i=0
+    while kill -0 "$sz_pid" 2>/dev/null; do
+        local done_n=$(wc -l < "$sizefile" 2>/dev/null | tr -d ' ')
+        printf '\r\033[2K  \033[0;36m%s\033[0m Measuring sizes... \033[2m(%s/%s)\033[0m ' \
+            "${_SPIN_CHARS[$i]}" "${done_n:-0}" "$nm_total"
+        i=$(( (i + 1) % _SPIN_N ))
+        sleep 0.08
+    done
+    wait "$sz_pid" 2>/dev/null
+    printf '\r\033[2K  \033[0;32m✓\033[0m Sizes measured\n'
+
+    local -a entries=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && entries+=("$line")
+        local sz="${line%%|*}"
+        (( total_kb += sz )) 2>/dev/null
+    done < "$sizefile"
+    rm -f "$sizefile"
+
+    IFS=$'\n' sorted=($(printf '%s\n' "${entries[@]}" | sort -t'|' -k1 -rn)); unset IFS
+
+    local idx=1
+    for entry in "${sorted[@]}"; do
+        local sz="${entry%%|*}" path="${entry#*|}"
+        local home_short="${path/#$HOME/~}"
+        local parent="${path%/node_modules}"
+        local proj="${parent##*/}"
+        local sz_h; sz_h=$(human_size $(( sz * 1024 )))
+        # Check if project was accessed recently
+        local last_mod
+        last_mod=$(stat -f "%Sm" -t "%Y-%m-%d" "$parent/package.json" 2>/dev/null || echo "unknown")
+        printf "  ${GREEN}%2d${NC})  %-12s  %-30s  ${DIM}last: %s${NC}\n" "$idx" "$sz_h" "$proj" "$last_mod"
+        ((idx++))
+    done
+
+    echo ""
+    local total_h; total_h=$(human_size $(( total_kb * 1024 )))
+    echo -e "  ${BOLD}Total: ${YELLOW}${total_h}${NC} across $((idx-1)) projects"
+    echo ""
+    echo -e "  ${GREEN}a${NC})  Remove ALL stale node_modules (> 30 days old)"
+    echo -e "  ${GREEN}m${NC})  Back"
+    echo ""
+    read -r -n1 -p "  > " nm_ch; echo ""
+
+    if [[ "$nm_ch" == "a" || "$nm_ch" == "A" ]]; then
+        local removed=0 freed=0
+        while IFS= read -r d; do
+            local parent="${d%/node_modules}"
+            local pkg="$parent/package.json"
+            if [[ -f "$pkg" ]]; then
+                local age
+                age=$(( ( $(date +%s) - $(stat -f%m "$pkg" 2>/dev/null || echo 0) ) / 86400 ))
+                if (( age > 30 )); then
+                    local sz; sz=$(du -sk "$d" 2>/dev/null | awk '{print $1}')
+                    echo -e "  ${DIM}Removing ${d/#$HOME/~}...${NC}"
+                    rm -rf "$d"
+                    (( freed += sz )); (( removed++ ))
+                fi
+            fi
+        done <<< "$results"
+        local freed_h; freed_h=$(human_size $(( freed * 1024 )))
+        echo -e "\n  ${GREEN}✓ Removed ${removed} stale node_modules (${freed_h} freed)${NC}"
+    fi
+}
+
+# ─── Interactive Menu ───────────────────────────────────────────────────────
+
+do_menu() {
+    while true; do
+        clear
+        title_box "Storage Manager" "💾"
+
+        do_overview
+
+        echo -e "  ${BOLD}Actions:${NC}"
+        echo -e "   ${GREEN}1${NC})  Scan home directory (top consumers)"
+        echo -e "   ${GREEN}2${NC})  Find biggest files (> 100MB)"
+        echo -e "   ${GREEN}3${NC})  Cleanable caches & build artifacts"
+        echo -e "   ${GREEN}4${NC})  iCloud migration analysis"
+        echo -e "   ${GREEN}5${NC})  node_modules cleanup"
+        echo -e "   ${GREEN}6${NC})  Open System Storage Settings"
+        echo -e "   ${GREEN}0${NC})  Back"
+        echo ""
+        read -r -n1 -p "  > " ch; echo ""
+
+        case "$ch" in
+            1) clear; do_scan; pause ;;
+            2) clear; do_big_files; pause ;;
+            3) clear; do_clean; pause ;;
+            4) clear; do_icloud; pause ;;
+            5) clear; do_node_modules; pause ;;
+            6) open "x-apple.systempreferences:com.apple.settings.Storage" 2>/dev/null \
+                || open "/System/Applications/System Settings.app" ;;
+            0|q|m) return ;;
+            *) echo -e "  ${RED}Unknown option${NC}"; sleep 0.3 ;;
+        esac
+    done
+}
+
+# ─── CLI Entry ──────────────────────────────────────────────────────────────
+
+case "${1:-}" in
+    scan)       do_scan; [[ -t 1 ]] && pause ;;
+    big)        do_big_files "${2:-100}"; [[ -t 1 ]] && pause ;;
+    clean)      do_clean ;;
+    icloud)     do_icloud; [[ -t 1 ]] && pause ;;
+    move)       do_move "${2:?Usage: storage move <path>}" "${3:-}"; [[ -t 1 ]] && pause ;;
+    node)       do_node_modules; [[ -t 1 ]] && pause ;;
+    overview)   do_overview ;;
+    help|-h|--help)
+        echo "Usage: storage [command]"
+        echo ""
+        echo "Commands:"
+        echo "  (none)     Interactive storage manager"
+        echo "  scan       Show top space consumers in home directory"
+        echo "  big [MB]   Find files larger than MB (default: 100)"
+        echo "  clean      Find and clean caches & build artifacts"
+        echo "  icloud     Analyze iCloud migration candidates"
+        echo "  move PATH  Move a directory to iCloud with symlink"
+        echo "  node       Scan and clean node_modules"
+        echo "  overview   Quick disk usage summary"
+        ;;
+    "")         do_menu ;;
+    *)          echo "Unknown: $1 — try 'storage help'"; exit 1 ;;
+esac

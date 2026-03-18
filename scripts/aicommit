@@ -1,0 +1,134 @@
+#!/bin/bash
+# aicommit — AI-generated commit messages
+# Usage: aicommit              (stage all + commit)
+#        aicommit --no-stage   (use current staging)
+#        aicommit -m "hint"    (give context)
+#        aicommit --amend      (amend last commit with new message)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh" 2>/dev/null
+source "$SCRIPT_DIR/_auth-helper.sh"
+_ensure_claude_auth || exit 1
+
+AUTO_STAGE=true
+HINT=""
+AMEND=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-stage|-n) AUTO_STAGE=false; shift ;;
+        -m|--message) HINT="$2"; shift 2 ;;
+        --amend) AMEND=true; shift ;;
+        -h|--help)
+            echo "Usage: aicommit [--no-stage] [-m hint] [--amend]"
+            exit 0 ;;
+        *) shift ;;
+    esac
+done
+
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+    title_box "AI Commit" "✍️"
+    echo -e "  ${YELLOW}⚠${NC}  Not inside a git repository."
+    echo ""
+    echo -e "  ${DIM}Navigate to a project first, or use ${NC}${GREEN}p${NC}${DIM} (Project Launcher) from the menu.${NC}"
+    echo -e "  ${DIM}You can also run:  ${NC}cd ~/your-project && toolkit aicommit"
+    exit 1
+fi
+
+# Get the diff
+if $AMEND; then
+    DIFF=$(git diff HEAD~1..HEAD)
+    AUTO_STAGE=false
+else
+    $AUTO_STAGE && git add -A
+    DIFF=$(git diff --cached)
+fi
+
+if [[ -z "$DIFF" ]]; then echo "Nothing to commit."; exit 0; fi
+
+FILE_COUNT=$(echo "$DIFF" | grep '^diff --git' | wc -l | tr -d ' ')
+
+# Auto-detect scope from changed paths
+SCOPE=""
+DIRS=$(echo "$DIFF" | grep '^diff --git' | sed 's|diff --git a/||;s| b/.*||' | xargs -I{} dirname {} | sort -u)
+DIR_COUNT=$(echo "$DIRS" | wc -l | tr -d ' ')
+if (( DIR_COUNT == 1 )); then
+    SCOPE=$(echo "$DIRS" | head -1)
+    [[ "$SCOPE" == "." ]] && SCOPE=""
+elif echo "$DIRS" | grep -q "^frontend\|^web\|^src/components"; then
+    SCOPE="frontend"
+elif echo "$DIRS" | grep -q "^backend\|^api\|^server"; then
+    SCOPE="backend"
+elif echo "$DIRS" | grep -q "^test\|^spec\|^__test"; then
+    SCOPE="tests"
+fi
+
+title_box "AI Commit" "✍️"
+echo -e "  Generating commit message for ${BOLD}$FILE_COUNT${NC} file(s)..."
+[[ -n "$SCOPE" ]] && echo -e "\033[2mDetected scope: $SCOPE\033[0m"
+
+HINT_LINE=""
+[[ -n "$HINT" ]] && HINT_LINE="Developer context: $HINT"
+SCOPE_LINE=""
+[[ -n "$SCOPE" ]] && SCOPE_LINE="Detected scope from file paths: '$SCOPE'. Use this as the scope in the commit type, e.g., feat($SCOPE):"
+
+PROMPT="Write a git commit message for this diff. Use conventional commits.
+
+Rules:
+- Line 1: type(scope): summary (max 72 chars)
+- Blank line
+- 1-3 bullet points: what changed and why
+- No code blocks or markdown
+$HINT_LINE
+$SCOPE_LINE
+
+\`\`\`diff
+$DIFF
+\`\`\`
+
+Output ONLY the commit message."
+
+MSG=$(_claude_ask "$PROMPT" "claude-haiku-4-5" 1024 "Writing commit")
+
+if [[ -z "$MSG" ]]; then echo "Error: no message generated."; exit 1; fi
+
+echo ""
+echo "━━━ Proposed Commit Message ━━━"
+echo ""
+echo "$MSG"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  y) Commit    e) Edit first    n) Abort"
+echo ""
+read -r -p "Choice [y/e/n]: " choice
+
+case "$choice" in
+    y|Y)
+        if $AMEND; then
+            git commit --amend -m "$MSG"
+        else
+            git commit -m "$MSG"
+        fi
+        echo -e "\n✓ Committed!"
+        ;;
+    e|E)
+        TMPFILE=$(mktemp)
+        echo "$MSG" > "$TMPFILE"
+        ${EDITOR:-vim} "$TMPFILE"
+        EDITED=$(cat "$TMPFILE"); rm -f "$TMPFILE"
+        if [[ -n "$EDITED" ]]; then
+            if $AMEND; then git commit --amend -m "$EDITED"
+            else git commit -m "$EDITED"; fi
+            echo "✓ Committed!"
+        else
+            echo "Empty — aborted."
+            $AUTO_STAGE && git reset HEAD &>/dev/null
+        fi
+        ;;
+    *)
+        echo "Aborted."
+        $AUTO_STAGE && git reset HEAD &>/dev/null
+        ;;
+esac

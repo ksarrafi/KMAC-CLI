@@ -1,0 +1,107 @@
+#!/bin/bash
+# review — AI code review using Anthropic API
+# Usage: review              (all uncommitted changes)
+#        review --staged      (only staged)
+#        review HEAD~3..HEAD  (commit range)
+#        review --strict      (PR-ready thorough review)
+#        review --quick       (fast surface-level check)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh" 2>/dev/null
+source "$SCRIPT_DIR/_auth-helper.sh"
+_ensure_claude_auth || exit 1
+
+DIFF_TARGET=""
+STAGED_ONLY=false
+MODE="normal"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --staged|-s) STAGED_ONLY=true; shift ;;
+        --strict) MODE="strict"; shift ;;
+        --quick|-q) MODE="quick"; shift ;;
+        -h|--help)
+            echo "Usage: review [--staged] [--strict|--quick] [commit-range]"
+            exit 0 ;;
+        *) DIFF_TARGET="$1"; shift ;;
+    esac
+done
+
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+    title_box "AI Code Review" "🔍"
+    echo -e "  ${YELLOW}⚠${NC}  Not inside a git repository."
+    echo ""
+    echo -e "  ${DIM}Navigate to a project first, or use ${NC}${GREEN}p${NC}${DIM} (Project Launcher) from the menu.${NC}"
+    echo -e "  ${DIM}You can also run:  ${NC}cd ~/your-project && toolkit review"
+    exit 1
+fi
+
+DIFF=""
+if [[ -n "$DIFF_TARGET" ]]; then DIFF=$(git diff "$DIFF_TARGET")
+elif $STAGED_ONLY; then DIFF=$(git diff --cached)
+else DIFF=$(git diff HEAD 2>/dev/null || git diff)
+fi
+
+if [[ -z "$DIFF" ]]; then echo "No changes to review."; exit 0; fi
+
+REPO=$(basename "$(git rev-parse --show-toplevel)")
+BRANCH=$(git branch --show-current)
+FILE_COUNT=$(echo "$DIFF" | grep '^diff --git' | wc -l | tr -d ' ')
+
+# Choose review depth based on mode and size
+REVIEW_MODEL="claude-sonnet-4-6"
+case "$MODE" in
+    quick) REVIEW_MODEL="claude-haiku-4-5" ;;
+    strict) REVIEW_MODEL="claude-sonnet-4-6" ;;
+esac
+
+# For large diffs (>8 files), review file-by-file then summarize
+if (( FILE_COUNT > 8 )) && [[ "$MODE" != "quick" ]]; then
+    echo "Large changeset ($FILE_COUNT files) — reviewing file by file..."
+    echo ""
+    FILES=$(echo "$DIFF" | grep '^diff --git' | sed 's|diff --git a/||' | sed 's| b/.*||')
+    SUMMARY=""
+    for file in $FILES; do
+        echo -e "\033[2mReviewing: $file\033[0m"
+        FILE_DIFF=$(git diff HEAD -- "$file" 2>/dev/null || git diff -- "$file")
+        [[ -z "$FILE_DIFF" ]] && continue
+        PROMPT="Review ONLY this file diff from '$REPO'. Be brief — 2-3 bullet points max. Flag only real issues.
+
+\`\`\`diff
+$FILE_DIFF
+\`\`\`"
+        RESULT=$(_claude_ask "$PROMPT" "$REVIEW_MODEL" 1024 "Reviewing")
+        if [[ -n "$RESULT" ]]; then
+            echo -e "\n\033[1m$file:\033[0m"
+            echo "$RESULT"
+            SUMMARY="${SUMMARY}\n$file: $RESULT\n"
+            echo ""
+        fi
+    done
+
+    # Overall summary
+    echo -e "\n\033[1m━━━ Overall Summary ━━━\033[0m\n"
+    SUM_PROMPT="Here are per-file code review notes for a changeset in '$REPO'. Write a 3-5 sentence overall summary: what's the risk level (low/medium/high), what are the top 1-2 things to fix before merging, and is it ready to ship?
+
+$SUMMARY"
+    _claude_ask "$SUM_PROMPT" "$REVIEW_MODEL" 1024 "Summarizing"
+else
+    # Single-pass review for smaller diffs
+    title_box "AI Code Review" "🔍"
+    echo -e "  Reviewing ${BOLD}$FILE_COUNT${NC} file(s) on ${BOLD}$REPO/$BRANCH${NC} ($MODE mode)..."
+    echo ""
+
+    TONE=""
+    case "$MODE" in
+        quick) TONE="Be very brief. One-liners per issue. Skip anything minor." ;;
+        strict) TONE="Be thorough. Check security, error handling, edge cases, naming, tests. Rate overall: SHIP IT / NEEDS WORK / BLOCK." ;;
+        *) TONE="Be direct. Skip praise. Flag real issues only." ;;
+    esac
+
+    PROMPT="Review this diff from '$REPO' on '$BRANCH'. $TONE
+
+\`\`\`diff
+$DIFF
+\`\`\`"
+    _claude_ask "$PROMPT" "$REVIEW_MODEL" 4096 "Reviewing"
+fi

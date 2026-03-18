@@ -1,0 +1,407 @@
+#!/bin/bash
+# pilot — KMac Pilot: control AI agents from your phone via Telegram
+# Usage: pilot start | stop | status | config | test | log | help
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_pilot-lib.sh"
+
+pilot_ensure_dirs
+
+# ─── Setup Wizard ────────────────────────────────────────────────────────
+
+do_setup() {
+    title_box "KMac Pilot Setup" "🛰"
+    echo -e "  ${BOLD}Step 1: Create a Telegram Bot${NC}"
+    echo -e "  ${DIM}Open Telegram on your phone and message @BotFather:${NC}"
+    echo ""
+    echo -e "  1. Send ${GREEN}/newbot${NC} to @BotFather"
+    echo -e "  2. Choose a name (e.g. ${BOLD}KMac Pilot${NC})"
+    echo -e "  3. Choose a username (e.g. ${BOLD}kmac_pilot_bot${NC})"
+    echo -e "  4. Copy the token BotFather gives you"
+    echo ""
+    read -r -p "  Paste your bot token: " token
+
+    if [[ -z "$token" ]]; then
+        echo -e "  ${RED}No token provided.${NC}"
+        return 1
+    fi
+
+    # Validate the token
+    echo -e "  ${DIM}Verifying token...${NC}"
+    local result
+    result=$(curl -sf "${TELEGRAM_API}${token}/getMe" 2>/dev/null)
+    local ok
+    ok=$(echo "$result" | jq -r '.ok // false' 2>/dev/null)
+
+    if [[ "$ok" != "true" ]]; then
+        echo -e "  ${RED}Invalid token. Double-check it from BotFather.${NC}"
+        return 1
+    fi
+
+    local bot_name
+    bot_name=$(echo "$result" | jq -r '.result.username // "unknown"')
+    echo -e "  ${GREEN}*${NC} Connected to @${bot_name}"
+
+    pilot_set_config "telegram_token" "$token"
+    pilot_set_config "bot_username" "$bot_name"
+
+    echo ""
+    echo -e "  ${BOLD}Step 2: Project Directories${NC}"
+    echo -e "  ${DIM}Where are your projects? Comma-separate for multiple dirs.${NC}"
+    echo -e "  ${DIM}Pilot auto-discovers git repos up to 3 levels deep.${NC}"
+    echo ""
+    read -r -p "  Project dirs [~/Projects]: " proj_dir
+    proj_dir="${proj_dir:-$HOME/Projects}"
+    proj_dir="${proj_dir/#\~/$HOME}"
+
+    # Validate each directory
+    local valid_dirs=""
+    IFS=',' read -ra dir_arr <<< "$proj_dir"
+    for d in "${dir_arr[@]}"; do
+        d=$(echo "$d" | xargs)  # trim
+        d="${d/#\~/$HOME}"
+        if [[ ! -d "$d" ]]; then
+            echo -e "  ${YELLOW}!${NC} Directory not found: $d (skipping)"
+        else
+            [[ -n "$valid_dirs" ]] && valid_dirs+=","
+            valid_dirs+="$d"
+            echo -e "  ${GREEN}*${NC} $d"
+        fi
+    done
+
+    if [[ -z "$valid_dirs" ]]; then
+        echo -e "  ${RED}No valid directories provided.${NC}"
+        return 1
+    fi
+
+    pilot_set_config "project_dirs" "$valid_dirs"
+
+    echo ""
+    echo -e "  ${BOLD}Step 3: Link Your Phone${NC}"
+    echo -e "  ${DIM}Send any message to your bot on Telegram.${NC}"
+    echo -e "  ${DIM}Pilot will auto-detect your chat ID on first message.${NC}"
+    echo ""
+
+    # Check if chat_id is already configured
+    local existing_cid
+    existing_cid=$(pilot_chat_id)
+    if [[ -n "$existing_cid" ]]; then
+        echo -e "  ${GREEN}*${NC} Chat ID already set: $existing_cid"
+    else
+        echo -e "  ${YELLOW}>>  Start the bot with 'pilot start', then message it${NC}"
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}${BOLD}Setup complete!${NC}"
+    echo ""
+    echo -e "  Next steps:"
+    echo -e "    ${GREEN}pilot start${NC}    Start the bot daemon"
+    echo -e "    ${DIM}Then message your bot on Telegram with /help${NC}"
+    echo ""
+}
+
+# ─── Commands ────────────────────────────────────────────────────────────
+
+do_start() {
+    local token
+    token=$(pilot_token)
+
+    if [[ -z "$token" ]]; then
+        echo -e "${YELLOW}Pilot is not configured yet.${NC}"
+        echo ""
+        do_setup
+        token=$(pilot_token)
+        [[ -z "$token" ]] && return 1
+    fi
+
+    if pilot_bot_running; then
+        echo -e "${YELLOW}Pilot bot is already running${NC} (PID $(cat "$PILOT_PID_FILE"))"
+        return 0
+    fi
+
+    echo -e "${DIM}Starting KMac Pilot bot daemon...${NC}"
+
+    nohup bash "$SCRIPT_DIR/_pilot-bot.sh" >> "$PILOT_DIR/bot.log" 2>&1 &
+    echo $! > "$PILOT_PID_FILE"
+    disown 2>/dev/null
+
+    sleep 1
+    if pilot_bot_running; then
+        echo -e "${GREEN}*${NC} Pilot bot started (PID $(cat "$PILOT_PID_FILE"))"
+        echo -e "${DIM}  Listening for Telegram messages...${NC}"
+        echo -e "${DIM}  Log: $PILOT_DIR/bot.log${NC}"
+    else
+        echo -e "${RED}Failed to start bot daemon. Check log:${NC}"
+        echo -e "${DIM}  tail -20 $PILOT_DIR/bot.log${NC}"
+        return 1
+    fi
+}
+
+do_stop() {
+    if ! pilot_bot_running; then
+        echo -e "${DIM}Pilot bot is not running.${NC}"
+        return 0
+    fi
+
+    local pid
+    pid=$(cat "$PILOT_PID_FILE")
+
+    # Also stop any running agent
+    if pilot_agent_running; then
+        local agent_pid
+        agent_pid=$(cat "$PILOT_AGENT_PID")
+        kill "$agent_pid" 2>/dev/null
+        rm -f "$PILOT_AGENT_PID"
+        echo -e "${DIM}Stopped agent (PID $agent_pid)${NC}"
+    fi
+
+    kill "$pid" 2>/dev/null
+    rm -f "$PILOT_PID_FILE"
+    echo -e "${GREEN}*${NC} Pilot bot stopped"
+
+    # Notify via Telegram
+    local cid
+    cid=$(pilot_chat_id)
+    [[ -n "$cid" ]] && tg_send "$cid" "KMac Pilot is *offline*." &>/dev/null &
+}
+
+do_status() {
+    title_box "KMac Pilot" "🛰"
+
+    # Bot status
+    if pilot_bot_running; then
+        echo -e "  Bot:   ${GREEN}* running${NC} (PID $(cat "$PILOT_PID_FILE"))"
+    else
+        echo -e "  Bot:   ${DIM}- stopped${NC}"
+    fi
+
+    # Agent status
+    if pilot_agent_running; then
+        local proj task
+        proj=$(pilot_task_field "project")
+        task=$(pilot_task_field "task")
+        echo -e "  Agent: ${GREEN}* running${NC} on ${BOLD}${proj}${NC}"
+        echo -e "  Task:  ${DIM}${task}${NC}"
+        local lines
+        lines=$(wc -l < "$PILOT_AGENT_LOG" 2>/dev/null | tr -d ' ')
+        echo -e "  Output: ${lines} lines"
+    else
+        local last_status
+        last_status=$(pilot_task_field "status")
+        if [[ -n "$last_status" ]]; then
+            echo -e "  Agent: ${DIM}$last_status${NC} ($(pilot_task_field "project"))"
+        else
+            echo -e "  Agent: ${DIM}- idle${NC}"
+        fi
+    fi
+
+    echo ""
+
+    # Config
+    local token
+    token=$(pilot_token)
+    if [[ -n "$token" ]]; then
+        local bot_name
+        bot_name=$(pilot_get_config "bot_username")
+        echo -e "  Telegram: ${GREEN}*${NC} @${bot_name:-configured}"
+    else
+        echo -e "  Telegram: ${RED}not configured${NC} — run ${GREEN}pilot config${NC}"
+    fi
+
+    local cid
+    cid=$(pilot_chat_id)
+    if [[ -n "$cid" ]]; then
+        echo -e "  Chat ID:  ${GREEN}*${NC} ${cid}"
+    else
+        echo -e "  Chat ID:  ${YELLOW}pending${NC} (send a message to your bot)"
+    fi
+
+    echo -e "  Projects: $(pilot_project_dirs)"
+    echo -e "  AI Agent: ${BOLD}$(pilot_agent_label)${NC} ($(pilot_agent))"
+    echo ""
+
+    # Server status
+    do_server status
+    echo ""
+}
+
+do_config() {
+    if [[ $# -ge 2 ]]; then
+        pilot_set_config "$1" "$2"
+        echo -e "${GREEN}*${NC} Set $1 = $2"
+        return
+    fi
+
+    if [[ "${1:-}" == "show" ]]; then
+        if [[ -f "$PILOT_CONFIG" ]]; then
+            echo -e "${BOLD}Pilot Config:${NC} $PILOT_CONFIG"
+            echo ""
+            jq '.' "$PILOT_CONFIG" 2>/dev/null
+        else
+            echo "No config file yet. Run: pilot config"
+        fi
+        return
+    fi
+
+    do_setup
+}
+
+do_log() {
+    local lines="${1:-30}"
+    if [[ ! -f "$PILOT_DIR/bot.log" ]]; then
+        echo "No bot log yet."
+        return
+    fi
+    echo -e "${BOLD}Bot log${NC} (last $lines lines):"
+    echo ""
+    tail -"$lines" "$PILOT_DIR/bot.log"
+}
+
+do_test() {
+    local cid
+    cid=$(pilot_chat_id)
+    local token
+    token=$(pilot_token)
+
+    if [[ -z "$token" ]]; then
+        echo -e "${RED}No token configured.${NC} Run: pilot config"
+        return 1
+    fi
+
+    if [[ -z "$cid" ]]; then
+        echo -e "${YELLOW}No chat ID yet.${NC} Message your bot on Telegram first, then retry."
+        return 1
+    fi
+
+    echo -e "${DIM}Sending test message to Telegram...${NC}"
+    local result
+    result=$(tg_send "$cid" "Test from KMac Pilot on $(hostname) at $(date '+%H:%M')")
+    local ok
+    ok=$(echo "$result" | jq -r '.ok // false' 2>/dev/null)
+
+    if [[ "$ok" == "true" ]]; then
+        echo -e "${GREEN}*${NC} Message sent! Check your Telegram."
+    else
+        echo -e "${RED}Failed to send.${NC} Response: $result"
+    fi
+}
+
+SERVER_PID_FILE="$PILOT_DIR/server.pid"
+
+do_server() {
+    local action="${1:-}"
+    local server_dir="$SCRIPT_DIR/../server"
+    local venv="$server_dir/.venv"
+
+    case "$action" in
+        start)
+            if [[ -f "$SERVER_PID_FILE" ]] && kill -0 "$(cat "$SERVER_PID_FILE" 2>/dev/null)" 2>/dev/null; then
+                echo -e "${YELLOW}Server already running${NC} (PID $(cat "$SERVER_PID_FILE"))"
+                return 0
+            fi
+
+            if [[ ! -d "$venv" ]]; then
+                echo -e "${DIM}Creating virtual environment...${NC}"
+                python3 -m venv "$venv"
+                "$venv/bin/pip" install -r "$server_dir/requirements.txt" -q
+            fi
+
+            echo -e "${DIM}Starting KMac Pilot API server...${NC}"
+
+            # Unset placeholder keys
+            [[ "${ANTHROPIC_API_KEY:-}" == "your-api-key-here" ]] && unset ANTHROPIC_API_KEY
+            [[ "${OPENAI_API_KEY:-}" == "your-api-key-here" ]]    && unset OPENAI_API_KEY
+
+            nohup "$venv/bin/python3" "$server_dir/app.py" >> "$PILOT_DIR/server.log" 2>&1 &
+            echo $! > "$SERVER_PID_FILE"
+            disown 2>/dev/null
+
+            sleep 1
+            if kill -0 "$(cat "$SERVER_PID_FILE" 2>/dev/null)" 2>/dev/null; then
+                local token
+                token=$(cat "$HOME/.config/kmac-pilot/server_token" 2>/dev/null)
+                echo -e "${GREEN}*${NC} Server started (PID $(cat "$SERVER_PID_FILE"))"
+                echo -e "  ${DIM}URL:   http://$(hostname):7890${NC}"
+                echo -e "  ${DIM}Token: ${token}${NC}"
+                echo -e "  ${DIM}Log:   $PILOT_DIR/server.log${NC}"
+            else
+                echo -e "${RED}Failed to start server. Check:${NC}"
+                echo -e "${DIM}  tail -20 $PILOT_DIR/server.log${NC}"
+            fi
+            ;;
+
+        stop)
+            if [[ ! -f "$SERVER_PID_FILE" ]] || ! kill -0 "$(cat "$SERVER_PID_FILE" 2>/dev/null)" 2>/dev/null; then
+                echo -e "${DIM}Server is not running.${NC}"
+                return 0
+            fi
+            kill "$(cat "$SERVER_PID_FILE")" 2>/dev/null
+            rm -f "$SERVER_PID_FILE"
+            echo -e "${GREEN}*${NC} Server stopped"
+            ;;
+
+        status)
+            if [[ -f "$SERVER_PID_FILE" ]] && kill -0 "$(cat "$SERVER_PID_FILE" 2>/dev/null)" 2>/dev/null; then
+                echo -e "  Server: ${GREEN}* running${NC} (PID $(cat "$SERVER_PID_FILE"))"
+            else
+                echo -e "  Server: ${DIM}- stopped${NC}"
+            fi
+            local token
+            token=$(cat "$HOME/.config/kmac-pilot/server_token" 2>/dev/null)
+            [[ -n "$token" ]] && echo -e "  Token:  ${DIM}${token}${NC}"
+            ;;
+
+        *)
+            echo "Usage: pilot server <start|stop|status>"
+            ;;
+    esac
+}
+
+usage() {
+    echo "Usage: pilot <command>"
+    echo ""
+    echo "  start          Start the Telegram bot daemon"
+    echo "  stop           Stop the bot daemon"
+    echo "  restart        Restart the bot daemon"
+    echo "  server start   Start the API server (for iOS app)"
+    echo "  server stop    Stop the API server"
+    echo "  server status  Show server status + token"
+    echo "  status         Show bot, agent, and config status"
+    echo "  config         Run setup wizard (or: config <key> <value>)"
+    echo "  config show    Show current config"
+    echo "  test           Send a test message to Telegram"
+    echo "  log [N]        Show last N lines of bot log"
+    echo "  help           Show this help"
+    echo ""
+    echo "Telegram commands (from your phone):"
+    echo "  /task <project> <prompt>       — Start AI agent on task"
+    echo "  /ask <question>                — Follow-up question on project"
+    echo "  /status                        — Check running task"
+    echo "  /log                           — Agent output"
+    echo "  /diff                          — Git changes"
+    echo "  /approve [message]             — Commit changes"
+    echo "  /reject                        — Revert changes"
+    echo "  /stop                          — Stop agent"
+    echo "  /agent [claude|cursor]         — View/switch AI agent"
+    echo "  /projects [filter]             — List projects"
+    echo "  /tree [subdir]                 — Directory tree"
+    echo "  /cat <file>                    — View a file"
+    echo "  /run <command>                 — Run shell command"
+}
+
+# ─── Main ────────────────────────────────────────────────────────────────
+
+case "${1:-help}" in
+    start)      do_start ;;
+    stop)       do_stop ;;
+    restart)    do_stop; sleep 1; do_start ;;
+    status|st)  do_status ;;
+    server)     shift; do_server "$@" ;;
+    config)     shift; do_config "$@" ;;
+    test)       do_test ;;
+    log)        do_log "${2:-30}" ;;
+    help|-h|--help) usage ;;
+    *)          echo "Unknown: $1 — try 'pilot help'"; exit 1 ;;
+esac

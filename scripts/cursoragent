@@ -1,0 +1,27 @@
+#!/bin/bash
+# cask — quick Cursor Agent task from the command line
+# Usage: cask "add error handling to server.js"
+#        cask   (interactive prompt)
+
+PROMPT="$*"
+
+if [[ -z "$PROMPT" ]]; then
+    if [[ -t 0 ]]; then
+        read -r -p "Cursor Agent task: " PROMPT
+    else
+        PROMPT=$(cat)
+    fi
+fi
+
+if [[ -z "$PROMPT" ]]; then
+    echo "Usage: cask \"your task description\""
+    exit 1
+fi
+
+if ! command -v cursor &>/dev/null; then
+    echo "Error: cursor CLI not found."
+    echo "Install: https://cursor.com/download"
+    exit 1
+fi
+
+exec cursor agent "$PROMPT"

@@ -1,0 +1,14 @@
+#!/bin/bash
+# AICoder Global Installer
+# Installs AICoder in the current directory
+
+AICODER_DIR="${AICODER_DIR:-$HOME/Projects/AICoders-library}"
+INSTALLER_SCRIPT="$AICODER_DIR/aicoder_package/scripts/ultra-clean-one-liner.sh"
+
+if [[ ! -f "$INSTALLER_SCRIPT" ]]; then
+    echo "AICoder installer not found at: $INSTALLER_SCRIPT"
+    exit 1
+fi
+
+# Run the installer
+bash "$INSTALLER_SCRIPT"

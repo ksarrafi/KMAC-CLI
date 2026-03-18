@@ -1,0 +1,66 @@
+#!/bin/bash
+# killport — find and kill processes on a port
+# Usage: killport 3000
+#        killport 3000 8080      (multiple)
+#        killport --dry-run 3000 (show what would be killed)
+#        killport                (list all listening)
+
+DRY_RUN=false
+PORTS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run|-d) DRY_RUN=true; shift ;;
+        -h|--help)
+            echo "Usage: killport [--dry-run] <port> [port2...]"
+            echo "       killport  (list all listening ports)"
+            exit 0 ;;
+        *) PORTS+=("$1"); shift ;;
+    esac
+done
+
+if [[ ${#PORTS[@]} -eq 0 ]]; then
+    echo -e "\033[1mListening Ports:\033[0m"
+    echo ""
+    printf "  %-8s %-15s %-8s %s\n" "PORT" "PROCESS" "PID" "COMMAND"
+    echo "  ────────────────────────────────────────────────────"
+    lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR>1 {
+        split($9,a,":");
+        port=a[length(a)]
+    }' | sort -u
+    # Better listing with full details
+    lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR>1 {
+        split($9,a,":")
+        port=a[length(a)]
+        if (!seen[port]++) {
+            cmd=$1; pid=$2
+            printf "  %-8s %-15s %-8s\n", port, cmd, pid
+        }
+    }' | sort -t' ' -k1 -n
+    echo ""
+    exit 0
+fi
+
+for PORT in "${PORTS[@]}"; do
+    PIDS=$(lsof -ti :"$PORT" 2>/dev/null)
+    if [[ -z "$PIDS" ]]; then
+        echo "No process on port $PORT"
+        continue
+    fi
+
+    for PID in $PIDS; do
+        PNAME=$(ps -p "$PID" -o comm= 2>/dev/null)
+        FULL_CMD=$(ps -p "$PID" -o args= 2>/dev/null)
+        echo ""
+        echo -e "  Port:    \033[1m$PORT\033[0m"
+        echo -e "  Process: $PNAME (PID $PID)"
+        echo -e "  Command: \033[2m$FULL_CMD\033[0m"
+
+        if $DRY_RUN; then
+            echo -e "  \033[33m[dry-run] Would kill PID $PID\033[0m"
+        else
+            kill -9 "$PID" 2>/dev/null
+            echo -e "  \033[32m✓ Killed\033[0m"
+        fi
+    done
+done

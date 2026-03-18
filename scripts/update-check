@@ -1,0 +1,234 @@
+#!/bin/bash
+# update-check — check for outdated tools and alert
+# Usage: update-check          (full check)
+#        update-check --quick   (cached, for menu startup)
+#        update-check --update  (actually run updates)
+
+TOOLKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$TOOLKIT_DIR/scripts/_ui.sh" 2>/dev/null
+source "$TOOLKIT_DIR/scripts/_ai-fix.sh" 2>/dev/null
+CACHE_DIR="/tmp/toolkit-update-cache"
+CACHE_FILE="$CACHE_DIR/last-check.json"
+CACHE_MAX_AGE=14400  # 4 hours in seconds
+
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+mkdir -p "$CACHE_DIR"
+
+# ─── Helpers ──────────────────────────────────────────────────────────────
+
+# Resolve the npm that manages the `claude` binary.
+# Claude Code is installed globally via npm — we need to find WHICH npm
+# owns it (homebrew's node vs nvm vs system) so updates go to the right place.
+_resolve_npm() {
+    # Follow the `claude` symlink to find its node_modules home
+    local claude_bin
+    claude_bin=$(command -v claude 2>/dev/null)
+    if [[ -n "$claude_bin" && -L "$claude_bin" ]]; then
+        # e.g. /opt/homebrew/bin/claude -> ../lib/node_modules/@anthropic-ai/claude-code/cli.js
+        local real_path
+        real_path=$(readlink -f "$claude_bin" 2>/dev/null || realpath "$claude_bin" 2>/dev/null)
+        if [[ -n "$real_path" ]]; then
+            # Walk up to find the bin/ dir that has npm
+            local node_prefix="${real_path%%/lib/node_modules/*}"
+            if [[ -x "$node_prefix/bin/npm" ]]; then
+                echo "$node_prefix/bin/npm"
+                return
+            fi
+        fi
+    fi
+    # Fallback: homebrew npm (most common on macOS)
+    if [[ -x "/opt/homebrew/bin/npm" ]]; then
+        echo "/opt/homebrew/bin/npm"
+        return
+    fi
+    # Final fallback: whatever npm is in PATH
+    command -v npm 2>/dev/null
+}
+
+NPM_BIN="$(_resolve_npm)"
+
+# Check if cache is fresh
+cache_is_fresh() {
+    [[ -f "$CACHE_FILE" ]] || return 1
+    local age=$(( $(date +%s) - $(stat -f %m "$CACHE_FILE" 2>/dev/null || echo 0) ))
+    (( age < CACHE_MAX_AGE ))
+}
+
+# Run the actual version checks
+run_checks() {
+    local updates=()
+
+    # 1. Claude CLI
+    local claude_current claude_latest
+    claude_current=$(claude --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+    claude_latest=$($NPM_BIN view @anthropic-ai/claude-code version 2>/dev/null)
+    if [[ -n "$claude_latest" && -n "$claude_current" && "$claude_current" != "$claude_latest" ]]; then
+        updates+=("claude:$claude_current:$claude_latest:$NPM_BIN install -g @anthropic-ai/claude-code@latest")
+    fi
+
+    # 2. Homebrew outdated (key packages only)
+    local outdated
+    outdated=$(brew outdated --quiet 2>/dev/null | head -10)
+    if [[ -n "$outdated" ]]; then
+        local count
+        count=$(echo "$outdated" | wc -l | tr -d ' ')
+        updates+=("brew:$count packages:outdated:brew upgrade")
+    fi
+
+    # 3. Check if dotfiles backup is stale (>7 days)
+    local last_backup="$TOOLKIT_DIR/dotfiles/.last-backup"
+    if [[ -f "$last_backup" ]]; then
+        local backup_age=$(( $(date +%s) - $(stat -f %m "$last_backup" 2>/dev/null || echo 0) ))
+        if (( backup_age > 604800 )); then  # 7 days
+            updates+=("dotbackup:$(( backup_age / 86400 )) days old:stale:dotbackup")
+        fi
+    else
+        updates+=("dotbackup:never:no backup:dotbackup")
+    fi
+
+    # Write cache
+    printf "%s\n" "${updates[@]}" > "$CACHE_FILE"
+    # If no updates, make sure cache is empty (not a file with one blank line)
+    if (( ${#updates[@]} == 0 )); then
+        > "$CACHE_FILE"
+    fi
+    echo "${#updates[@]}"
+}
+
+# Display quick banner alert (called from toolkit menu)
+show_quick_alert() {
+    if ! cache_is_fresh; then
+        run_checks &>/dev/null &
+        disown
+    fi
+    [[ -f "$CACHE_FILE" ]] || return
+    local count
+    count=$(wc -l < "$CACHE_FILE" | tr -d ' ')
+    if (( count > 0 )) && [[ -s "$CACHE_FILE" ]]; then
+        echo -e "  ${YELLOW}⚡ $count update(s) available — press 'u' for details${NC}"
+        echo ""
+    fi
+}
+
+# ─── Spinner ──────────────────────────────────────────────────────────────
+
+spin() {
+    local pid=$1 chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\r  %s Checking for updates..." "${chars:i%${#chars}:1}"
+        ((i++))
+        sleep 0.1
+    done
+    printf "\r  ${GREEN}✓${NC} Checking for updates... done\n"
+}
+
+# ─── Update Runner ────────────────────────────────────────────────────────
+# Runs a command live, offers AI diagnosis on failure.
+# Returns: 0 on success, non-zero on failure.
+
+run_update() {
+    local label="$1"; shift
+    echo -e "${CYAN}${label}...${NC}"
+    "$@" 2>&1
+    local rc=$?
+    if (( rc != 0 )); then
+        echo -e "${RED}⚠  ${label} failed${NC}"
+        if type ai_diagnose &>/dev/null; then
+            # Re-run silently to capture output for AI
+            local captured
+            captured=$("$@" 2>&1)
+            ai_diagnose "$captured" "$label"
+        fi
+    fi
+    return $rc
+}
+
+# ─── Full Interactive Report ──────────────────────────────────────────────
+
+show_full_report() {
+    title_box "Update Check" "🔄"
+    run_checks >/dev/null 2>&1 &
+    spin $!
+
+    if [[ ! -s "$CACHE_FILE" ]]; then
+        echo ""
+        echo -e "${GREEN}✓ Everything is up to date!${NC}"
+        return
+    fi
+
+    echo ""
+    while IFS=: read -r tool current status cmd; do
+        [[ -z "$tool" ]] && continue
+        case "$status" in
+            outdated|stale|"no backup")
+                echo -e "  ${YELLOW}⚡${NC} ${BOLD}$tool${NC}: $current → $status"
+                echo -e "     ${DIM}Fix: $cmd${NC}"
+                ;;
+            *)
+                echo -e "  ${YELLOW}⚡${NC} ${BOLD}$tool${NC}: v$current → v$status"
+                echo -e "     ${DIM}Fix: $cmd${NC}"
+                ;;
+        esac
+    done < "$CACHE_FILE"
+
+    echo ""
+    echo -e "  ${GREEN}a)${NC} Run all updates"
+    echo -e "  ${GREEN}b)${NC} Just update brew packages"
+    echo -e "  ${GREEN}c)${NC} Just update Claude CLI"
+    echo -e "  ${GREEN}m)${NC} Back"
+    echo ""
+    read -r -n1 -p "  > " up_choice; echo ""
+
+    case "$up_choice" in
+        a|A)
+            echo ""
+            run_update "Updating brew packages" brew upgrade
+            echo ""
+            run_update "Updating Claude CLI" $NPM_BIN install -g @anthropic-ai/claude-code@latest
+            echo ""
+            echo -e "${CYAN}Running dotfile backup...${NC}"
+            bash "$TOOLKIT_DIR/scripts/dotbackup" 2>&1
+            echo ""
+            # Always refresh cache after updates so menu reflects reality
+            echo -e "${DIM}Refreshing update status...${NC}"
+            run_checks &>/dev/null
+            if [[ -s "$CACHE_FILE" ]]; then
+                local remaining
+                remaining=$(wc -l < "$CACHE_FILE" | tr -d ' ')
+                echo -e "${YELLOW}${remaining} update(s) still pending.${NC}"
+            else
+                echo -e "${GREEN}✓ All updates complete!${NC}"
+            fi
+            ;;
+        b|B)
+            echo ""
+            run_update "Updating brew packages" brew upgrade
+            echo ""
+            echo -e "${DIM}Refreshing update status...${NC}"
+            run_checks &>/dev/null
+            echo -e "${GREEN}✓ Done.${NC}"
+            ;;
+        c|C)
+            echo ""
+            run_update "Updating Claude CLI" $NPM_BIN install -g @anthropic-ai/claude-code@latest
+            echo ""
+            echo -e "${DIM}Refreshing update status...${NC}"
+            run_checks &>/dev/null
+            echo -e "${GREEN}✓ Done.${NC}"
+            ;;
+    esac
+}
+
+# Main entry point
+case "${1:-}" in
+    --quick) show_quick_alert ;;
+    --update) show_full_report ;;
+    *) show_full_report ;;
+esac

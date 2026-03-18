@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude doctor)",
+      "Bash(mkdir:*)",
+      "Bash(python3 -m pip install:*)",
+      "Bash(python3:*)",
+      "Bash(docker system:*)",
+      "Bash(docker version:*)",
+      "Bash(docker volume:*)",
+      "Bash(docker context:*)",
+      "Bash(open:*)",
+      "Bash(docker buildx:*)",
+      "Bash(source ~/.zshrc)",
+      "Bash(du:*)",
+      "Bash(tmutil listlocalsnapshots:*)",
+      "Bash(tmutil listbackups:*)",
+      "Bash(diskutil info:*)",
+      "Bash(docker builder prune:*)",
+      "Bash(ls:*)",
+      "Bash(xattr:*)",
+      "Bash(brctl log:*)",
+      "Bash(~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/.sync-test)",
+      "Bash(defaults read:*)",
+      "Bash(find:*)",
+      "Bash(ln:*)",
+      "Bash(npm i:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
