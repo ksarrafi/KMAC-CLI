@@ -28,14 +28,15 @@ echo -e "${BOLD}${CYAN}Installing KMac Toolkit...${NC}"
 echo ""
 
 # ─── 1. Check for iCloud Drive ────────────────────────────────────────────
-echo -e "${CYAN}${ICON_INFO} Checking iCloud Drive availability...${NC}"
+# Detect install method
 ICLOUD_GLOB=~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit
-if ! ls $ICLOUD_GLOB &>/dev/null 2>&1; then
-    echo -e "${RED}${ICON_WARNING} Toolkit not found in iCloud Drive${NC}"
-    echo "Expected path: ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit"
-    exit 1
+if ls $ICLOUD_GLOB &>/dev/null 2>&1; then
+    INSTALL_MODE="icloud"
+    echo -e "${GREEN}${ICON_SUCCESS} iCloud Drive detected — syncs across all Macs${NC}"
+else
+    INSTALL_MODE="local"
+    echo -e "${GREEN}${ICON_SUCCESS} Local install from ${TOOLKIT_DIR}${NC}"
 fi
-echo -e "${GREEN}${ICON_SUCCESS} iCloud Drive accessible${NC}"
 
 # ─── 2. Make all scripts executable ───────────────────────────────────────
 echo -e "${CYAN}${ICON_INFO} Making scripts executable...${NC}"
@@ -47,16 +48,22 @@ echo -e "${GREEN}${ICON_SUCCESS} Scripts are executable${NC}"
 # ─── 3. Add toolkit alias to .zshrc (if zsh is available) ────────────────
 echo -e "${CYAN}${ICON_INFO} Setting up .zshrc...${NC}"
 
-TOOLKIT_ALIAS="alias toolkit='bash \$(echo ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/toolkit.sh)'"
+if [[ "$INSTALL_MODE" == "icloud" ]]; then
+    TOOLKIT_ALIAS="alias toolkit='bash \$(echo ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/toolkit.sh)'"
+    ALIAS_EXPORT="source ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/aliases.sh"
+    ENV_SOURCE="[[ -f ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/env.sh ]] && source ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/env.sh"
+else
+    TOOLKIT_ALIAS="alias toolkit='bash ${TOOLKIT_DIR}/toolkit.sh'"
+    ALIAS_EXPORT="source ${TOOLKIT_DIR}/aliases.sh"
+    ENV_SOURCE="[[ -f ${TOOLKIT_DIR}/env.sh ]] && source ${TOOLKIT_DIR}/env.sh"
+fi
 KMAC_ALIAS="alias kmac='toolkit'"
-ALIAS_EXPORT="source ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/aliases.sh"
-ENV_SOURCE="[[ -f ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/env.sh ]] && source ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/env.sh"
 
 if [[ -f "$ZSHRC_FILE" ]]; then
     # Check if toolkit alias already exists
     if ! grep -q "alias toolkit=" "$ZSHRC_FILE"; then
         echo "" >> "$ZSHRC_FILE"
-        echo "# KMac Toolkit (iCloud-synced)" >> "$ZSHRC_FILE"
+        echo "# KMac Toolkit" >> "$ZSHRC_FILE"
         echo "$TOOLKIT_ALIAS" >> "$ZSHRC_FILE"
         echo "$KMAC_ALIAS" >> "$ZSHRC_FILE"
         echo "$ALIAS_EXPORT" >> "$ZSHRC_FILE"
@@ -80,7 +87,7 @@ echo -e "${CYAN}${ICON_INFO} Setting up .bashrc...${NC}"
 if [[ -f "$BASHRC_FILE" ]]; then
     if ! grep -q "alias toolkit=" "$BASHRC_FILE"; then
         echo "" >> "$BASHRC_FILE"
-        echo "# KMac Toolkit (iCloud-synced)" >> "$BASHRC_FILE"
+        echo "# KMac Toolkit" >> "$BASHRC_FILE"
         echo "$TOOLKIT_ALIAS" >> "$BASHRC_FILE"
         echo "$KMAC_ALIAS" >> "$BASHRC_FILE"
         echo "$ALIAS_EXPORT" >> "$BASHRC_FILE"

@@ -2,6 +2,15 @@
 
 ## Install
 
+**From GitHub:**
+```bash
+git clone https://github.com/ksarrafi/RevestTech.git ~/Projects/KMac-CLI
+cd ~/Projects/KMac-CLI
+bash install.sh
+source ~/.zshrc
+```
+
+**From iCloud Drive** (if you sync via iCloud):
 ```bash
 bash $(echo ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/install.sh)
 source ~/.zshrc
@@ -26,8 +35,8 @@ kmac help        # CLI usage
 | `e` | Claude Session      | `b` | Backup Dotfiles     |
 | `x` | Cursor Agent        | `u` | Check Updates       |
 | `k` | Kill Port           | `?` | Health Check        |
-| `B` | Bootstrap Mac       | `+` | Build a Tool (AI)   |
-| `/` | Show Aliases        | `i` | Install/Update      |
+| `S` | Storage Manager     | `+` | Build a Tool (AI)   |
+| `B` | Bootstrap Mac       | `i` | Install/Update      |
 
 ## Quick CLI Commands
 
@@ -35,9 +44,11 @@ kmac help        # CLI usage
 kmac ask "how do I ..."        # Ask Claude
 kmac review                    # AI code review
 kmac aicommit                  # AI commit message
+kmac docker dashboard          # Docker health (Engine API)
+kmac storage big               # Find large files with AI analysis
 kmac make "build a ..."        # AI tool builder
 kmac killport 3000             # Kill port
-kmac dotbackup                 # Backup dotfiles
+kmac pilot start               # Start Telegram bot
 ```
 
 ## KMac Pilot — Control AI from Your Phone
@@ -55,7 +66,6 @@ kmac pilot status              # Check everything
 /ask <question>                Follow-up question
 /status                        Check progress
 /stop                          Stop agent
-/agent [claude|cursor]         Switch AI agent
 /projects                      List projects
 /diff                          Git changes
 /approve [msg]                 Commit
@@ -78,11 +88,9 @@ Press `.` in the menu, or:
 security add-generic-password -s "toolkit-anthropic" -a "$USER" -w "your-key"
 ```
 
-## Development
+## Configuration
 
 ```bash
-cd ~/Projects/KMac-CLI     # Open in Cursor
-# Make changes...
-./deploy.sh --dry-run      # Preview
-./deploy.sh                # Push to iCloud
+cp env.template env.sh         # Then edit with your settings
+kmac pilot config              # Set up Telegram bot + project dirs
 ```
