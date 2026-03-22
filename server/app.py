@@ -17,6 +17,7 @@ from session_manager import SessionManager
 from projects import list_projects, resolve_project, file_tree, read_file, browse_directory, get_browse_roots
 from git_ops import diff_stat, approve, reject, log_oneline
 from docker_ops import docker_available, containers, images, container_action, container_logs, system_df
+from docker_dashboard import register_routes as register_docker_health_routes
 from system_ops import disk_usage, memory_info, top_processes, network_info, services_status, homebrew_services
 
 session_mgr = SessionManager()
@@ -26,7 +27,7 @@ AUTH_TOKEN = get_or_create_token()
 
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
-    if request.path in ("/api/ping", "/ws"):
+    if request.path in ("/api/ping", "/ws", "/docker-dashboard") or request.path.startswith("/static/"):
         return await handler(request)
 
     token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
@@ -605,6 +606,14 @@ def create_app() -> web.Application:
 
     # WebSocket
     app.router.add_get("/ws", handle_ws)
+
+    # Docker Health Dashboard (API + web UI)
+    register_docker_health_routes(app)
+
+    # Static files for web dashboards
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    if os.path.isdir(static_dir):
+        app.router.add_static("/static", static_dir)
 
     return app
 

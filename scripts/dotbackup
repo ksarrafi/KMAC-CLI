@@ -5,17 +5,21 @@
 #        dotbackup diff     (show what changed since last backup)
 #        dotbackup hook     (install auto-backup on shell exit)
 
-TOOLKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLKIT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKUP_DIR="$TOOLKIT_DIR/dotfiles"
 ACTION="${1:-backup}"
 
-G='\033[0;32m' Y='\033[0;33m' R='\033[0;31m' D='\033[2m' B='\033[1m' N='\033[0m'
+source "$SCRIPT_DIR/_ui.sh"
+
+# Aliases for backward compat within this script
+G="$GREEN" Y="$YELLOW" R="$RED" D="$DIM" B="$BOLD" N="$NC"
 
 DOTFILES=("$HOME/.zshrc" "$HOME/.gitconfig" "$HOME/.gitignore_global" "$HOME/.vimrc" "$HOME/.tmux.conf")
 CLAUDE_ITEMS=("$HOME/.claude/agents" "$HOME/.claude/commands" "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json")
 
 show_diff() {
-    echo -e "${B}Changes since last backup:${N}\n"
+    title_box "Dotfile Changes" "📋"
     local changes=0
     for f in "${DOTFILES[@]}"; do
         local name=$(basename "$f")
@@ -37,7 +41,7 @@ show_diff() {
 
 do_backup() {
     mkdir -p "$BACKUP_DIR"
-    echo -e "${B}Backing up dotfiles...${N}\n"
+    title_box "Dotfile Backup" "💾"
     for f in "${DOTFILES[@]}"; do
         [[ -f "$f" ]] || continue
         local name=$(basename "$f")
@@ -73,10 +77,11 @@ do_backup() {
 }
 
 do_restore() {
-    [[ -d "$BACKUP_DIR" ]] || { echo -e "${R}No backup found at $BACKUP_DIR${N}"; return 1; }
+    [[ -d "$BACKUP_DIR" ]] || { ui_fail "No backup found at $BACKUP_DIR"; return 1; }
     local ts=$(date +%Y%m%d-%H%M%S)
-    echo -e "${B}Restoring dotfiles...${N}"
-    echo -e "${Y}Safety: current files saved as .bak-$ts${N}\n"
+    title_box "Dotfile Restore" "📥"
+    ui_warn "Current files will be saved as .bak-$ts"
+    echo ""
     for f in "${DOTFILES[@]}"; do
         local name=$(basename "$f")
         local src="$BACKUP_DIR/$name"

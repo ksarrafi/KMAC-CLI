@@ -7,16 +7,30 @@ _ensure_claude_auth() {
     if [[ -n "${ANTHROPIC_API_KEY:-}" && "$ANTHROPIC_API_KEY" != "your-api-key-here" ]]; then
         return 0
     fi
+
+    # Try vault (supports both Keychain and encrypted file backends)
+    if type vault_get &>/dev/null; then
+        local key
+        key=$(vault_get "anthropic" 2>/dev/null)
+        if [[ -n "$key" ]]; then
+            export ANTHROPIC_API_KEY="$key"
+            return 0
+        fi
+    fi
+
+    # Legacy: direct Keychain lookup for backward compatibility
     local key
-    key=$(security find-generic-password -s "toolkit-anthropic" -w 2>/dev/null)
+    key=$(security find-generic-password -s "toolkit-anthropic" -w 2>/dev/null \
+       || security find-generic-password -s "kmac-anthropic" -w 2>/dev/null)
     if [[ -n "$key" ]]; then
         export ANTHROPIC_API_KEY="$key"
         return 0
     fi
+
     echo "⚠  No Anthropic API key found."
     echo ""
     echo "Set one up:"
-    echo "  1) toolkit → Secrets (.) → add ANTHROPIC_API_KEY"
+    echo "  1) kmac → Secrets (.) → set anthropic"
     echo "  2) export ANTHROPIC_API_KEY=\"sk-ant-...\" in shell"
     echo ""
     echo "Get a key: https://console.anthropic.com/settings/keys"

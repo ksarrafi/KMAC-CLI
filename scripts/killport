@@ -5,6 +5,9 @@
 #        killport --dry-run 3000 (show what would be killed)
 #        killport                (list all listening)
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+
 DRY_RUN=false
 PORTS=()
 
@@ -12,23 +15,17 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run|-d) DRY_RUN=true; shift ;;
         -h|--help)
-            echo "Usage: killport [--dry-run] <port> [port2...]"
-            echo "       killport  (list all listening ports)"
+            echo -e "  ${BOLD}Usage:${NC} killport [--dry-run] <port> [port2...]"
+            echo -e "         killport  ${DIM}(list all listening ports)${NC}"
             exit 0 ;;
         *) PORTS+=("$1"); shift ;;
     esac
 done
 
 if [[ ${#PORTS[@]} -eq 0 ]]; then
-    echo -e "\033[1mListening Ports:\033[0m"
-    echo ""
-    printf "  %-8s %-15s %-8s %s\n" "PORT" "PROCESS" "PID" "COMMAND"
-    echo "  ────────────────────────────────────────────────────"
-    lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR>1 {
-        split($9,a,":");
-        port=a[length(a)]
-    }' | sort -u
-    # Better listing with full details
+    title_box "Listening Ports" "🔌"
+    printf "  ${BOLD}%-8s %-15s %-8s${NC}\n" "PORT" "PROCESS" "PID"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..35})${NC}"
     lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR>1 {
         split($9,a,":")
         port=a[length(a)]
@@ -38,13 +35,14 @@ if [[ ${#PORTS[@]} -eq 0 ]]; then
         }
     }' | sort -t' ' -k1 -n
     echo ""
+    ui_dim "Use: killport <port> to kill a process"
     exit 0
 fi
 
 for PORT in "${PORTS[@]}"; do
     PIDS=$(lsof -ti :"$PORT" 2>/dev/null)
     if [[ -z "$PIDS" ]]; then
-        echo "No process on port $PORT"
+        ui_warn "No process on port ${BOLD}$PORT${NC}"
         continue
     fi
 
@@ -52,15 +50,16 @@ for PORT in "${PORTS[@]}"; do
         PNAME=$(ps -p "$PID" -o comm= 2>/dev/null)
         FULL_CMD=$(ps -p "$PID" -o args= 2>/dev/null)
         echo ""
-        echo -e "  Port:    \033[1m$PORT\033[0m"
-        echo -e "  Process: $PNAME (PID $PID)"
-        echo -e "  Command: \033[2m$FULL_CMD\033[0m"
+        echo -e "  ${BOLD}Port:${NC}    $PORT"
+        echo -e "  ${BOLD}Process:${NC} $PNAME ${DIM}(PID $PID)${NC}"
+        echo -e "  ${BOLD}Command:${NC} ${DIM}$FULL_CMD${NC}"
 
         if $DRY_RUN; then
-            echo -e "  \033[33m[dry-run] Would kill PID $PID\033[0m"
+            ui_warn "[dry-run] Would kill PID $PID"
         else
             kill -9 "$PID" 2>/dev/null
-            echo -e "  \033[32m✓ Killed\033[0m"
+            ui_success "Killed PID $PID"
         fi
     done
 done
+echo ""

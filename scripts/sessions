@@ -5,26 +5,34 @@
 #        sessions last          (resume most recent)
 #        sessions search "term" (search sessions)
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+
 ACTION="${1:-picker}"
 SEARCH_TERM="${2:-}"
 
 case "$ACTION" in
     list|ls)
-        echo "Recent Claude sessions:"
-        echo ""
-        # Show recent todo files as a proxy for sessions
-        ls -lt ~/.claude/todos/ 2>/dev/null | head -20 | while read -r line; do
-            echo "  $line"
-        done
-        echo ""
-        echo "Use 'sessions resume <id>' to resume."
+        title_box "Claude Sessions" "📋"
+        if [[ -d "$HOME/.claude/todos" ]]; then
+            local_count=0
+            ls -lt "$HOME/.claude/todos/" 2>/dev/null | tail -n +2 | head -20 | while read -r line; do
+                echo "  $line"
+                ((local_count++))
+            done
+            echo ""
+            ui_dim "Use 'sessions resume <id>' to resume a session."
+        else
+            ui_dim "No sessions found."
+        fi
         ;;
     last|continue)
         exec claude --continue
         ;;
     search|find)
         if [[ -z "$SEARCH_TERM" ]]; then
-            read -r -p "Search term: " SEARCH_TERM
+            echo ""
+            read -r -p "  Search term: " SEARCH_TERM
         fi
         exec claude --resume "$SEARCH_TERM"
         ;;

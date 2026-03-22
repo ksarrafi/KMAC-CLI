@@ -1,6 +1,9 @@
 #!/bin/bash
 # remote-terminal.sh — Sourceable remote terminal functions
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_vault.sh" 2>/dev/null
+
 remote-terminal() {
     local pid_dir="/tmp/remote-terminal"
     local ttyd_pidfile="$pid_dir/ttyd.pid"
@@ -43,17 +46,17 @@ remote-terminal() {
         rm -f "$caddyfile"
     }
 
-    # ── credentials (from Keychain) ──
+    # ── credentials (from vault) ──
     local RT_USER="user"
     local RT_PASS
-    RT_PASS=$(security find-generic-password -s "toolkit-rt-password" -w 2>/dev/null)
+    RT_PASS=$(vault_get "rt-password" 2>/dev/null)
     if [[ -z "$RT_PASS" ]]; then
-        echo "No remote-terminal password found in Keychain."
-        echo "Set one with: security add-generic-password -s toolkit-rt-password -a \$USER -w"
+        echo "No remote-terminal password found in vault."
+        echo "Set one with: kmac secrets set rt-password"
         read -r -s -p "Or enter a password now: " RT_PASS; echo ""
         if [[ -n "$RT_PASS" ]]; then
-            security add-generic-password -s "toolkit-rt-password" -a "$USER" -w "$RT_PASS" 2>/dev/null
-            echo "Saved to Keychain for next time."
+            vault_set "rt-password" "$RT_PASS" 2>/dev/null
+            echo "Saved to vault for next time."
         else
             return 1
         fi

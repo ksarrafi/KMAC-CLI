@@ -21,6 +21,12 @@ PLUGINS_DIR="$TOOLKIT_DIR/plugins"
 # ─── Shared UI (colors, title_box, pause) ─────────────────────────────────
 source "$SCRIPTS_DIR/_ui.sh"
 
+# ─── Vault (secret management) ───────────────────────────────────────────
+source "$SCRIPTS_DIR/_vault.sh" 2>/dev/null
+
+# Auto-export vault credentials into environment so all tools can use them
+vault_export_all 2>/dev/null
+
 # ─── AI Self-Healing ──────────────────────────────────────────────────────
 source "$SCRIPTS_DIR/_ai-fix.sh" 2>/dev/null
 
@@ -202,60 +208,59 @@ print_menu() {
     print_logo
 
     # ─── Status Bar ───
-    local _box_w=52
     echo ""
-    echo -e "  ${DIM}┌ services ──────────────────────────────────────────┐${NC}"
+    echo -e "  ${DIM}┌─ services ─────────────────────────────────────────┐${NC}"
 
-    local _plain="  $(si_plain "$rt") Remote Terminal   $(si_plain "$dk_state") Docker (${dk_count})   $(si_plain "$ng") ngrok"
-    local _pad=$(( _box_w - ${#_plain} ))
-    (( _pad < 1 )) && _pad=1
-    local _sp; printf -v _sp '%*s' "$_pad" ''
-    printf "  ${DIM}│${NC}  $(si "$rt") Remote Terminal   $(si "$dk_state") Docker ${DIM}(${dk_count})${NC}   $(si "$ng") ngrok${_sp}${DIM}│${NC}\n"
+    local rt_label dk_label ng_label
+    if [[ "$rt" == "up" ]]; then rt_label="${GREEN}●${NC} Remote Terminal"; else rt_label="${DIM}○ Remote Terminal${NC}"; fi
+    if [[ "$dk_state" == "up" ]]; then dk_label="${GREEN}●${NC} Docker ${DIM}(${dk_count})${NC}"; else dk_label="${DIM}○ Docker${NC}"; fi
+    if [[ "$ng" == "up" ]]; then ng_label="${GREEN}●${NC} ngrok"; else ng_label="${DIM}○ ngrok${NC}"; fi
+
+    echo -e "  ${DIM}│${NC}  ${rt_label}    ${dk_label}    ${ng_label}             ${DIM}│${NC}"
 
     local _cache="/tmp/toolkit-update-cache/last-check.json"
     if [[ -s "$_cache" ]]; then
         local _ucount
         _ucount=$(wc -l < "$_cache" 2>/dev/null | tr -d ' ')
         if (( _ucount > 0 )); then
-            local _up_plain="  >> ${_ucount} update(s) available -- press u for details"
-            local _up_pad=$(( _box_w - ${#_up_plain} ))
-            (( _up_pad < 1 )) && _up_pad=1
-            local _up_sp; printf -v _up_sp '%*s' "$_up_pad" ''
-            echo -e "  ${DIM}│${NC}  ${YELLOW}>>${NC} ${_ucount} update(s) available ${DIM}--${NC} press ${BOLD}u${NC} for details${_up_sp}${DIM}│${NC}"
+            echo -e "  ${DIM}│${NC}  ${YELLOW}▸${NC} ${_ucount} update(s) available ${DIM}— press${NC} ${BOLD}u${NC} ${DIM}to review${NC}           ${DIM}│${NC}"
         fi
     fi
     echo -e "  ${DIM}└────────────────────────────────────────────────────┘${NC}"
 
-    # ─── Commands ───
+    # ─── Commands — 3-column layout ───
     echo ""
-    echo -e "   ${BOLD}${C_CYAN}  AI${NC}                       ${BOLD}${C_TEAL}  Dev${NC}                      ${BOLD}${C_GREEN}  Infra${NC}"
-    echo -e "   ${DIM}────${NC}                       ${DIM}─────${NC}                      ${DIM}──────${NC}"
-    echo -e "   ${GREEN}a${NC}  Ask Claude              ${GREEN}p${NC}  Project Launcher        ${GREEN}r${NC}  Remote Terminal"
-    echo -e "   ${GREEN}v${NC}  AI Code Review          ${GREEN}e${NC}  Claude Code             ${GREEN}d${NC}  Docker Manager"
-    echo -e "   ${GREEN}c${NC}  AI Commit               ${GREEN}x${NC}  Cursor Agent            ${GREEN}n${NC}  Network Info"
-    echo -e "   ${GREEN}+${NC}  ${BOLD}Build a Tool${NC}            ${GREEN}s${NC}  Sessions                ${GREEN}k${NC}  Kill Port"
-    echo -e "                               ${GREEN}P${NC}  ${C_MINT}${BOLD}Pilot${NC} ${DIM}(remote agent)${NC}"
+    echo -e "   ${C_CYAN}${BOLD}AI${NC}                        ${C_TEAL}${BOLD}Dev${NC}                       ${C_GREEN}${BOLD}Infra${NC}"
+    echo -e "   ${DIM}──${NC}                        ${DIM}───${NC}                       ${DIM}─────${NC}"
+    echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}p${NC}  Project Launcher       ${GREEN}r${NC}  Remote Terminal"
+    echo -e "   ${GREEN}+${NC}  Build a Tool           ${GREEN}e${NC}  Claude Code            ${GREEN}d${NC}  Docker Manager"
+    echo -e "                              ${GREEN}x${NC}  Cursor Agent           ${GREEN}n${NC}  Network Info"
+    echo -e "                              ${GREEN}v${NC}  Code Review            ${GREEN}k${NC}  Kill Port"
+    echo -e "                              ${GREEN}c${NC}  Smart Commit"
+    echo -e "                              ${GREEN}P${NC}  Pilot ${DIM}(remote agent)${NC}"
     echo ""
-    echo -e "   ${BOLD}${YELLOW}  System${NC}"
-    echo -e "   ${DIM}────────${NC}"
-    echo -e "   ${GREEN}S${NC}  ${BOLD}Storage Manager${NC}         ${GREEN}b${NC}  Backup Dotfiles         ${GREEN}u${NC}  Check Updates"
-    echo -e "   ${GREEN}.${NC}  Secrets (Keychain)      ${GREEN}/${NC}  Show Aliases            ${GREEN}i${NC}  Install/Update"
-    echo -e "   ${GREEN}?${NC}  Health Check            ${GREEN}q${NC}  Connection QR           ${GREEN}B${NC}  Bootstrap Mac"
+    echo -e "   ${YELLOW}${BOLD}System${NC}"
+    echo -e "   ${DIM}──────${NC}"
+    echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}b${NC}  Backup Dotfiles        ${GREEN}u${NC}  Check Updates"
+    echo -e "   ${GREEN}.${NC}  Secrets & Keys         ${GREEN}/${NC}  Show Aliases           ${GREEN}i${NC}  Install/Update"
+    echo -e "   ${GREEN}?${NC}  Health Check           ${GREEN}q${NC}  Connection QR          ${GREEN}B${NC}  Bootstrap Mac"
 
     # ─── Plugins ───
     if (( ${#PLUGIN_NAMES[@]} > 0 )); then
         echo ""
-        echo -e "   ${BOLD}${MAGENTA}  Plugins${NC}"
-        echo -e "   ${DIM}─────────${NC}"
+        echo -e "   ${MAGENTA}${BOLD}Plugins${NC}"
+        echo -e "   ${DIM}───────${NC}"
         for idx in "${!PLUGIN_NAMES[@]}"; do
             local pkey="${PLUGIN_KEYS[$idx]:-$((idx+1))}"
-            printf "   ${GREEN}${pkey}${NC}  %-22s ${DIM}%s${NC}\n" "${PLUGIN_NAMES[$idx]}" "${PLUGIN_DESCS[$idx]}"
+            printf "   ${GREEN}${pkey}${NC})  %-22s ${DIM}%s${NC}\n" "${PLUGIN_NAMES[$idx]}" "${PLUGIN_DESCS[$idx]}"
         done
     fi
 
-    # ─── Footer ───
+    # ─── Footer with tip ───
     echo ""
     echo -e "  ${DIM}─────────────────────────────────────────────────────${NC}"
+    random_tip
+    echo ""
     echo -e "   ${DIM}0  Exit${NC}"
     echo ""
 }
@@ -277,7 +282,7 @@ do_remote_terminal() {
         echo -e "  Status: ${GREEN}● Running${NC}"
         echo -e "  URL:    ${GREEN}${url:-unknown}${NC}"
         local _rt_pass
-        _rt_pass=$(security find-generic-password -s "toolkit-rt-password" -w 2>/dev/null || echo "(stored in Keychain)")
+        _rt_pass=$(vault_get "rt-password" 2>/dev/null || echo "(stored in vault)")
         echo -e "  Auth:   user / ${_rt_pass}"
         echo ""
         echo -e "  ${GREEN}q${NC}) Show QR code"
@@ -323,7 +328,7 @@ do_show_qr() {
     echo -e "  URL:      ${GREEN}${url:-unknown}${NC}"
     echo -e "  Username: ${GREEN}user${NC}"
     local _rt_pass
-    _rt_pass=$(security find-generic-password -s "toolkit-rt-password" -w 2>/dev/null || echo "(stored in Keychain)")
+    _rt_pass=$(vault_get "rt-password" 2>/dev/null || echo "(stored in vault)")
     echo -e "  Password: ${GREEN}${_rt_pass}${NC}"
     echo ""
     [[ -n "$url" ]] && qrencode -t UTF8 "$url" 2>/dev/null
@@ -372,11 +377,33 @@ do_health() {
         fi
     done
     echo ""
-    echo -e "  ${BOLD}Environment:${NC}"
-    [[ -n "${ANTHROPIC_API_KEY:-}" && "$ANTHROPIC_API_KEY" != "your-api-key-here" ]] \
-        && echo -e "    ${GREEN}✓${NC} ANTHROPIC_API_KEY" || echo -e "    ${YELLOW}!${NC} ANTHROPIC_API_KEY not set"
-    security find-generic-password -s "toolkit-anthropic" &>/dev/null 2>&1 \
-        && echo -e "    ${GREEN}✓${NC} Keychain: toolkit-anthropic" || echo -e "    ${DIM}○${NC} Keychain: not stored (use '.' to set up)"
+    echo -e "  ${BOLD}Secrets Vault:${NC}"
+    local _hc_backend
+    _hc_backend=$(_vault_backend 2>/dev/null || echo "unknown")
+    echo -e "    Backend: ${CYAN}${_hc_backend}${NC}"
+
+    local _hc_configured=0 _hc_total=0
+    _vault_load_registry 2>/dev/null
+    for (( _hi=0; _hi<${#_REG_SERVICES[@]}; _hi++ )); do
+        ((_hc_total++))
+        vault_has "${_REG_SERVICES[$_hi]}" 2>/dev/null && ((_hc_configured++))
+    done
+    if (( _hc_configured > 0 )); then
+        echo -e "    ${GREEN}✓${NC} ${_hc_configured}/${_hc_total} integrations configured"
+    else
+        echo -e "    ${YELLOW}!${NC} No credentials configured ${DIM}(use '.' to set up)${NC}"
+    fi
+
+    # Key checks via vault
+    vault_has "anthropic" 2>/dev/null \
+        && echo -e "    ${GREEN}✓${NC} Anthropic API key" \
+        || echo -e "    ${DIM}○${NC} Anthropic API key not set"
+    vault_has "github" 2>/dev/null \
+        && echo -e "    ${GREEN}✓${NC} GitHub token" \
+        || echo -e "    ${DIM}○${NC} GitHub token not set"
+    vault_has "rt-password" 2>/dev/null \
+        && echo -e "    ${GREEN}✓${NC} Remote Terminal password" \
+        || echo -e "    ${DIM}○${NC} Remote Terminal password not set"
     echo ""
     echo -e "  ${BOLD}Paths:${NC}"
     [[ -d "$TOOLKIT_DIR" ]] && echo -e "    ${GREEN}✓${NC} Toolkit dir" || { echo -e "    ${RED}✗${NC} Toolkit dir missing"; ((issues++)); }
@@ -408,38 +435,7 @@ do_aliases() {
 }
 
 do_secrets() {
-    title_box "Secrets (macOS Keychain)" "🔐"
-    local secrets=("toolkit-openai:OPENAI_API_KEY" "toolkit-anthropic:ANTHROPIC_API_KEY" "toolkit-ngrok:NGROK_AUTHTOKEN" "toolkit-rt-password:RT_PASSWORD")
-    for entry in "${secrets[@]}"; do
-        local svc="${entry%%:*}" envvar="${entry##*:}"
-        security find-generic-password -s "$svc" -w &>/dev/null \
-            && echo -e "  ${GREEN}✓${NC} $envvar" || echo -e "  ${RED}✗${NC} $envvar"
-    done
-    echo -e "\n  ${GREEN}a${NC}) Add/update    ${GREEN}l${NC}) Load into shell    ${GREEN}m${NC}) Back\n"
-    read -r -n1 -p "  > " sc; echo ""
-    case "$sc" in
-        a|A)
-            echo -e "\n  1) OPENAI_API_KEY  2) ANTHROPIC_API_KEY  3) NGROK_AUTHTOKEN  4) RT_PASSWORD\n"
-            read -r -p "Which [1-4]: " kc
-            local sn=""
-            case "$kc" in 1) sn="toolkit-openai";; 2) sn="toolkit-anthropic";; 3) sn="toolkit-ngrok";; 4) sn="toolkit-rt-password";; *) return;; esac
-            read -r -s -p "Paste key (hidden): " nk; echo ""
-            [[ -n "$nk" ]] && {
-                security add-generic-password -U -s "$sn" -a "$USER" -w "$nk" 2>/dev/null \
-                    || security add-generic-password -s "$sn" -a "$USER" -w "$nk"
-                echo -e "${GREEN}✓ Saved${NC}"
-            }
-            ;;
-        l|L)
-            for entry in "${secrets[@]}"; do
-                local svc="${entry%%:*}" envvar="${entry##*:}"
-                local val=$(security find-generic-password -s "$svc" -w 2>/dev/null)
-                [[ -n "$val" ]] && { export "$envvar=$val"; echo -e "  ${GREEN}✓${NC} $envvar loaded"; }
-            done
-            echo -e "${DIM}Loaded for this session only.${NC}"
-            ;;
-    esac
-    pause
+    bash "$SCRIPTS_DIR/secrets"
 }
 
 do_bootstrap() {
@@ -476,39 +472,151 @@ do_bootstrap() {
 
 # ─── Main Loop ────────────────────────────────────────────────────────────
 
+welcome_wizard() {
+    clear
+    echo ""
+    echo -e "  ${C_CYAN}${BOLD}Welcome to KMac CLI${NC}"
+    echo -e "  ${DIM}Your portable macOS command center${NC}"
+    echo ""
+    echo -e "  Let's get you set up. I'll walk you through each step."
+    echo ""
+
+    # Step 1: Check essentials
+    section "Step 1 of 3 — Health Check"
+    local ok=0 total=0
+    for dep in git python3 curl docker brew; do
+        ((total++))
+        if command -v "$dep" &>/dev/null; then
+            ui_success "$dep found"
+            ((ok++))
+        else
+            ui_warn "$dep not found ${DIM}(some features will be limited)${NC}"
+        fi
+    done
+    echo ""
+    echo -e "  ${BOLD}${ok}/${total}${NC} core tools ready"
+    echo ""
+    read -r -n1 -p "  Press any key to continue..."; echo ""
+
+    # Step 2: Guided API key setup
+    clear
+    echo ""
+    section "Step 2 of 3 — Connect Your Services"
+    echo ""
+    echo -e "  KMac works best with API keys for AI, GitHub, and other services."
+    echo -e "  ${DIM}I'll open the signup page for each one and walk you through it.${NC}"
+    echo -e "  ${DIM}Skip any you don't need — you can always add them later with${NC} ${GREEN}kmac secrets${NC}"
+    echo ""
+
+    # Source the guided setup functions from secrets
+    source "$SCRIPTS_DIR/secrets" _source_only 2>/dev/null
+
+    local -a _wiz_services=("anthropic" "openai" "github" "ngrok")
+    local -a _wiz_labels=("Anthropic (Claude AI)" "OpenAI (GPT)" "GitHub" "ngrok (tunnels)")
+    local _wiz_configured=0
+
+    for (( _wi=0; _wi<${#_wiz_services[@]}; _wi++ )); do
+        local svc="${_wiz_services[$_wi]}"
+        local label="${_wiz_labels[$_wi]}"
+
+        # Skip if already configured
+        if vault_has "$svc" 2>/dev/null; then
+            ui_success "${label} — already configured"
+            ((_wiz_configured++))
+            continue
+        fi
+
+        echo ""
+        echo -e "  ${BOLD}${label}${NC}"
+        read -r -n1 -p "  Set up now? (y/N/q to skip all) > " yn; echo ""
+
+        case "$yn" in
+            y|Y)
+                guided_setup "$svc" && ((_wiz_configured++))
+                ;;
+            q|Q)
+                echo -e "  ${DIM}Skipping remaining services.${NC}"
+                break
+                ;;
+            *)
+                echo -e "  ${DIM}Skipped — add later with:${NC} ${GREEN}kmac secrets set ${svc}${NC}"
+                ;;
+        esac
+    done
+
+    echo ""
+    if (( _wiz_configured > 0 )); then
+        echo -e "  ${GREEN}${BOLD}${_wiz_configured} service(s) configured!${NC}"
+    else
+        echo -e "  ${DIM}No services configured yet — that's fine.${NC}"
+        echo -e "  ${DIM}Run${NC} ${GREEN}kmac secrets${NC} ${DIM}anytime to manage your keys.${NC}"
+    fi
+    echo ""
+    read -r -n1 -p "  Press any key to continue..."; echo ""
+
+    # Step 3: Quick orientation
+    clear
+    echo ""
+    section "Step 3 of 3 — Quick Tour"
+    echo ""
+    echo -e "  ${BOLD}How to use KMac:${NC}"
+    echo ""
+    echo -e "   ${GREEN}kmac${NC}              Open the interactive menu"
+    echo -e "   ${GREEN}kmac ask${NC} ${DIM}\"...\"${NC}    Chat with Claude from anywhere"
+    echo -e "   ${GREEN}kmac review${NC}       AI code review on your current changes"
+    echo -e "   ${GREEN}kmac secrets${NC}      Manage API keys and credentials"
+    echo -e "   ${GREEN}kmac docker${NC}       Docker container manager"
+    echo -e "   ${GREEN}kmac help${NC}         See all available commands"
+    echo ""
+    echo -e "  ${DIM}In the menu, each tool has a single-key shortcut.${NC}"
+    echo -e "  ${DIM}Just press the green letter to jump to it.${NC}"
+    echo ""
+
+    mark_first_run_done
+
+    echo -e "  ${GREEN}${BOLD}You're all set!${NC}"
+    echo ""
+    read -r -n1 -p "  Press any key to enter KMac..."; echo ""
+}
+
 main() {
     mkdir -p "$PLUGINS_DIR" 2>/dev/null
-    animate_intro
+
+    if is_first_run; then
+        welcome_wizard
+    else
+        animate_intro
+    fi
+
     while true; do
         print_menu
         read -r -n1 -p "  > " choice; echo ""
         case "$choice" in
             # AI
             a) clear; do_ask ;;
-            v) clear; safe_run "AI Code Review" bash "$SCRIPTS_DIR/review"; pause ;;
-            c) clear; safe_run "AI Commit" bash "$SCRIPTS_DIR/aicommit"; pause ;;
-            s) clear; bash "$SCRIPTS_DIR/sessions" ;;
+            +) clear; bash "$SCRIPTS_DIR/toolmaker"; pause ;;
             # Dev
             p) clear; safe_run "Project Launcher" bash "$SCRIPTS_DIR/project" ;;
             e) clear; bash "$SCRIPTS_DIR/claudeme" ;;
             x) clear; echo -e "${BOLD}Cursor Agent Task:${NC}"; read -r -p "Task: " t; safe_run "Cursor Agent" bash "$SCRIPTS_DIR/cursoragent" "$t" ;;
-            k) clear; echo -e "${BOLD}Kill Port:${NC}"; read -r -p "Port (blank=list): " pt; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" $pt; pause ;;
+            v) clear; safe_run "Code Review" bash "$SCRIPTS_DIR/review"; pause ;;
+            c) clear; safe_run "Smart Commit" bash "$SCRIPTS_DIR/aicommit"; pause ;;
             P) clear; bash "$SCRIPTS_DIR/pilot" status; pause ;;
             # Infra
             r) clear; do_remote_terminal ;;
             d) clear; do_docker ;;
             n) clear; do_network ;;
+            k) clear; echo -e "${BOLD}Kill Port:${NC}"; read -r -p "Port (blank=list): " pt; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" $pt; pause ;;
             q) clear; do_show_qr ;;
             # System
             .) clear; do_secrets ;;
+            S) clear; bash "$SCRIPTS_DIR/storage"; pause ;;
             b) clear; safe_run "Dotfile Backup" bash "$SCRIPTS_DIR/dotbackup"; pause ;;
             u) clear; safe_run "Update Check" bash "$SCRIPTS_DIR/update-check"; pause ;;
-            \?) clear; do_health ;;
             /) clear; do_aliases ;;
+            \?) clear; do_health ;;
             i) clear; safe_run "Install/Update Toolkit" bash "$TOOLKIT_DIR/install.sh"; pause ;;
             B) clear; do_bootstrap ;;
-            S) clear; bash "$SCRIPTS_DIR/storage"; pause ;;
-            +) clear; bash "$SCRIPTS_DIR/toolmaker"; pause ;;
             0) echo -e "\n  ${C_TEAL}See you! ✌${NC}\n"; exit 0 ;;
             *)
                 # Check plugins
@@ -541,7 +649,9 @@ if [[ $# -gt 0 ]]; then
         update)     exec bash "$SCRIPTS_DIR/update-check" "$@" ;;
         doctor)     do_health ;;
         storage)    exec bash "$SCRIPTS_DIR/storage" "$@" ;;
+        secrets)    exec bash "$SCRIPTS_DIR/secrets" "$@" ;;
         docker)     exec bash "$SCRIPTS_DIR/docker" "$@" ;;
+        docker-health) exec bash "$SCRIPTS_DIR/docker-health" "$@" ;;
         make|build|toolmaker) exec bash "$SCRIPTS_DIR/toolmaker" "$@" ;;
         version|-v|--version)
             print_logo
@@ -566,22 +676,27 @@ if [[ $# -gt 0 ]]; then
             echo ""
             echo -e "  ${BOLD}AI${NC}"
             echo "    ask \"question\"        Ask Claude (or -i for interactive, -m opus)"
-            echo "    review [--strict]     AI code review (--quick, --staged)"
-            echo "    aicommit [--amend]    AI commit message with scope detection"
-            echo "    sessions              Resume a Claude session"
+            echo "    make \"description\"    Build a new tool with AI"
             echo ""
             echo -e "  ${BOLD}Dev${NC}"
             echo "    project               Project launcher with fzf"
+            echo "    review [--strict]     Code review (--quick, --staged)"
+            echo "    aicommit [--amend]    Smart commit message with scope detection"
             echo "    cursoragent \"task\"     Cursor Agent task (alias: cask)"
+            echo "    sessions              Resume a Claude Code session"
             echo "    pilot <cmd>           Remote AI agent via Telegram (start/stop/status)"
+            echo ""
+            echo -e "  ${BOLD}Infra${NC}"
+            echo "    docker [cmd]          Docker Manager (dashboard|health|disk|compose|mcp)"
+            echo "    docker-health         Docker health report (--json, --history)"
             echo "    killport [port]       Kill process on port (blank = list all)"
             echo ""
             echo -e "  ${BOLD}System${NC}"
+            echo "    secrets [cmd]         Credential manager (list|get|set|export|add|backend)"
             echo "    storage [cmd]         Disk usage analyzer + iCloud migration"
             echo "    dotbackup [cmd]       Backup/restore/diff/hook dotfiles"
             echo "    update                Check for updates"
             echo "    doctor                Health check"
-            echo "    make \"description\"    Build a new tool with AI"
             echo ""
             echo -e "  ${BOLD}Meta${NC}"
             echo "    help, -h              Show this help"

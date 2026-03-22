@@ -7,6 +7,7 @@
 #        git diff | ask "explain this"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
 source "$SCRIPT_DIR/_auth-helper.sh"
 
 MODEL="claude-sonnet-4-6"
@@ -56,24 +57,25 @@ fi
 
 # Interactive conversation mode
 if $INTERACTIVE; then
-    echo -e "\033[1mClaude (${MODEL})  — type 'exit' to quit, 'model X' to switch\033[0m"
+    title_box "Ask Claude" "🤖"
+    echo -e "  ${BOLD}Model:${NC} ${CYAN}${MODEL}${NC}"
+    echo -e "  ${DIM}Type 'exit' to quit, 'model X' to switch (opus/sonnet/haiku)${NC}"
     echo ""
     HISTORY=""
     while true; do
-        read -r -p "you> " input
+        read -r -p "  you> " input
         [[ "$input" == "exit" || "$input" == "quit" ]] && break
         if [[ "$input" == model\ * ]]; then
             MODEL="${input#model }"
             MODEL_LOWER=$(echo "$MODEL" | tr '[:upper:]' '[:lower:]')
             case "$MODEL_LOWER" in opus) MODEL="claude-opus-4-6";; haiku) MODEL="claude-haiku-4-5";; sonnet) MODEL="claude-sonnet-4-6";; esac
-            echo -e "\033[2mSwitched to $MODEL\033[0m"
+            ui_info "Switched to ${BOLD}$MODEL${NC}"
             continue
         fi
         [[ -z "$input" ]] && continue
         HISTORY="${HISTORY}User: ${input}\n"
-        local full_prompt="${HISTORY}Answer the user's latest question. Be concise."
+        full_prompt="${HISTORY}Answer the user's latest question. Be concise."
         echo ""
-        local answer
         answer=$(_claude_ask "$full_prompt" "$MODEL" 4096 "Thinking")
         echo "$answer"
         HISTORY="${HISTORY}Assistant: ${answer}\n\n"
@@ -84,7 +86,7 @@ fi
 
 # Single-shot mode
 if [[ -z "$PROMPT" ]]; then
-    echo "Usage: ask \"your question\" or pipe input, or ask -i for interactive"
+    echo -e "  ${BOLD}Usage:${NC} ask \"your question\" or pipe input, or ${GREEN}ask -i${NC} for interactive"
     exit 1
 fi
 

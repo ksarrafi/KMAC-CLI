@@ -7,10 +7,12 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_pilot-lib.sh"
+source "$SCRIPT_DIR/_vault.sh" 2>/dev/null
+
+# Load credentials from vault into environment
+vault_export_all 2>/dev/null
 
 # Strip placeholder API keys that override real OAuth/session auth.
-# env.sh ships with "your-api-key-here" placeholders; if Claude Code
-# sees those it skips its own OAuth session and fails.
 [[ "${ANTHROPIC_API_KEY:-}" == "your-api-key-here" ]] && unset ANTHROPIC_API_KEY
 [[ "${OPENAI_API_KEY:-}" == "your-api-key-here" ]]    && unset OPENAI_API_KEY
 

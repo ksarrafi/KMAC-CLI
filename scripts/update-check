@@ -223,6 +223,7 @@ show_full_report() {
             run_checks &>/dev/null
             echo -e "${GREEN}✓ Done.${NC}"
             ;;
+        m|M|"") ;;
     esac
 }
 

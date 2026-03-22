@@ -2,6 +2,10 @@
 # claudeme — launch a Claude coding session with a chosen model (with descriptions)
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+source "$SCRIPT_DIR/_vault.sh" 2>/dev/null
+
 DEFAULT_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-6}"
 
 MODELS=(
@@ -84,17 +88,22 @@ SESSION_NAME="${SESSION_NAME:-$(basename "$(pwd)")-$(date +%Y%m%d-%H%M)}"
 WORKDIR="${WORKDIR:-$(pwd)}"
 
 if ! command_exists aicoder && ! command_exists claude; then
-  echo "Neither 'aicoder' nor 'claude' CLI found in PATH." >&2
+  ui_fail "Neither 'aicoder' nor 'claude' CLI found in PATH."
   exit 127
 fi
+
+# Load API key from vault if not already in environment
+if [[ -z "${ANTHROPIC_API_KEY:-}" || "${ANTHROPIC_API_KEY:-}" == "your-api-key-here" ]]; then
+  vault_export "anthropic" "ANTHROPIC_API_KEY" 2>/dev/null
+fi
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  echo "Warning: ANTHROPIC_API_KEY not set." >&2
+  ui_warn "Anthropic API key not set — run ${GREEN}kmac secrets set anthropic${NC}"
 fi
 
-echo "Starting session:"
-echo "  Model:   $MODEL"
-echo "  Session: $SESSION_NAME"
-echo "  Dir:     $WORKDIR"
+title_box "Claude Code Session" "🚀"
+echo -e "  ${BOLD}Model:${NC}   ${CYAN}$MODEL${NC}"
+echo -e "  ${BOLD}Session:${NC} $SESSION_NAME"
+echo -e "  ${BOLD}Dir:${NC}     ${DIM}$WORKDIR${NC}"
 echo ""
 
 if command_exists aicoder; then

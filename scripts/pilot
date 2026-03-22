@@ -6,6 +6,10 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_pilot-lib.sh"
+source "$SCRIPT_DIR/_vault.sh" 2>/dev/null
+
+# Load credentials from vault so subprocesses can inherit them
+vault_export_all 2>/dev/null
 
 pilot_ensure_dirs
 

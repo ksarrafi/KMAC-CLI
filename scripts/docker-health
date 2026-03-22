@@ -1,0 +1,446 @@
+#!/bin/bash
+# docker-health — Docker health monitoring with color-coded alerts
+# Usage: docker-health [--json] [--history]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+
+# Docker socket discovery
+_SOCK=""
+for s in "$HOME/.docker/run/docker.sock" /var/run/docker.sock; do
+    [[ -S "$s" ]] && { _SOCK="$s"; break; }
+done
+
+HISTORY_FILE="/tmp/kmac-docker-history.json"
+OUTPUT_JSON=false
+SHOW_HISTORY=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --json) OUTPUT_JSON=true ;;
+        --history) SHOW_HISTORY=true ;;
+    esac
+done
+
+# ─── Engine API helper ───────────────────────────────────────────────────
+
+_api() {
+    [[ -z "$_SOCK" ]] && return 1
+    curl -s --max-time 5 --unix-socket "$_SOCK" "http://localhost${1}" 2>/dev/null
+}
+
+# ─── Thresholds ──────────────────────────────────────────────────────────
+
+_disk_badge() {
+    local pct=$1
+    if (( pct >= 90 )); then   echo "CRITICAL"
+    elif (( pct >= 85 )); then echo "SEVERE"
+    elif (( pct >= 75 )); then echo "WARNING"
+    else                       echo "HEALTHY"
+    fi
+}
+
+_disk_color() {
+    local pct=$1
+    if (( pct >= 90 )); then   echo "$RED"
+    elif (( pct >= 85 )); then echo "\033[38;5;208m"  # orange
+    elif (( pct >= 75 )); then echo "$YELLOW"
+    else                       echo "$GREEN"
+    fi
+}
+
+_disk_icon() {
+    local pct=$1
+    if (( pct >= 90 )); then   echo "🔴"
+    elif (( pct >= 85 )); then echo "🟠"
+    elif (( pct >= 75 )); then echo "🟡"
+    else                       echo "🟢"
+    fi
+}
+
+# ─── Collect all data ────────────────────────────────────────────────────
+
+collect_health() {
+    local ts=$(date +%s)
+
+    # System info
+    local info
+    info=$(_api "/info" | python3 -c "
+import sys,json
+d = json.load(sys.stdin)
+print(d.get('ContainersRunning',0))
+print(d.get('ContainersStopped',0))
+print(d.get('ContainersPaused',0))
+print(d.get('Images',0))
+print(d.get('NCPU',0))
+print(f'{d.get(\"MemTotal\",0)/(1024**3):.1f}')
+" 2>/dev/null)
+
+    local running stopped paused img_count cpus mem_total
+    { read -r running; read -r stopped; read -r paused; read -r img_count
+      read -r cpus; read -r mem_total; } <<< "$info"
+    running=${running:-0}; stopped=${stopped:-0}; paused=${paused:-0}
+
+    # Host disk
+    local disk_line
+    disk_line=$(df -h / 2>/dev/null | tail -1)
+    local disk_total disk_used disk_avail disk_pct
+    disk_total=$(echo "$disk_line" | awk '{print $2}')
+    disk_used=$(echo "$disk_line" | awk '{print $3}')
+    disk_avail=$(echo "$disk_line" | awk '{print $4}')
+    disk_pct=$(echo "$disk_line" | awk '{print $5}' | tr -d '%')
+    disk_pct=${disk_pct:-0}
+
+    # Container stats
+    local containers_json
+    containers_json=$(_api "/containers/json")
+    local container_data=""
+
+    if [[ -n "$containers_json" && "$containers_json" != "null" ]]; then
+        local cids
+        cids=$(echo "$containers_json" | python3 -c "
+import sys,json
+cs = json.load(sys.stdin)
+for c in cs:
+    print(c['Id'][:12] + '|' + c['Names'][0].lstrip('/') + '|' + c.get('Image','') + '|' + c.get('Status',''))
+" 2>/dev/null)
+
+        while IFS='|' read -r cid name image status; do
+            [[ -z "$cid" ]] && continue
+
+            local health
+            health=$(_api "/containers/$cid/json" | python3 -c "
+import sys,json
+d = json.load(sys.stdin)
+h = d.get('State',{}).get('Health',{}).get('Status','none')
+ports = []
+pm = d.get('NetworkSettings',{}).get('Ports',{})
+for k,v in pm.items():
+    if v:
+        for b in v:
+            hp = b.get('HostPort','')
+            if hp and hp not in ports: ports.append(hp)
+print(h + '|' + ','.join(ports))
+" 2>/dev/null)
+
+            local health_status="${health%%|*}"
+            local ports="${health#*|}"
+
+            local stats
+            stats=$(_api "/containers/$cid/stats?stream=false" | python3 -c "
+import sys,json
+s = json.load(sys.stdin)
+cpu_d = s.get('cpu_stats',{}).get('cpu_usage',{}).get('total_usage',0) - s.get('precpu_stats',{}).get('cpu_usage',{}).get('total_usage',0)
+sys_d = s.get('cpu_stats',{}).get('system_cpu_usage',0) - s.get('precpu_stats',{}).get('system_cpu_usage',0)
+ncpu = len(s.get('cpu_stats',{}).get('cpu_usage',{}).get('percpu_usage',[0]))
+cpu = (cpu_d/sys_d*ncpu*100) if sys_d > 0 else 0
+mem = s.get('memory_stats',{}).get('usage',0)
+lim = s.get('memory_stats',{}).get('limit',1)
+mem_pct = (mem/lim*100) if lim > 0 else 0
+if mem >= 1073741824: mem_h = f'{mem/1073741824:.1f}G'
+elif mem >= 1048576: mem_h = f'{mem/1048576:.0f}M'
+else: mem_h = f'{mem/1024:.0f}K'
+print(f'{cpu:.1f}|{mem_pct:.1f}|{mem_h}')
+" 2>/dev/null)
+
+            local cpu_pct="${stats%%|*}"
+            local rest="${stats#*|}"
+            local mem_pct="${rest%%|*}"
+            local mem_h="${rest#*|}"
+
+            container_data+="${cid}|${name}|${image}|${status}|${health_status}|${cpu_pct:-0}|${mem_pct:-0}|${mem_h:-0}|${ports}"$'\n'
+        done <<< "$cids"
+    fi
+
+    # Docker disk usage
+    local docker_df
+    docker_df=$(docker system df --format '{{.Type}}\t{{.Size}}\t{{.Reclaimable}}' 2>/dev/null)
+
+    # Build alerts
+    local -a alerts=()
+    (( disk_pct >= 90 )) && alerts+=("CRITICAL: Host disk at ${disk_pct}% — free space immediately")
+    (( disk_pct >= 85 && disk_pct < 90 )) && alerts+=("SEVERE: Host disk at ${disk_pct}% — cleanup recommended")
+    (( disk_pct >= 75 && disk_pct < 85 )) && alerts+=("WARNING: Host disk at ${disk_pct}% — monitor closely")
+
+    while IFS='|' read -r _ name _ _ _ cpu_pct mem_pct _ _; do
+        [[ -z "$name" ]] && continue
+        local cpu_int=${cpu_pct%.*}
+        local mem_int=${mem_pct%.*}
+        (( cpu_int > 80 )) && alerts+=("HIGH CPU: ${name} at ${cpu_pct}%")
+        (( mem_int > 90 )) && alerts+=("CRITICAL MEM: ${name} at ${mem_pct}% — OOM risk")
+        (( mem_int > 75 && mem_int <= 90 )) && alerts+=("HIGH MEM: ${name} at ${mem_pct}%")
+    done <<< "$container_data"
+
+    # Save to history
+    _save_history "$ts" "$disk_pct" "$running" "${#alerts[@]}"
+
+    # ─── JSON output ──────────────────────────────────────────────────
+    if $OUTPUT_JSON; then
+        local tmp_containers="/tmp/kmac-dh-containers.$$"
+        local tmp_alerts="/tmp/kmac-dh-alerts.$$"
+        printf '%s' "$container_data" > "$tmp_containers"
+        printf '%s\n' "${alerts[@]}" > "$tmp_alerts"
+
+        python3 -c "
+import json, sys
+containers = []
+with open('$tmp_containers') as f:
+    for line in f:
+        line = line.strip()
+        if not line: continue
+        parts = line.split('|')
+        if len(parts) >= 9:
+            containers.append({
+                'id': parts[0], 'name': parts[1], 'image': parts[2],
+                'status': parts[3], 'health': parts[4],
+                'cpu_pct': float(parts[5] or 0), 'mem_pct': float(parts[6] or 0),
+                'mem_usage': parts[7], 'ports': [p for p in parts[8].split(',') if p]
+            })
+alerts_list = []
+with open('$tmp_alerts') as f:
+    for line in f:
+        line = line.strip()
+        if line: alerts_list.append(line)
+print(json.dumps({
+    'timestamp': $ts,
+    'host': {'disk_pct': $disk_pct, 'disk_used': '$disk_used', 'disk_total': '$disk_total', 'disk_avail': '$disk_avail'},
+    'docker': {'running': $running, 'stopped': $stopped, 'paused': $paused, 'images': ${img_count:-0}},
+    'containers': containers,
+    'alerts': alerts_list,
+    'disk_status': '$(_disk_badge $disk_pct)',
+}, indent=2))
+" 2>/dev/null
+        rm -f "$tmp_containers" "$tmp_alerts"
+        return
+    fi
+
+    # ─── Display ──────────────────────────────────────────────────────
+    title_box "Docker Health Monitor" "🏥"
+
+    # Disk status bar
+    local disk_color
+    disk_color=$(_disk_color $disk_pct)
+    local icon
+    icon=$(_disk_icon $disk_pct)
+    local badge
+    badge=$(_disk_badge $disk_pct)
+    local bar_w=30 filled=$(( disk_pct * 30 / 100 )) empty=$(( 30 - disk_pct * 30 / 100 ))
+    local bar=""
+    for (( b=0; b<filled; b++ )); do bar+="▇"; done
+    for (( b=0; b<empty; b++ )); do bar+="░"; done
+
+    echo -e "  ${BOLD}Host Disk${NC}  ${icon} ${badge}"
+    printf "  ${disk_color}%s${NC} %s%%  (%s used / %s total, %s free)\n" "$bar" "$disk_pct" "$disk_used" "$disk_total" "$disk_avail"
+    echo ""
+
+    # Container summary
+    echo -e "  ${BOLD}Containers${NC}  ${GREEN}${running} running${NC}  ${YELLOW}${paused} paused${NC}  ${RED}${stopped} stopped${NC}  │  Images: ${BOLD}${img_count:-0}${NC}"
+    echo ""
+
+    # Container table
+    if [[ -n "$container_data" ]]; then
+        echo -e "  ${BOLD}Container Health${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..78})${NC}"
+        printf "  %-22s %-10s %7s %7s %8s  %s\n" "NAME" "HEALTH" "CPU" "MEM" "MEM USE" "PORTS"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..78})${NC}"
+
+        while IFS='|' read -r cid name image status health cpu mem mem_h ports; do
+            [[ -z "$name" ]] && continue
+
+            local h_badge=""
+            case "$health" in
+                healthy)   h_badge="${GREEN}● healthy${NC} " ;;
+                unhealthy) h_badge="${RED}● unhealth${NC}" ;;
+                starting)  h_badge="${YELLOW}● start${NC}  " ;;
+                *)         h_badge="${DIM}○ none${NC}   " ;;
+            esac
+
+            local cpu_int=${cpu%.*}
+            local mem_int=${mem%.*}
+            local cpu_c="$GREEN"; (( cpu_int > 50 )) && cpu_c="$YELLOW"; (( cpu_int > 80 )) && cpu_c="$RED"
+            local mem_c="$GREEN"; (( mem_int > 50 )) && mem_c="$YELLOW"; (( mem_int > 75 )) && mem_c="$RED"
+
+            local port_display=""
+            if [[ -n "$ports" ]]; then
+                port_display="${CYAN}:${ports}${NC}"
+            fi
+
+            printf "  %-22s %b ${cpu_c}%6s%%${NC} ${mem_c}%6s%%${NC} %8s  %b\n" \
+                "${name:0:22}" "$h_badge" "$cpu" "$mem" "$mem_h" "$port_display"
+        done <<< "$container_data"
+        echo ""
+    fi
+
+    # Docker disk usage
+    if [[ -n "$docker_df" ]]; then
+        echo -e "  ${BOLD}Docker Disk${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..50})${NC}"
+        printf "  %-16s %12s %14s\n" "TYPE" "SIZE" "RECLAIMABLE"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..50})${NC}"
+        while IFS=$'\t' read -r dtype sz reclaim; do
+            printf "  %-16s %12s %14s\n" "$dtype" "$sz" "$reclaim"
+        done <<< "$docker_df"
+        echo ""
+    fi
+
+    # Alerts
+    if (( ${#alerts[@]} > 0 )); then
+        echo -e "  ${BOLD}${RED}Alerts (${#alerts[@]})${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..50})${NC}"
+        for alert in "${alerts[@]}"; do
+            local a_color="$YELLOW"
+            [[ "$alert" == CRITICAL* ]] && a_color="$RED"
+            [[ "$alert" == SEVERE* ]] && a_color="\033[38;5;208m"
+            [[ "$alert" == HIGH* ]] && a_color="$YELLOW"
+            echo -e "  ${a_color}▸ ${alert}${NC}"
+        done
+        echo ""
+    else
+        echo -e "  ${GREEN}✓ No alerts — all systems healthy${NC}"
+        echo ""
+    fi
+
+    # Quick actions with port links
+    if [[ -n "$container_data" ]]; then
+        local has_ports=false
+        while IFS='|' read -r _ name _ _ _ _ _ _ ports; do
+            [[ -n "$ports" ]] && has_ports=true
+        done <<< "$container_data"
+
+        if $has_ports; then
+            echo -e "  ${BOLD}Quick Links${NC}"
+            while IFS='|' read -r _ name _ _ _ _ _ _ ports; do
+                [[ -z "$ports" ]] && continue
+                IFS=',' read -ra port_arr <<< "$ports"
+                local seen_ports=""
+                for p in "${port_arr[@]}"; do
+                    [[ -z "$p" ]] && continue
+                    [[ " $seen_ports " == *" $p "* ]] && continue
+                    seen_ports+=" $p"
+                    echo -e "  ${CYAN}→${NC} ${name}: ${BOLD}http://localhost:${p}${NC}"
+                done
+            done <<< "$container_data"
+            echo ""
+        fi
+    fi
+}
+
+# ─── History ─────────────────────────────────────────────────────────────
+
+_save_history() {
+    local ts="$1" disk="$2" containers="$3" alerts="$4"
+    python3 -c "
+import json, os, time
+f = '$HISTORY_FILE'
+data = []
+if os.path.exists(f):
+    try:
+        with open(f) as fh: data = json.load(fh)
+    except: pass
+cutoff = time.time() - 86400  # keep 24h
+data = [d for d in data if d.get('ts',0) > cutoff]
+data.append({'ts': $ts, 'disk_pct': $disk, 'containers': $containers, 'alerts': $alerts})
+with open(f, 'w') as fh: json.dump(data, fh)
+" 2>/dev/null
+}
+
+show_history() {
+    title_box "Docker Health History" "📊"
+
+    if [[ ! -f "$HISTORY_FILE" ]]; then
+        echo -e "  ${DIM}No history data yet. Run 'docker-health' first to start collecting.${NC}"
+        return
+    fi
+
+    python3 -c "
+import json, time
+
+with open('$HISTORY_FILE') as f:
+    data = json.load(f)
+
+if not data:
+    print('  No data points.')
+else:
+    print(f'  {len(data)} data points over last 24h')
+    print()
+
+    # Show last 60 minutes as a mini graph
+    cutoff = time.time() - 3600
+    recent = [d for d in data if d['ts'] > cutoff]
+
+    if recent:
+        print('  \033[1mDisk Usage (last 60 min)\033[0m')
+        max_val = max(d['disk_pct'] for d in recent)
+        min_val = min(d['disk_pct'] for d in recent)
+        print(f'  Range: {min_val}% — {max_val}%')
+        print()
+
+        # ASCII sparkline
+        cols = min(60, len(recent))
+        step = max(1, len(recent) // cols)
+        sparkline = ''
+        blocks = ' ▁▂▃▄▅▆▇'
+        for i in range(0, len(recent), step):
+            v = recent[i]['disk_pct']
+            idx = min(8, int((v - min_val + 1) / max(max_val - min_val + 1, 1) * 8))
+            sparkline += blocks[idx]
+
+        print(f'  {sparkline}')
+        start_t = time.strftime('%H:%M', time.localtime(recent[0]['ts']))
+        end_t = time.strftime('%H:%M', time.localtime(recent[-1]['ts']))
+        print(f'  \033[2m{start_t}' + ' ' * (len(sparkline) - 10) + f'{end_t}\033[0m')
+        print()
+
+    # Summary table
+    print('  \033[1mRecent Snapshots\033[0m')
+    print('  \033[2m' + '─' * 50 + '\033[0m')
+    for d in data[-10:]:
+        t = time.strftime('%Y-%m-%d %H:%M', time.localtime(d['ts']))
+        disk = d['disk_pct']
+        containers = d.get('containers', 0)
+        alerts = d.get('alerts', 0)
+        a_str = f'\033[0;31m{alerts} alerts\033[0m' if alerts > 0 else '\033[0;32m✓\033[0m'
+        print(f'  {t}  Disk: {disk}%  Containers: {containers}  {a_str}')
+" 2>/dev/null
+}
+
+# ─── Entry point ─────────────────────────────────────────────────────────
+
+if [[ -z "$_SOCK" ]]; then
+    if $OUTPUT_JSON; then
+        echo '{"error": "Docker not running"}'
+    else
+        echo -e "  ${RED}Docker socket not found. Is Docker Desktop running?${NC}"
+    fi
+    exit 1
+fi
+
+if $SHOW_HISTORY; then
+    show_history
+    [[ -t 1 ]] && pause
+elif $OUTPUT_JSON; then
+    collect_health
+else
+    # Show a spinner while collecting container stats (can take several seconds)
+    if [[ -t 1 ]]; then
+        _frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+        _fi=0
+        _tmpout="/tmp/kmac-dh-output.$$"
+        collect_health > "$_tmpout" 2>&1 &
+        _pid=$!
+        tput civis 2>/dev/null
+        while kill -0 "$_pid" 2>/dev/null; do
+            printf "\r  ${CYAN}${_frames[$_fi]}${NC} Collecting Docker health data... "
+            _fi=$(( (_fi + 1) % ${#_frames[@]} ))
+            sleep 0.08
+        done
+        tput cnorm 2>/dev/null
+        printf "\r\033[K"
+        wait "$_pid" 2>/dev/null
+        cat "$_tmpout"
+        rm -f "$_tmpout"
+        pause
+    else
+        collect_health
+    fi
+fi

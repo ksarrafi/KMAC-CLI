@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KMac Docker Health</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Mono',Monaco,monospace;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:16px}
+a{color:#38bdf8;text-decoration:none}
+a:hover{text-decoration:underline}
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px}
+.header h1{font-size:1.4rem;display:flex;align-items:center;gap:8px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.dot.green{background:#4ade80}.dot.red{background:#ef4444}.dot.yellow{background:#facc15}
+.auth{display:flex;gap:8px;align-items:center}
+.auth input{background:#1e293b;border:1px solid #334155;border-radius:6px;padding:6px 10px;color:#e2e8f0;font-size:0.8rem;width:200px}
+.auth button{background:#334155;border:none;border-radius:6px;padding:6px 12px;color:#e2e8f0;cursor:pointer;font-size:0.8rem}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px}
+.card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px}
+.card .label{font-size:0.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em}
+.card .value{font-size:2rem;font-weight:700;margin:4px 0}
+.card .sub{font-size:0.8rem;color:#64748b}
+.progress{height:8px;background:#334155;border-radius:4px;margin-top:8px;overflow:hidden}
+.progress .fill{height:100%;border-radius:4px;transition:width 0.5s}
+.section{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px;margin-bottom:16px}
+.section h2{font-size:1rem;margin-bottom:12px;color:#f1f5f9}
+table{width:100%;border-collapse:collapse;font-size:0.85rem}
+th{text-align:left;color:#94a3b8;font-weight:500;padding:8px 6px;border-bottom:1px solid #334155}
+td{padding:8px 6px;border-bottom:1px solid #1e293b}
+tr:hover{background:#172033}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.75rem;font-weight:600}
+.badge.green{background:#064e3b;color:#4ade80}
+.badge.yellow{background:#422006;color:#facc15}
+.badge.orange{background:#431407;color:#fb923c}
+.badge.red{background:#450a0a;color:#ef4444}
+.badge.blue{background:#0c4a6e;color:#38bdf8}
+.alert{padding:8px 12px;border-radius:6px;margin-bottom:6px;font-size:0.85rem;display:flex;align-items:center;gap:8px}
+.alert.critical{background:#450a0a;border-left:3px solid #ef4444}
+.alert.severe{background:#431407;border-left:3px solid #fb923c}
+.alert.warning{background:#422006;border-left:3px solid #facc15}
+.alert.info{background:#0c4a6e;border-left:3px solid #38bdf8}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.btn{background:#334155;border:1px solid #475569;border-radius:6px;padding:8px 16px;color:#e2e8f0;cursor:pointer;font-size:0.85rem;transition:background 0.2s}
+.btn:hover{background:#475569}
+.btn.danger{border-color:#ef4444;color:#fca5a5}
+.btn.danger:hover{background:#450a0a}
+.chart-wrap{height:200px;margin-top:8px}
+.status-line{font-size:0.75rem;color:#64748b;margin-top:8px;text-align:right}
+@media(max-width:600px){
+  .header{flex-direction:column;align-items:flex-start}
+  .cards{grid-template-columns:1fr}
+  table{font-size:0.75rem}
+  td,th{padding:6px 4px}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span class="dot" id="statusDot"></span> KMac Docker Health</h1>
+  <div class="auth">
+    <input type="password" id="tokenInput" placeholder="Auth token" />
+    <button onclick="saveToken()">Connect</button>
+  </div>
+</div>
+
+<div class="cards" id="cards"></div>
+
+<div class="section">
+  <h2>Containers</h2>
+  <div style="overflow-x:auto"><table><thead id="ctHead"></thead><tbody id="ctBody"></tbody></table></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div class="section">
+    <h2>Docker Disk</h2>
+    <table><thead><tr><th>Type</th><th>Size</th><th>Reclaimable</th></tr></thead><tbody id="dfBody"></tbody></table>
+  </div>
+  <div class="section">
+    <h2>Alerts</h2>
+    <div id="alertsList"></div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>60-Minute Trend</h2>
+  <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>Quick Actions</h2>
+  <div class="actions">
+    <button class="btn" onclick="cleanup('containers')">Prune Containers</button>
+    <button class="btn" onclick="cleanup('images')">Prune Images</button>
+    <button class="btn" onclick="cleanup('volumes')">Prune Volumes</button>
+    <button class="btn" onclick="cleanup('cache')">Prune Build Cache</button>
+    <button class="btn danger" onclick="cleanup('all')">Prune Everything</button>
+  </div>
+  <div id="cleanupResult" style="margin-top:8px;font-size:0.85rem"></div>
+</div>
+
+<div class="status-line" id="statusLine"></div>
+
+<script>
+let token = localStorage.getItem('kmac_token') || '';
+let chart = null;
+const tokenInput = document.getElementById('tokenInput');
+tokenInput.value = token;
+
+function saveToken() {
+  token = tokenInput.value.trim();
+  localStorage.setItem('kmac_token', token);
+  fetchAll();
+}
+
+function api(path, opts = {}) {
+  const headers = {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'};
+  return fetch(path, {...opts, headers}).then(r => r.json()).catch(() => null);
+}
+
+function diskColor(pct) {
+  if (pct >= 90) return '#ef4444';
+  if (pct >= 85) return '#fb923c';
+  if (pct >= 75) return '#facc15';
+  return '#4ade80';
+}
+
+function healthBadge(h) {
+  const map = {healthy:'green', unhealthy:'red', starting:'yellow', none:'blue'};
+  return `<span class="badge ${map[h]||'blue'}">${h||'none'}</span>`;
+}
+
+function portLinks(ports) {
+  if (!ports) return '';
+  const ps = ports.match(/\d+\.\d+\.\d+\.\d+:(\d+)/g) || [];
+  return ps.map(p => {
+    const port = p.split(':')[1];
+    return `<a href="http://localhost:${port}" target="_blank">:${port}</a>`;
+  }).join(' ');
+}
+
+function renderCards(d) {
+  const disk = d.host_disk || {};
+  const dc = d.docker || {};
+  const ac = d.alert_count || 0;
+  const color = diskColor(disk.pct || 0);
+  document.getElementById('statusDot').className = `dot ${ac > 0 ? (disk.pct >= 90 ? 'red' : 'yellow') : 'green'}`;
+  document.getElementById('cards').innerHTML = `
+    <div class="card"><div class="label">Running</div><div class="value" style="color:#4ade80">${dc.running||0}</div><div class="sub">${dc.stopped||0} stopped</div></div>
+    <div class="card"><div class="label">Host Disk</div><div class="value" style="color:${color}">${disk.pct||0}%</div><div class="sub">${disk.used||'?'} / ${disk.total||'?'} (${disk.avail||'?'} free)</div><div class="progress"><div class="fill" style="width:${disk.pct||0}%;background:${color}"></div></div></div>
+    <div class="card"><div class="label">Alerts</div><div class="value" style="color:${ac?'#ef4444':'#4ade80'}">${ac}</div><div class="sub">${disk.status||'HEALTHY'}</div></div>`;
+}
+
+function renderContainers(containers) {
+  document.getElementById('ctHead').innerHTML = '<tr><th>Name</th><th>Health</th><th>CPU%</th><th>Mem%</th><th>Mem Usage</th><th>Ports</th></tr>';
+  document.getElementById('ctBody').innerHTML = (containers||[]).map(c => {
+    const cpuV = c.cpu_val||0, memV = c.mem_val||0;
+    const cpuC = cpuV>80?'#ef4444':cpuV>50?'#facc15':'#4ade80';
+    const memC = memV>90?'#ef4444':memV>75?'#facc15':'#4ade80';
+    return `<tr><td><strong>${c.name||''}</strong><br><span style="color:#64748b;font-size:0.75rem">${c.image||''}</span></td><td>${healthBadge(c.state==='running'?'healthy':'none')}</td><td style="color:${cpuC}">${(c.cpu_val||0).toFixed(1)}%</td><td style="color:${memC}">${(c.mem_val||0).toFixed(1)}%</td><td>${c.mem_usage||''}</td><td>${portLinks(c.ports)}</td></tr>`;
+  }).join('');
+}
+
+function renderDockerDisk(dd) {
+  document.getElementById('dfBody').innerHTML = (dd||[]).map(d => `<tr><td>${d.type||''}</td><td>${d.size||''}</td><td>${d.reclaimable||''}</td></tr>`).join('');
+}
+
+function renderAlerts(alerts) {
+  const el = document.getElementById('alertsList');
+  if (!alerts || !alerts.length) { el.innerHTML = '<div style="color:#4ade80">✓ All systems healthy</div>'; return; }
+  el.innerHTML = alerts.map(a => {
+    const cls = a.level === 'CRITICAL' ? 'critical' : a.level === 'SEVERE' ? 'severe' : a.level === 'WARNING' ? 'warning' : 'info';
+    return `<div class="alert ${cls}">${a.message}</div>`;
+  }).join('');
+}
+
+function renderChart(history) {
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  const labels = (history||[]).map(h => new Date(h.ts*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+  const diskData = (history||[]).map(h => h.disk_pct);
+  const cpuData = (history||[]).map(h => h.avg_cpu);
+  const memData = (history||[]).map(h => h.avg_mem);
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {label:'Disk %',data:diskData,borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,0.1)',fill:true,tension:0.3,pointRadius:0},
+        {label:'Avg CPU %',data:cpuData,borderColor:'#4ade80',tension:0.3,pointRadius:0},
+        {label:'Avg Mem %',data:memData,borderColor:'#facc15',tension:0.3,pointRadius:0},
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      scales: {y:{min:0,max:100,grid:{color:'#1e293b'},ticks:{color:'#64748b'}},x:{grid:{color:'#1e293b'},ticks:{color:'#64748b',maxTicksLimit:10}}},
+      plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}}}
+    }
+  });
+}
+
+async function fetchAll() {
+  if (!token) return;
+  const [health, hist] = await Promise.all([api('/api/docker/health'), api('/api/docker/history?minutes=60')]);
+  if (health) {
+    renderCards(health);
+    renderContainers(health.containers);
+    renderDockerDisk(health.docker_disk);
+    renderAlerts(health.alerts);
+  }
+  if (hist) renderChart(hist.history);
+  document.getElementById('statusLine').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+}
+
+async function cleanup(type) {
+  if (type === 'all' && !confirm('This will remove ALL unused Docker resources. Continue?')) return;
+  if (!confirm(`Prune ${type}?`)) return;
+  const r = await api('/api/docker/cleanup', {method:'POST', body:JSON.stringify({type})});
+  document.getElementById('cleanupResult').innerHTML = r?.ok ? `<span style="color:#4ade80">✓ ${type} cleaned</span>` : `<span style="color:#ef4444">Error: ${r?.error||r?.output||'Failed'}</span>`;
+  setTimeout(fetchAll, 2000);
+}
+
+fetchAll();
+setInterval(fetchAll, 10000);
+</script>
+</body>
+</html>

@@ -36,6 +36,9 @@ xcuserdata/
 *.pem
 *.key
 credentials.*
+vault.enc
+integrations.json
+docker-vault-token
 
 # Deploy and local config
 deploy.sh

@@ -305,6 +305,7 @@ print(f'{name} {ec} {oom} {img} {fin}')")
             docker container prune -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
             echo -e "  ${GREEN}✓ Cleaned up stopped containers${NC}"
             ;;
+        m|M|"") ;;
     esac
 }
 
@@ -878,6 +879,46 @@ do_restart() {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
+# 9. WEB DASHBOARD LAUNCHER
+# ═════════════════════════════════════════════════════════════════════════════
+
+_open_web_dashboard() {
+    local server_dir="$SCRIPT_DIR/../server"
+    local port
+    port=$(python3 -c "
+import sys; sys.path.insert(0, '$server_dir')
+try:
+    from config import PORT
+    print(PORT)
+except:
+    print(8888)
+" 2>/dev/null)
+    port="${port:-8888}"
+
+    local url="http://localhost:${port}/docker-dashboard"
+    echo -e "  ${DIM}Opening Docker Health Dashboard...${NC}"
+    echo -e "  ${BOLD}${url}${NC}"
+
+    if curl -sf --max-time 2 "http://localhost:${port}/api/ping" &>/dev/null; then
+        open "$url" 2>/dev/null
+    else
+        echo ""
+        echo -e "  ${YELLOW}KMac Pilot Server not running.${NC}"
+        echo -e "  ${DIM}Start it with: cd server && python3 app.py${NC}"
+        echo ""
+        echo -e "  Start server now? (y/N)"
+        read -r -p "  > " yn
+        if [[ "$yn" == [yY]* ]]; then
+            echo -e "  ${DIM}Starting server in background...${NC}"
+            (cd "$server_dir" && python3 app.py &>/dev/null &)
+            sleep 2
+            open "$url" 2>/dev/null
+            echo -e "  ${GREEN}✓ Server started and dashboard opened${NC}"
+        fi
+    fi
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
 # INTERACTIVE MENU
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -904,6 +945,8 @@ do_menu() {
         echo -e "   ${GREEN}1${NC})  Health Dashboard        ${DIM}live stats, health checks, alerts${NC}"
         echo -e "   ${GREEN}2${NC})  Crash Detective          ${DIM}find OOM kills & crashes${NC}"
         echo -e "   ${GREEN}3${NC})  Disk Monitor             ${DIM}images, volumes, reclaimable${NC}"
+        echo -e "   ${GREEN}h${NC})  ${BOLD}Health Report${NC}            ${DIM}color-coded thresholds + history${NC}"
+        echo -e "   ${GREEN}w${NC})  ${BOLD}Web Dashboard${NC}            ${DIM}open in browser${NC}"
         echo ""
         echo -e "  ${DIM}── Manage ───────────────────────────${NC}"
         echo -e "   ${GREEN}4${NC})  Compose Deployments      ${DIM}projects, logs, restart${NC}"
@@ -926,6 +969,8 @@ do_menu() {
             1) do_dashboard ;;
             2) do_crashes ;;
             3) do_disk ;;
+            h|H) bash "$SCRIPT_DIR/docker-health" ;;
+            w|W) _open_web_dashboard ;;
             4) do_compose ;;
             5) do_restart ;;
             6) do_quick_clean ;;
@@ -945,7 +990,8 @@ do_menu() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 case "${1:-}" in
-    dashboard|health|status) do_dashboard; [[ -t 1 ]] && pause ;;
+    dashboard|status)        do_dashboard; [[ -t 1 ]] && pause ;;
+    health)                  bash "$SCRIPT_DIR/docker-health" "${@:2}" ;;
     crashes|crash)           do_crashes; [[ -t 1 ]] && pause ;;
     disk)                    do_disk; [[ -t 1 ]] && pause ;;
     compose)                 do_compose; [[ -t 1 ]] && pause ;;
@@ -953,5 +999,6 @@ case "${1:-}" in
     clean|cleanup)           do_quick_clean; [[ -t 1 ]] && pause ;;
     scheduler|cron)          do_scheduler; [[ -t 1 ]] && pause ;;
     mcp)                     do_mcp; [[ -t 1 ]] && pause ;;
+    web)                     _open_web_dashboard; [[ -t 1 ]] && pause ;;
     *)                       do_menu ;;
 esac

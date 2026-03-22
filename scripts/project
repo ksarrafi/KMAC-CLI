@@ -5,6 +5,9 @@
 #        project -c FlightPrep  (open in Claude)
 #        project -x FlightPrep  (open in Cursor agent)
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+
 PROJECTS_DIR="$HOME/Projects"
 ACTION=""
 PROJECT_NAME=""
@@ -50,16 +53,14 @@ if [[ -z "$PROJECT_NAME" ]]; then
     fi
 fi
 
-[[ -z "$PROJECT_NAME" ]] && { echo "No project selected."; exit 1; }
+[[ -z "$PROJECT_NAME" ]] && { ui_warn "No project selected."; exit 1; }
 
 PROJECT_PATH="$PROJECTS_DIR/$PROJECT_NAME"
-[[ ! -d "$PROJECT_PATH" ]] && { echo "Not found: $PROJECT_PATH"; exit 1; }
+[[ ! -d "$PROJECT_PATH" ]] && { ui_fail "Not found: $PROJECT_PATH"; exit 1; }
 
 # Show project dashboard
 if [[ -z "$ACTION" ]]; then
-    echo ""
-    echo -e "\033[1m$PROJECT_NAME\033[0m"
-    echo ""
+    title_box "$PROJECT_NAME" "📁"
 
     # Git info
     if [[ -d "$PROJECT_PATH/.git" ]]; then
@@ -70,7 +71,7 @@ if [[ -z "$ACTION" ]]; then
 
         echo "  Branch:   $BRANCH  ($BRANCHES total)"
         echo "  Last:     $LAST"
-        [[ "$DIRTY" -gt 0 ]] && echo -e "  Changes:  \033[33m$DIRTY uncommitted file(s)\033[0m"
+        [[ "$DIRTY" -gt 0 ]] && echo -e "  Changes:  ${YELLOW}$DIRTY uncommitted file(s)${NC}"
 
         # Recent branches
         echo ""
@@ -83,25 +84,23 @@ if [[ -z "$ACTION" ]]; then
     # Check for running services
     echo ""
     echo "  Services:"
-    local found_svc=false
-    # Check common dev ports
+    found_svc=false
     for port in 3000 3001 5000 5173 8000 8080 4200; do
-        local pid_on_port=$(lsof -ti :"$port" 2>/dev/null | head -1)
+        pid_on_port=$(lsof -ti :"$port" 2>/dev/null | head -1)
         if [[ -n "$pid_on_port" ]]; then
-            local pname=$(ps -p "$pid_on_port" -o comm= 2>/dev/null)
-            echo -e "    \033[32m●\033[0m :$port  ($pname)"
+            pname=$(ps -p "$pid_on_port" -o comm= 2>/dev/null)
+            echo -e "    ${GREEN}●${NC} :$port  ($pname)"
             found_svc=true
         fi
     done
-    $found_svc || echo -e "    \033[2m○ No dev servers detected\033[0m"
+    $found_svc || echo -e "    ${DIM}○ No dev servers detected${NC}"
 
-    # Check for CLAUDE.md
-    [[ -f "$PROJECT_PATH/CLAUDE.md" ]] && echo -e "\n  \033[32m✓\033[0m CLAUDE.md found"
+    [[ -f "$PROJECT_PATH/CLAUDE.md" ]] && echo -e "\n  ${GREEN}✓${NC} CLAUDE.md found"
 
     echo ""
-    echo "  1) Claude Code    2) Cursor Agent    3) cd    4) IDE    5) AI Review"
+    echo -e "  ${GREEN}1${NC}) Claude Code    ${GREEN}2${NC}) Cursor Agent    ${GREEN}3${NC}) cd    ${GREEN}4${NC}) IDE    ${GREEN}5${NC}) AI Review"
     echo ""
-    read -r -p "Action [1-5]: " act
+    read -r -p "  Action [1-5]: " act
     case "$act" in
         1) ACTION="claude" ;;
         2) ACTION="cursor" ;;
@@ -116,6 +115,6 @@ case "$ACTION" in
     claude)  echo "Starting Claude Code..."; cd "$PROJECT_PATH" && exec claude ;;
     cursor)  echo "Starting Cursor Agent..."; cd "$PROJECT_PATH" && exec cursor agent ;;
     ide)     code "$PROJECT_PATH" 2>/dev/null || cursor "$PROJECT_PATH" 2>/dev/null || open "$PROJECT_PATH" ;;
-    review)  cd "$PROJECT_PATH" && exec bash "$(echo ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit/scripts/review)" ;;
+    review)  cd "$PROJECT_PATH" && exec bash "$SCRIPT_DIR/review" ;;
     cd|*)    echo "cd $PROJECT_PATH"; cd "$PROJECT_PATH" && exec $SHELL ;;
 esac

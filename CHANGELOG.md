@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.4.0 — 2026-03-22
+
+### New: Triple-Backend Secrets Vault
+- **Credential Manager** (`kmac secrets`): full-featured secret management with 3 backends
+  - macOS Keychain (hardware-backed, default on macOS)
+  - Encrypted File Vault (AES-256-CBC, portable, syncable)
+  - Docker Vault (containerized REST API, volume-portable)
+- **Integration Registry**: 19 pre-configured services across 6 categories (AI, DevOps, Cloud, Infra, Docker, Services)
+- **Custom integrations**: register any API key, token, or secret with a category and env var mapping
+- **Guided setup**: browser auto-open to signup pages, step-by-step instructions, key validation via API calls
+- **Auto-export**: vault credentials loaded into environment on toolkit startup — all tools use the vault automatically
+- **Backward compatible**: legacy Keychain entries auto-migrated to new naming scheme
+
+### New: Docker Health Monitoring
+- **CLI** (`kmac docker-health`): real-time container stats (CPU%, memory%), host disk usage, color-coded alerts
+- **Web Dashboard** (`/docker-dashboard`): Chart.js graphs, container list, disk breakdown, quick cleanup actions
+- **History tracking** (`--history`): 24-hour trend data with ASCII sparklines
+- **JSON output** (`--json`): structured health data for automation and API consumption
+
+### UX Overhaul
+- **First-run welcome wizard**: guided onboarding with health check, API key setup (opens browser, validates keys), quick tour
+- **Redesigned main menu**: Code Review and Smart Commit moved to Dev section, Sessions removed, rotating tips in footer
+- **Shared UI library** (`_ui.sh`): spinner, spin_while, confirm, section, menu_option, progress indicators, random tips
+- **Standardized 12 scripts**: title_box headers, consistent colors, error formatting across ask, sessions, killport, dotbackup, claudeme, cursoragent, project, docker-health, remote-terminal, pilot, update-check, docker
+- **Fixed bugs**: broken back handlers in docker crashes and update-check menus, `local` outside functions in project/ask, hardcoded iCloud paths in aliases.sh and project
+- **Portable aliases**: aliases.sh uses `$_KMAC_ALIAS_DIR` instead of hardcoded iCloud glob paths
+- **Health check** now shows vault backend, configured integration count, and key status via vault API
+
 ## 2.3.0 — 2026-03-19
 
 ### New: KMac Pilot — Remote AI Agent Control

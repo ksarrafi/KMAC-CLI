@@ -3,24 +3,29 @@
 # Usage: cask "add error handling to server.js"
 #        cask   (interactive prompt)
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+
 PROMPT="$*"
 
 if [[ -z "$PROMPT" ]]; then
     if [[ -t 0 ]]; then
-        read -r -p "Cursor Agent task: " PROMPT
+        title_box "Cursor Agent" "⚡"
+        read -r -p "  Task: " PROMPT
+        echo ""
     else
         PROMPT=$(cat)
     fi
 fi
 
 if [[ -z "$PROMPT" ]]; then
-    echo "Usage: cask \"your task description\""
+    echo -e "  ${BOLD}Usage:${NC} cask \"your task description\""
     exit 1
 fi
 
 if ! command -v cursor &>/dev/null; then
-    echo "Error: cursor CLI not found."
-    echo "Install: https://cursor.com/download"
+    ui_fail "cursor CLI not found"
+    ui_dim "Install: https://cursor.com/download"
     exit 1
 fi
 
