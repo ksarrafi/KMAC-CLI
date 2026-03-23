@@ -1,0 +1,642 @@
+#!/bin/bash
+# software — Install & manage developer tools, AI CLIs, and apps
+# Usage: software                 (interactive menu)
+#        software install <name>  (install specific tool)
+#        software list            (show all with status)
+#        software update          (update all installed)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+[[ -z "${KMAC_PLATFORM_LOADED:-}" ]] && source "$SCRIPT_DIR/_platform.sh"
+
+# ─── Software Registry ──────────────────────────────────────────────────
+# Each entry: name|category|check_cmd|install_cmd|description|url
+# Categories: dev, ai, app, infra, shell
+
+REGISTRY=(
+    # ── Dev Essentials ──
+    "git|dev|git|brew install git|Distributed version control|https://git-scm.com"
+    "python3|dev|python3|brew install python|Python interpreter|https://python.org"
+    "node|dev|node|brew install node|Node.js runtime|https://nodejs.org"
+    "go|dev|go|brew install go|Go programming language|https://go.dev"
+    "rust|dev|rustc|curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh -s -- -y|Rust toolchain via rustup|https://rustup.rs"
+    "jq|dev|jq|brew install jq|JSON processor|https://jqlang.github.io/jq"
+    "ripgrep|dev|rg|brew install ripgrep|Fast recursive search (rg)|https://github.com/BurntSushi/ripgrep"
+    "fd|dev|fd|brew install fd|Fast file finder|https://github.com/sharkdp/fd"
+    "fzf|dev|fzf|brew install fzf|Fuzzy finder|https://github.com/junegunn/fzf"
+    "bat|dev|bat|brew install bat|Cat with syntax highlighting|https://github.com/sharkdp/bat"
+    "eza|dev|eza|brew install eza|Modern ls replacement|https://eza.rocks"
+    "tmux|dev|tmux|brew install tmux|Terminal multiplexer|https://github.com/tmux/tmux"
+    "gh|dev|gh|brew install gh|GitHub CLI|https://cli.github.com"
+
+    # ── AI CLIs ──
+    "claude|ai|claude|npm install -g @anthropic-ai/claude-code|Claude Code — AI coding agent|https://docs.anthropic.com/en/docs/claude-code"
+    "chatgpt|ai|chatgpt|brew install --cask chatgpt|ChatGPT desktop app|https://openai.com/chatgpt/desktop"
+    "gemini|ai|gemini|npm install -g @anthropic-ai/gemini-cli 2>/dev/null \|\| pip3 install google-generativeai|Google Gemini CLI|https://ai.google.dev"
+    "ollama|ai|ollama|brew install ollama|Run LLMs locally|https://ollama.com"
+    "aider|ai|aider|pip3 install aider-chat|AI pair programming in terminal|https://aider.chat"
+    "copilot|ai|gh copilot|gh extension install github/gh-copilot|GitHub Copilot CLI|https://github.com/github/gh-copilot"
+
+    # ── Editors & Apps ──
+    "cursor|app|cursor|brew install --cask cursor|Cursor AI editor|https://cursor.com"
+    "vscode|app|code|brew install --cask visual-studio-code|Visual Studio Code|https://code.visualstudio.com"
+    "warp|app|warp|brew install --cask warp|Warp terminal|https://warp.dev"
+    "iterm2|app|iterm2|brew install --cask iterm2|iTerm2 terminal|https://iterm2.com"
+
+    # ── Infrastructure ──
+    "docker|infra|docker|brew install --cask docker|Docker Desktop|https://docker.com"
+    "kubectl|infra|kubectl|brew install kubectl|Kubernetes CLI|https://kubernetes.io/docs/reference/kubectl"
+    "terraform|infra|terraform|brew install hashicorp/tap/terraform|Infrastructure as code|https://terraform.io"
+    "ngrok|infra|ngrok|brew install ngrok|Secure tunnels|https://ngrok.com"
+    "caddy|infra|caddy|brew install caddy|Web server with auto HTTPS|https://caddyserver.com"
+    "ttyd|infra|ttyd|brew install ttyd|Share terminal over web|https://tsl0922.github.io/ttyd"
+
+    # ── Shell Tools ──
+    "oh-my-zsh|shell|test -d ~/.oh-my-zsh|sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" \"\" --unattended|Zsh framework|https://ohmyz.sh"
+    "starship|shell|starship|brew install starship|Cross-shell prompt|https://starship.rs"
+    "zoxide|shell|zoxide|brew install zoxide|Smarter cd command|https://github.com/ajeetdsouza/zoxide"
+    "atuin|shell|atuin|brew install atuin|Better shell history|https://atuin.sh"
+)
+
+# ─── Helpers ─────────────────────────────────────────────────────────────
+
+_parse_entry() {
+    IFS='|' read -r SW_NAME SW_CAT SW_CHECK SW_INSTALL SW_DESC SW_URL <<< "$1"
+}
+
+_is_installed() {
+    local check="$1"
+    if [[ "$check" == test* ]]; then
+        eval "$check" &>/dev/null 2>&1
+    else
+        command -v "$check" &>/dev/null 2>&1
+    fi
+}
+
+_get_version() {
+    local cmd="$1"
+    if [[ "$cmd" == test* ]]; then
+        echo "installed"
+        return
+    fi
+    local ver
+    ver=$("$cmd" --version 2>/dev/null | head -1 | sed 's/^[^0-9]*//' | cut -d' ' -f1 | head -c 30)
+    [[ -n "$ver" ]] && echo "$ver" || echo "installed"
+}
+
+_ensure_brew() {
+    if [[ "${KMAC_OS:-}" == macos ]]; then
+        if ! command -v brew &>/dev/null; then
+            echo ""
+            ui_warn "Homebrew not found — installing..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            if ! command -v brew &>/dev/null; then
+                ui_fail "Homebrew installation failed. Visit https://brew.sh"
+                return 1
+            fi
+            ui_success "Homebrew installed"
+        fi
+        return 0
+    fi
+    # Linux: expect distro package manager (Homebrew optional)
+    case "${KMAC_PKG_MGR:-unknown}" in
+        apt|dnf|pacman) return 0 ;;
+        *)
+            ui_fail "Unsupported Linux environment (KMAC_PKG_MGR=$KMAC_PKG_MGR). Install apt, dnf, or pacman."
+            return 1
+            ;;
+    esac
+}
+
+_ensure_npm() {
+    if command -v npm &>/dev/null; then
+        return 0
+    fi
+    ui_warn "npm not found — installing Node.js first..."
+    _ensure_brew || return 1
+    if [[ "${KMAC_OS:-}" == macos ]]; then
+        brew install node
+    else
+        case "${KMAC_PKG_MGR:-}" in
+            apt) platform_install nodejs npm ;;
+            dnf) platform_install nodejs npm ;;
+            pacman) platform_install nodejs npm ;;
+            *) return 1 ;;
+        esac
+    fi
+    return 0
+}
+
+# Map a brew install line to native package names for platform_install (stdout).
+# Empty stdout means no safe mapping — caller should use Homebrew on Linux or install manually.
+_translate_pkg() {
+    local line="$1"
+    [[ "$line" == brew* ]] || { echo ""; return 1; }
+
+    local spec="" is_cask=false
+    if [[ "$line" =~ --cask[[:space:]]+([^[:space:]]+) ]]; then
+        spec="${BASH_REMATCH[1]}"
+        is_cask=true
+    else
+        local t
+        for t in $line; do
+            [[ "$t" == brew || "$t" == install ]] && continue
+            [[ "$t" == -* ]] && continue
+            spec="$t"
+        done
+        [[ -z "$spec" ]] && { echo ""; return 1; }
+        spec="${spec##*/}"
+    fi
+
+    if [[ "$is_cask" == true ]]; then
+        case "$spec" in
+            docker)
+                case "${KMAC_PKG_MGR:-}" in
+                    apt)    echo "docker.io" ;;
+                    dnf)    echo "docker" ;;
+                    pacman) echo "docker" ;;
+                    *)      echo "" ;;
+                esac
+                ;;
+            visual-studio-code|vscode)
+                case "${KMAC_PKG_MGR:-}" in
+                    apt|dnf|pacman) echo "code" ;;
+                    *)              echo "" ;;
+                esac
+                ;;
+            ollama)
+                case "${KMAC_PKG_MGR:-}" in
+                    apt|dnf|pacman) echo "ollama" ;;
+                    *)              echo "" ;;
+                esac
+                ;;
+            cursor|warp|iterm2|chatgpt)
+                echo ""
+                return 1
+                ;;
+            *)
+                echo ""
+                return 1
+                ;;
+        esac
+        return 0
+    fi
+
+    case "$spec" in
+        git) echo "git" ;;
+        python|python@*)
+            case "${KMAC_PKG_MGR:-}" in
+                apt)    echo "python3 python3-pip python3-venv" ;;
+                dnf)    echo "python3" ;;
+                pacman) echo "python python-pip" ;;
+                *)      echo "" ;;
+            esac
+            ;;
+        node|node@*)
+            case "${KMAC_PKG_MGR:-}" in
+                apt|dnf|pacman) echo "nodejs npm" ;;
+                *)              echo "" ;;
+            esac
+            ;;
+        go|golang)
+            case "${KMAC_PKG_MGR:-}" in
+                apt)    echo "golang-go" ;;
+                dnf)    echo "golang" ;;
+                pacman) echo "go" ;;
+                *)      echo "" ;;
+            esac
+            ;;
+        jq) echo "jq" ;;
+        ripgrep) echo "ripgrep" ;;
+        fd)
+            case "${KMAC_PKG_MGR:-}" in
+                apt)    echo "fd-find" ;;
+                dnf|pacman) echo "fd" ;;
+                *)    echo "" ;;
+            esac
+            ;;
+        fzf) echo "fzf" ;;
+        bat)
+            case "${KMAC_PKG_MGR:-}" in
+                apt)    echo "bat" ;;
+                dnf|pacman) echo "bat" ;;
+                *)    echo "" ;;
+            esac
+            ;;
+        eza) echo "eza" ;;
+        tmux) echo "tmux" ;;
+        gh) echo "gh" ;;
+        kubectl) echo "kubectl" ;;
+        terraform) echo "terraform" ;;
+        ngrok) echo "ngrok" ;;
+        caddy) echo "caddy" ;;
+        ttyd) echo "ttyd" ;;
+        ollama) echo "ollama" ;;
+        starship) echo "starship" ;;
+        zoxide) echo "zoxide" ;;
+        atuin) echo "atuin" ;;
+        *)
+            echo "$spec"
+            ;;
+    esac
+}
+
+_do_install() {
+    local name="$1" install_cmd="$2" check_cmd="$3"
+    local run_cmd="$install_cmd"
+
+    if _is_installed "$check_cmd"; then
+        local ver=$(_get_version "$check_cmd")
+        ui_success "$name is already installed ($ver)"
+        return 0
+    fi
+
+    # Ensure package managers are available
+    if [[ "$install_cmd" == brew* ]]; then
+        _ensure_brew || return 1
+        if [[ "${KMAC_OS:-}" == linux ]] && ! command -v brew &>/dev/null; then
+            local pkgs
+            pkgs=$(_translate_pkg "$install_cmd")
+            if [[ -z "$pkgs" ]]; then
+                ui_fail "No native Linux package mapping for '$name'. Install Homebrew on Linux (https://docs.brew.sh/Homebrew-on-Linux) or install manually."
+                return 1
+            fi
+            run_cmd="platform_install $pkgs"
+        fi
+    elif [[ "$install_cmd" == npm* ]]; then
+        _ensure_npm || return 1
+    fi
+
+    ui_info "Installing $name..."
+    echo ""
+
+    if eval "$run_cmd"; then
+        echo ""
+        if _is_installed "$check_cmd"; then
+            local ver=$(_get_version "$check_cmd")
+            ui_success "$name installed successfully ($ver)"
+        else
+            ui_success "$name installed"
+        fi
+        return 0
+    else
+        echo ""
+        ui_fail "Failed to install $name"
+        return 1
+    fi
+}
+
+# ─── Category Labels ────────────────────────────────────────────────────
+
+_cat_label() {
+    case "$1" in
+        dev)   echo "Dev Essentials" ;;
+        ai)    echo "AI & Coding Agents" ;;
+        app)   echo "Editors & Apps" ;;
+        infra) echo "Infrastructure" ;;
+        shell) echo "Shell & Productivity" ;;
+        *)     echo "$1" ;;
+    esac
+}
+
+_cat_icon() {
+    case "$1" in
+        dev)   echo "⚒" ;;
+        ai)    echo "🤖" ;;
+        app)   echo "💻" ;;
+        infra) echo "🏗" ;;
+        shell) echo "🐚" ;;
+        *)     echo "📦" ;;
+    esac
+}
+
+# ─── List All Software ──────────────────────────────────────────────────
+
+do_list() {
+    title_box "Software Catalog" "📦"
+
+    local current_cat=""
+    local installed=0 total=0
+
+    for entry in "${REGISTRY[@]}"; do
+        _parse_entry "$entry"
+        ((total++))
+
+        if [[ "$SW_CAT" != "$current_cat" ]]; then
+            current_cat="$SW_CAT"
+            echo ""
+            echo -e "   ${BOLD}$(_cat_icon "$SW_CAT")  $(_cat_label "$SW_CAT")${NC}"
+            echo -e "   ${DIM}$(printf '─%.0s' {1..44})${NC}"
+        fi
+
+        if _is_installed "$SW_CHECK"; then
+            local ver=$(_get_version "$SW_CHECK")
+            printf "   ${GREEN}●${NC}  %-14s ${DIM}%-32s %s${NC}\n" "$SW_NAME" "$SW_DESC" "$ver"
+            ((installed++))
+        else
+            printf "   ${DIM}○${NC}  %-14s ${DIM}%-32s${NC} ${YELLOW}not installed${NC}\n" "$SW_NAME" "$SW_DESC"
+        fi
+    done
+
+    echo ""
+    echo -e "  ${DIM}─────────────────────────────────────────────────────${NC}"
+    echo -e "  ${BOLD}${installed}/${total}${NC} tools installed"
+    echo ""
+}
+
+# ─── Interactive Category Menu ───────────────────────────────────────────
+
+do_category_menu() {
+    local cat="$1"
+    local cat_label=$(_cat_label "$cat")
+
+    while true; do
+        clear
+        title_box "$cat_label" "$(_cat_icon "$cat")"
+
+        local -a names=() checks=() installs=() descs=() urls=()
+        local idx=1
+
+        for entry in "${REGISTRY[@]}"; do
+            _parse_entry "$entry"
+            [[ "$SW_CAT" != "$cat" ]] && continue
+            names+=("$SW_NAME")
+            checks+=("$SW_CHECK")
+            installs+=("$SW_INSTALL")
+            descs+=("$SW_DESC")
+            urls+=("$SW_URL")
+
+            if _is_installed "$SW_CHECK"; then
+                local ver=$(_get_version "$SW_CHECK")
+                printf "   ${GREEN}%2d${NC}) ${GREEN}●${NC} %-14s %s ${DIM}(%s)${NC}\n" "$idx" "$SW_NAME" "$SW_DESC" "$ver"
+            else
+                printf "   ${GREEN}%2d${NC}) ${DIM}○${NC} %-14s %s\n" "$idx" "$SW_NAME" "$SW_DESC"
+            fi
+            ((idx++))
+        done
+
+        echo ""
+        echo -e "   ${GREEN}a${NC}) Install all missing    ${GREEN}m${NC}) Back"
+        echo ""
+        read -r -p "  Pick a number to install (or a/m): " pick
+
+        case "$pick" in
+            m|M|"") return ;;
+            a|A)
+                echo ""
+                for (( i=0; i<${#names[@]}; i++ )); do
+                    _is_installed "${checks[$i]}" && continue
+                    _do_install "${names[$i]}" "${installs[$i]}" "${checks[$i]}"
+                done
+                pause
+                ;;
+            *)
+                if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#names[@]} )); then
+                    local i=$((pick - 1))
+                    echo ""
+                    _do_install "${names[$i]}" "${installs[$i]}" "${checks[$i]}"
+                    pause
+                else
+                    ui_fail "Invalid choice"
+                    sleep 0.5
+                fi
+                ;;
+        esac
+    done
+}
+
+# ─── Install All Missing ────────────────────────────────────────────────
+
+do_install_all() {
+    title_box "Install All Missing" "🚀"
+
+    local missing=0
+    for entry in "${REGISTRY[@]}"; do
+        _parse_entry "$entry"
+        _is_installed "$SW_CHECK" || ((missing++))
+    done
+
+    if (( missing == 0 )); then
+        ui_success "Everything is already installed!"
+        pause
+        return
+    fi
+
+    echo -e "  ${BOLD}${missing}${NC} tools are not installed."
+    echo ""
+    read -r -n1 -p "  Install all? (y/N) " yn; echo ""
+
+    if [[ "$yn" =~ ^[yY]$ ]]; then
+        echo ""
+        for entry in "${REGISTRY[@]}"; do
+            _parse_entry "$entry"
+            _is_installed "$SW_CHECK" && continue
+            _do_install "$SW_NAME" "$SW_INSTALL" "$SW_CHECK"
+            echo ""
+        done
+        ui_success "Done!"
+    fi
+    pause
+}
+
+# ─── Update Installed ───────────────────────────────────────────────────
+
+do_update() {
+    title_box "Update Installed Tools" "🔄"
+
+    if [[ "${KMAC_OS:-}" == macos ]] && command -v brew &>/dev/null; then
+        ui_info "Updating Homebrew packages..."
+        brew update &>/dev/null
+        local outdated
+        outdated=$(brew outdated 2>/dev/null)
+        if [[ -n "$outdated" ]]; then
+            echo "$outdated" | while read -r pkg; do
+                echo -e "  ${YELLOW}↑${NC} $pkg"
+            done
+            echo ""
+            read -r -n1 -p "  Upgrade all? (y/N) " yn; echo ""
+            [[ "$yn" =~ ^[yY]$ ]] && brew upgrade
+        else
+            ui_success "All Homebrew packages up to date"
+        fi
+    elif [[ "${KMAC_OS:-}" == linux ]]; then
+        case "${KMAC_PKG_MGR:-}" in
+            apt)
+                ui_info "Checking apt upgrades..."
+                if [[ "$(id -u)" -eq 0 ]]; then
+                    apt-get update &>/dev/null
+                    outdated=$(apt list --upgradable 2>/dev/null | tail -n +2)
+                else
+                    sudo apt-get update &>/dev/null
+                    outdated=$(apt list --upgradable 2>/dev/null | tail -n +2)
+                fi
+                if [[ -n "$outdated" ]]; then
+                    echo "$outdated" | while read -r line; do
+                        echo -e "  ${YELLOW}↑${NC} $line"
+                    done
+                    echo ""
+                    read -r -n1 -p "  Run apt upgrade? (y/N) " yn; echo ""
+                    if [[ "$yn" =~ ^[yY]$ ]]; then
+                        if [[ "$(id -u)" -eq 0 ]]; then
+                            DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+                        else
+                            sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+                        fi
+                    fi
+                else
+                    ui_success "apt packages are up to date"
+                fi
+                ;;
+            dnf)
+                ui_info "Checking dnf updates..."
+                local outdated
+                outdated=$(dnf check-update 2>/dev/null | tail -n +2 || true)
+                if [[ -n "$outdated" ]]; then
+                    echo "$outdated" | head -40
+                    echo ""
+                    read -r -n1 -p "  Run dnf upgrade? (y/N) " yn; echo ""
+                    [[ "$yn" =~ ^[yY]$ ]] && { [[ "$(id -u)" -eq 0 ]] && dnf upgrade -y || sudo dnf upgrade -y; }
+                else
+                    ui_success "dnf packages are up to date"
+                fi
+                ;;
+            pacman)
+                ui_info "Checking pacman sync..."
+                if pacman -Qu &>/dev/null; then
+                    pacman -Qu
+                    echo ""
+                    read -r -n1 -p "  Run pacman -Syu? (y/N) " yn; echo ""
+                    [[ "$yn" =~ ^[yY]$ ]] && { [[ "$(id -u)" -eq 0 ]] && pacman -Syu --noconfirm || sudo pacman -Syu --noconfirm; }
+                else
+                    ui_success "pacman packages are up to date"
+                fi
+                ;;
+            *)
+                ui_warn "No distro update path (KMAC_PKG_MGR=$KMAC_PKG_MGR)"
+                ;;
+        esac
+    else
+        ui_warn "Homebrew not found — skipped package manager updates"
+    fi
+
+    echo ""
+    if command -v npm &>/dev/null; then
+        ui_info "Checking global npm packages..."
+        local npm_outdated
+        npm_outdated=$(npm outdated -g --depth=0 2>/dev/null)
+        if [[ -n "$npm_outdated" ]]; then
+            echo "$npm_outdated"
+            echo ""
+            read -r -n1 -p "  Update all? (y/N) " yn; echo ""
+            [[ "$yn" =~ ^[yY]$ ]] && npm update -g
+        else
+            ui_success "All npm global packages up to date"
+        fi
+    fi
+
+    echo ""
+    if command -v pip3 &>/dev/null; then
+        ui_info "Checking pip packages..."
+        for pkg in aider-chat google-generativeai; do
+            pip3 show "$pkg" &>/dev/null && pip3 install --upgrade "$pkg" 2>/dev/null && ui_success "Updated $pkg"
+        done
+    fi
+
+    pause
+}
+
+# ─── Search ──────────────────────────────────────────────────────────────
+
+do_search() {
+    local query="$1"
+    [[ -z "$query" ]] && { read -r -p "  Search: " query; }
+    [[ -z "$query" ]] && return
+
+    echo ""
+    local found=0
+    for entry in "${REGISTRY[@]}"; do
+        _parse_entry "$entry"
+        if [[ "${SW_NAME,,}" == *"${query,,}"* || "${SW_DESC,,}" == *"${query,,}"* || "${SW_CAT,,}" == *"${query,,}"* ]]; then
+            if _is_installed "$SW_CHECK"; then
+                printf "   ${GREEN}●${NC}  %-14s %-32s ${DIM}%s${NC}\n" "$SW_NAME" "$SW_DESC" "$(_cat_label "$SW_CAT")"
+            else
+                printf "   ${DIM}○${NC}  %-14s %-32s ${YELLOW}not installed${NC}\n" "$SW_NAME" "$SW_DESC"
+            fi
+            ((found++))
+        fi
+    done
+
+    (( found == 0 )) && ui_warn "No matches for '$query'"
+    echo ""
+}
+
+# ─── Interactive Main Menu ───────────────────────────────────────────────
+
+do_menu() {
+    while true; do
+        clear
+        title_box "Software Manager" "📦"
+
+        local installed=0 total=${#REGISTRY[@]}
+        for entry in "${REGISTRY[@]}"; do
+            _parse_entry "$entry"
+            _is_installed "$SW_CHECK" && ((installed++))
+        done
+        echo -e "  ${BOLD}${installed}/${total}${NC} tools installed"
+        echo ""
+
+        echo -e "   ${GREEN}1${NC})  $(_cat_icon dev)  Dev Essentials"
+        echo -e "   ${GREEN}2${NC})  $(_cat_icon ai)  AI & Coding Agents"
+        echo -e "   ${GREEN}3${NC})  $(_cat_icon app)  Editors & Apps"
+        echo -e "   ${GREEN}4${NC})  $(_cat_icon infra)  Infrastructure"
+        echo -e "   ${GREEN}5${NC})  $(_cat_icon shell)  Shell & Productivity"
+        echo ""
+        echo -e "   ${GREEN}l${NC})  List all with status"
+        echo -e "   ${GREEN}a${NC})  Install all missing"
+        echo -e "   ${GREEN}u${NC})  Update installed"
+        echo -e "   ${GREEN}s${NC})  Search"
+        echo -e "   ${GREEN}m${NC})  Back to KMac"
+        echo ""
+        read -r -n1 -p "  > " choice; echo ""
+
+        case "$choice" in
+            1) do_category_menu "dev" ;;
+            2) do_category_menu "ai" ;;
+            3) do_category_menu "app" ;;
+            4) do_category_menu "infra" ;;
+            5) do_category_menu "shell" ;;
+            l|L) clear; do_list; pause ;;
+            a|A) clear; do_install_all ;;
+            u|U) clear; do_update ;;
+            s|S) clear; title_box "Search" "🔍"; do_search; pause ;;
+            m|M|0|"") return ;;
+            *) ui_fail "Unknown: '$choice'"; sleep 0.5 ;;
+        esac
+    done
+}
+
+# ─── CLI Router ──────────────────────────────────────────────────────────
+
+case "${1:-}" in
+    install)
+        shift
+        if [[ -z "$1" ]]; then
+            echo "Usage: kmac software install <name>"
+            exit 1
+        fi
+        for entry in "${REGISTRY[@]}"; do
+            _parse_entry "$entry"
+            if [[ "$SW_NAME" == "$1" ]]; then
+                _do_install "$SW_NAME" "$SW_INSTALL" "$SW_CHECK"
+                exit $?
+            fi
+        done
+        ui_fail "Unknown software: $1"
+        echo "  Run 'kmac software list' to see available tools."
+        exit 1
+        ;;
+    list)   do_list ;;
+    update) do_update ;;
+    search) shift; do_search "$*" ;;
+    *)      do_menu ;;
+esac

@@ -32,9 +32,13 @@ vault_export_all 2>/dev/null
 # ─── AI Self-Healing ──────────────────────────────────────────────────────
 source "$SCRIPTS_DIR/_ai-fix.sh" 2>/dev/null
 
+# ─── Plugin hooks (API v2) ────────────────────────────────────────────────
+source "$SCRIPTS_DIR/_hooks.sh"
+
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
 tool_error() {
+    hooks_emit on-error "$1" || true
     echo -e "\n${RED}⚠  $1${NC}\n"
     echo -e "  ${GREEN}r)${NC} Retry    ${GREEN}f)${NC} AI Diagnose & Fix    ${GREEN}m)${NC} Back"
     echo ""
@@ -94,18 +98,20 @@ check_ngrok() {
 
 declare -a PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
 
-_BUILTIN_KEYS="a v c s p e x k r d n q . b u ? / i B P + 0 S"
+_BUILTIN_KEYS="a v c s p e x k r d n q . b u ? / i I B P + 0 S"
 
 discover_plugins() {
     PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
+    hooks_clear_plugin_handlers 2>/dev/null || true
     [[ -d "$PLUGINS_DIR" ]] || return
     local used_keys="$_BUILTIN_KEYS"
     for plugin in "$PLUGINS_DIR"/*; do
         [[ -x "$plugin" && -f "$plugin" ]] || continue
-        local name desc key
+        local name desc key hooks_raw hook_entry
         name=$(grep -m1 '^# TOOLKIT_NAME:' "$plugin" 2>/dev/null | sed 's/^# TOOLKIT_NAME: *//')
         desc=$(grep -m1 '^# TOOLKIT_DESC:' "$plugin" 2>/dev/null | sed 's/^# TOOLKIT_DESC: *//')
         key=$(grep -m1 '^# TOOLKIT_KEY:' "$plugin" 2>/dev/null | sed 's/^# TOOLKIT_KEY: *//')
+        hooks_raw=$(grep -m1 '^# TOOLKIT_HOOKS:' "$plugin" 2>/dev/null | sed 's/^# TOOLKIT_HOOKS: *//')
         if [[ -n "$name" ]]; then
             if [[ -n "$key" && " $used_keys " == *" $key "* ]]; then
                 echo -e "${YELLOW}Warning: plugin '${name}' key '$key' collides — skipping key${NC}" >&2
@@ -116,6 +122,12 @@ discover_plugins() {
             PLUGIN_PATHS+=("$plugin")
             PLUGIN_DESCS+=("${desc:-No description}")
             PLUGIN_KEYS+=("${key:-}")
+            if [[ -n "$hooks_raw" ]]; then
+                hooks_raw="${hooks_raw//,/ }"
+                for hook_entry in $hooks_raw; do
+                    [[ -n "$hook_entry" ]] && hooks_register_plugin "$hook_entry" "$plugin"
+                done
+            fi
         fi
     done
 }
@@ -246,6 +258,7 @@ print_menu() {
     echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}b${NC}  Backup Dotfiles        ${GREEN}u${NC}  Check Updates"
     echo -e "   ${GREEN}.${NC}  Secrets & Keys         ${GREEN}/${NC}  Show Aliases           ${GREEN}i${NC}  Install/Update"
     echo -e "   ${GREEN}?${NC}  Health Check           ${GREEN}q${NC}  Connection QR          ${GREEN}B${NC}  Bootstrap Mac"
+    echo -e "   ${GREEN}I${NC}  Software Manager"
 
     # ─── Plugins ───
     if (( ${#PLUGIN_NAMES[@]} > 0 )); then
@@ -590,6 +603,9 @@ main() {
         animate_intro
     fi
 
+    discover_plugins
+    hooks_emit on-startup || true
+
     while true; do
         print_menu
         read -r -n1 -p "  > " choice; echo ""
@@ -618,8 +634,9 @@ main() {
             /) clear; do_aliases ;;
             \?) clear; do_health ;;
             i) clear; safe_run "Install/Update Toolkit" bash "$TOOLKIT_DIR/install.sh"; pause ;;
+            I) clear; bash "$SCRIPTS_DIR/software" ;;
             B) clear; do_bootstrap ;;
-            0) echo -e "\n  ${C_TEAL}See you! ✌${NC}\n"; exit 0 ;;
+            0) hooks_emit on-exit || true; echo -e "\n  ${C_TEAL}See you! ✌${NC}\n"; exit 0 ;;
             *)
                 # Check plugins
                 local matched=false
@@ -655,6 +672,7 @@ if [[ $# -gt 0 ]]; then
         docker)     exec bash "$SCRIPTS_DIR/docker" "$@" ;;
         docker-health) exec bash "$SCRIPTS_DIR/docker-health" "$@" ;;
         make|build|toolmaker) exec bash "$SCRIPTS_DIR/toolmaker" "$@" ;;
+        software|sw) exec bash "$SCRIPTS_DIR/software" "$@" ;;
         version|-v|--version)
             print_logo
             echo ""
@@ -694,6 +712,7 @@ if [[ $# -gt 0 ]]; then
             echo "    killport [port]       Kill process on port (blank = list all)"
             echo ""
             echo -e "  ${BOLD}System${NC}"
+            echo "    software [cmd]        Install dev tools & AI CLIs (list|install|update|search)"
             echo "    secrets [cmd]         Credential manager (list|get|set|export|add|backend)"
             echo "    storage [cmd]         Disk usage analyzer + iCloud migration"
             echo "    dotbackup [cmd]       Backup/restore/diff/hook dotfiles"

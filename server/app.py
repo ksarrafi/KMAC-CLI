@@ -3,11 +3,14 @@
 
 import asyncio
 import json
+import logging
 import os
 import platform
 import re
 import shlex
 import time
+from pathlib import Path
+from typing import Optional
 
 import aiohttp
 from aiohttp import web
@@ -20,8 +23,21 @@ from docker_ops import docker_available, containers, images, container_action, c
 from docker_dashboard import register_routes as register_docker_health_routes
 from system_ops import disk_usage, memory_info, top_processes, network_info, services_status, homebrew_services
 
+log = logging.getLogger(__name__)
+
 session_mgr = SessionManager()
 AUTH_TOKEN = get_or_create_token()
+
+
+class WSClientState:
+    """Per-WebSocket subscription state (system metrics + session streams)."""
+
+    __slots__ = ("ws", "system", "sessions")
+
+    def __init__(self, ws: web.WebSocketResponse):
+        self.ws = ws
+        self.system = False
+        self.sessions: set[str] = set()
 
 # ── Auth middleware ───────────────────────────────────────────────────────
 
@@ -434,6 +450,63 @@ _ALLOWED_PREFIXES = (
 )
 
 
+def _validate_run_command(cmd: str) -> tuple[Optional[str], Optional[str]]:
+    """Return (error_message, first_token). error_message is None if OK."""
+    if not cmd:
+        return "command required", None
+    for pat in _BLOCKED_PATTERNS:
+        if pat.search(cmd):
+            return "Blocked: potentially destructive command", None
+    try:
+        first_token = shlex.split(cmd)[0]
+    except ValueError:
+        return "Malformed command", None
+    if first_token not in _ALLOWED_PREFIXES:
+        return f"Command not allowed: {first_token}", None
+    return None, first_token
+
+
+async def _execute_run_command(cmd: str, cwd: str) -> dict:
+    """Run shell command with the same rules as /api/run. cwd must be a directory."""
+    err, first_token = _validate_run_command(cmd)
+    if err:
+        return {"error": err, "first_token": first_token}
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *shlex.split(cmd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=cwd,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        output = stdout.decode("utf-8", errors="replace") if stdout else ""
+        return {"stdout": output, "exit_code": proc.returncode}
+    except asyncio.TimeoutError:
+        if proc:
+            proc.kill()
+        return {"error": "Command timed out (30s)", "exit_code": -1}
+    except FileNotFoundError:
+        return {"error": f"Command not found: {first_token}", "exit_code": -1}
+
+
+def _resolve_exec_cwd(cwd_raw: str) -> tuple[Optional[str], Optional[str]]:
+    """Resolve WebSocket exec cwd: must be under home. Returns (path, error_message)."""
+    if not (cwd_raw or "").strip():
+        d = _active_dir()
+        if not d:
+            return None, "No project context"
+        return d, None
+    p = Path(cwd_raw).expanduser().resolve()
+    try:
+        p.relative_to(Path.home().resolve())
+    except ValueError:
+        return None, "cwd must be under your home directory"
+    if not p.is_dir():
+        return None, "cwd is not a directory"
+    return str(p), None
+
+
 async def handle_run(request):
     try:
         body = await request.json()
@@ -442,57 +515,289 @@ async def handle_run(request):
     cmd = body.get("command", "")
     project = body.get("project", "")
 
-    if not cmd:
-        return json_ok({"error": "command required"}, 400)
-
-    for pat in _BLOCKED_PATTERNS:
-        if pat.search(cmd):
-            return json_ok({"error": "Blocked: potentially destructive command"}, 403)
-
-    try:
-        first_token = shlex.split(cmd)[0]
-    except ValueError:
-        return json_ok({"error": "Malformed command"}, 400)
-
-    if first_token not in _ALLOWED_PREFIXES:
-        return json_ok({"error": f"Command not allowed: {first_token}"}, 403)
+    err, _ft = _validate_run_command(cmd)
+    if err:
+        code = 403 if ("Blocked" in err or "not allowed" in err) else 400
+        return json_ok({"error": err}, code)
 
     project_dir = resolve_project(project) if project else _active_dir()
     if not project_dir:
         return json_ok({"error": "No project context"}, 400)
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *shlex.split(cmd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=project_dir,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-        output = stdout.decode("utf-8", errors="replace") if stdout else ""
-        return json_ok({"output": output, "exit_code": proc.returncode})
-    except asyncio.TimeoutError:
-        if proc:
-            proc.kill()
-        return json_ok({"error": "Command timed out (30s)", "exit_code": -1}, 408)
-    except FileNotFoundError:
-        return json_ok({"error": f"Command not found: {first_token}", "exit_code": -1}, 400)
+    result = await _execute_run_command(cmd, project_dir)
+    if "error" in result:
+        status = 408 if "timed out" in result.get("error", "") else 400
+        return json_ok(result, status)
+    return json_ok({"output": result["stdout"], "exit_code": result["exit_code"]})
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────
 
-async def handle_ws(request):
-    # Auth check for WebSocket
-    token = request.query.get("token", "")
-    if token != AUTH_TOKEN:
-        return web.Response(status=401, text="Unauthorized")
+async def _ws_safe_send(ws: web.WebSocketResponse, payload: dict) -> None:
+    try:
+        await ws.send_json(payload)
+    except (ConnectionResetError, RuntimeError):
+        pass
 
+
+def _ws_should_deliver(state: WSClientState, event: dict) -> bool:
+    et = event.get("type")
+    sid = event.get("session_id")
+    if et in ("output", "session_finished", "session_stopped"):
+        return bool(sid and sid in state.sessions)
+    if et == "session_created":
+        return state.system
+    return False
+
+
+async def _ws_build_system_status_dict() -> dict:
+    mem = await memory_info()
+    disks = await disk_usage()
+    proc_ld = await asyncio.create_subprocess_shell(
+        "sysctl -n vm.loadavg 2>/dev/null",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout_ld, _ = await proc_ld.communicate()
+    load = stdout_ld.decode().strip() if stdout_ld else ""
+    docker_block: dict = {"available": docker_available()}
+    if docker_block["available"]:
+        try:
+            docker_block["containers"] = await containers(False)
+        except Exception:
+            docker_block["containers"] = []
+    return {
+        "cpu": {"loadavg": load},
+        "memory": mem,
+        "disk": disks,
+        "docker": docker_block,
+    }
+
+
+async def _ws_system_broadcast_loop(app: web.Application) -> None:
+    try:
+        while True:
+            await asyncio.sleep(30)
+            clients = list(app.get("ws_clients", []))
+            if not any(c.system for c in clients):
+                continue
+            try:
+                body = await _ws_build_system_status_dict()
+            except Exception:
+                log.exception("system metrics collection failed")
+                continue
+            msg = {"type": "system.metrics", "ts": int(time.time()), **body}
+            for c in clients:
+                if not c.system:
+                    continue
+                await _ws_safe_send(c.ws, msg)
+    except asyncio.CancelledError:
+        raise
+
+
+async def _ws_startup(app: web.Application) -> None:
+    app["ws_broadcast_task"] = asyncio.create_task(_ws_system_broadcast_loop(app))
+
+
+async def _ws_cleanup(app: web.Application) -> None:
+    t = app.pop("ws_broadcast_task", None)
+    if t:
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
+
+
+async def _ws_dispatch(ws: web.WebSocketResponse, state: WSClientState, data: dict) -> None:
+    cmd = data.get("type")
+    if not cmd:
+        await _ws_safe_send(ws, {"type": "error", "message": "Missing type"})
+        return
+
+    if cmd == "ping":
+        await _ws_safe_send(ws, {"type": "pong", "ts": int(time.time())})
+        return
+
+    if cmd == "subscribe":
+        channel = data.get("channel", "")
+        if channel == "system":
+            state.system = True
+            return
+        if channel == "session":
+            sid = data.get("session_id", "")
+            if not sid:
+                await _ws_safe_send(ws, {"type": "error", "message": "session_id required for session channel"})
+                return
+            if not session_mgr.get(sid):
+                await _ws_safe_send(ws, {"type": "error", "message": "Session not found"})
+                return
+            state.sessions.add(sid)
+            return
+        await _ws_safe_send(ws, {"type": "error", "message": "Unknown channel"})
+        return
+
+    if cmd == "unsubscribe":
+        channel = data.get("channel", "")
+        if channel == "system":
+            state.system = False
+            return
+        if channel == "session":
+            sid = data.get("session_id", "")
+            if not sid:
+                await _ws_safe_send(ws, {"type": "error", "message": "session_id required for session channel"})
+                return
+            state.sessions.discard(sid)
+            return
+        await _ws_safe_send(ws, {"type": "error", "message": "Unknown channel"})
+        return
+
+    if cmd == "session.input":
+        sid = data.get("session_id", "")
+        text = data.get("text", "")
+        if not sid:
+            await _ws_safe_send(ws, {"type": "error", "message": "session_id required"})
+            return
+        if not isinstance(text, str):
+            await _ws_safe_send(ws, {"type": "error", "message": "text must be a string"})
+            return
+        result = await session_mgr.write_stdin(sid, text)
+        if result.get("error"):
+            await _ws_safe_send(ws, {"type": "error", "message": result["error"]})
+        return
+
+    if cmd == "session.start":
+        project_name = data.get("project", "")
+        task = data.get("task", "")
+        agent = data.get("agent", "claude")
+        if not project_name:
+            await _ws_safe_send(ws, {"type": "error", "message": "project required"})
+            return
+        project_dir = resolve_project(project_name)
+        if not project_dir:
+            await _ws_safe_send(ws, {"type": "error", "message": f"Project '{project_name}' not found"})
+            return
+        result = await session_mgr.create_session(project_name, project_dir, task, agent)
+        if not result.get("ok"):
+            await _ws_safe_send(ws, {"type": "error", "message": result.get("error", "Failed to start session")})
+            return
+        sid = result["session"]["id"]
+        state.sessions.add(sid)
+        await _ws_safe_send(ws, {"type": "session.started", "session_id": sid})
+        return
+
+    if cmd == "session.stop":
+        sid = data.get("session_id", "")
+        if not sid:
+            await _ws_safe_send(ws, {"type": "error", "message": "session_id required"})
+            return
+        result = await session_mgr.stop_session(sid)
+        if not result.get("ok"):
+            await _ws_safe_send(ws, {"type": "error", "message": result.get("error", "Failed to stop session")})
+        return
+
+    if cmd == "session.list":
+        sessions = [s.to_dict() for s in session_mgr.sessions]
+        await _ws_safe_send(ws, {"type": "session.list", "sessions": sessions})
+        return
+
+    if cmd == "system.status":
+        try:
+            body = await _ws_build_system_status_dict()
+        except Exception as e:
+            await _ws_safe_send(ws, {"type": "error", "message": str(e)})
+            return
+        await _ws_safe_send(ws, {"type": "system.status", **body})
+        return
+
+    if cmd == "exec":
+        command = data.get("command", "")
+        cwd_raw = data.get("cwd", "")
+        if not command:
+            await _ws_safe_send(ws, {"type": "error", "message": "command required"})
+            return
+        cwd_path, cwd_err = _resolve_exec_cwd(cwd_raw if isinstance(cwd_raw, str) else "")
+        if cwd_err:
+            await _ws_safe_send(ws, {"type": "error", "message": cwd_err})
+            return
+        result = await _execute_run_command(command, cwd_path)
+        if "error" in result:
+            await _ws_safe_send(ws, {
+                "type": "exec.result",
+                "stdout": result.get("error", ""),
+                "exit_code": result.get("exit_code", -1),
+            })
+            return
+        await _ws_safe_send(ws, {
+            "type": "exec.result",
+            "stdout": result["stdout"],
+            "exit_code": result["exit_code"],
+        })
+        return
+
+    await _ws_safe_send(ws, {"type": "error", "message": f"Unknown type: {cmd}"})
+
+
+async def _ws_reader(ws: web.WebSocketResponse, state: WSClientState) -> None:
+    async for msg in ws:
+        if msg.type == aiohttp.WSMsgType.TEXT:
+            try:
+                data = json.loads(msg.data)
+            except json.JSONDecodeError:
+                await _ws_safe_send(ws, {"type": "error", "message": "Invalid JSON"})
+                continue
+            if not isinstance(data, dict):
+                await _ws_safe_send(ws, {"type": "error", "message": "JSON object expected"})
+                continue
+            await _ws_dispatch(ws, state, data)
+        elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSE):
+            break
+
+
+async def _ws_writer(ws: web.WebSocketResponse, state: WSClientState, queue: asyncio.Queue) -> None:
+    while True:
+        event = await queue.get()
+        if not _ws_should_deliver(state, event):
+            continue
+        try:
+            await ws.send_json(event)
+        except (ConnectionResetError, RuntimeError):
+            break
+
+
+async def _ws_handshake_auth(ws: web.WebSocketResponse) -> bool:
+    msg = await ws.receive()
+    if msg.type == aiohttp.WSMsgType.CLOSE:
+        return False
+    if msg.type != aiohttp.WSMsgType.TEXT:
+        await _ws_safe_send(ws, {"type": "error", "message": "First message must be JSON auth"})
+        await ws.close()
+        return False
+    try:
+        data = json.loads(msg.data)
+    except json.JSONDecodeError:
+        await _ws_safe_send(ws, {"type": "error", "message": "Invalid JSON"})
+        await ws.close()
+        return False
+    if not isinstance(data, dict) or data.get("type") != "auth" or data.get("token") != AUTH_TOKEN:
+        await _ws_safe_send(ws, {"type": "error", "message": "Unauthorized"})
+        await ws.close()
+        return False
+    return True
+
+
+async def handle_ws(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
+    app = request.app
 
+    if not await _ws_handshake_auth(ws):
+        return ws
+
+    state = WSClientState(ws)
+    app["ws_clients"].append(state)
     queue = session_mgr.subscribe()
 
-    # Send current state on connect
     sessions = [s.to_dict() for s in session_mgr.sessions]
     await ws.send_json({
         "type": "connected",
@@ -501,34 +806,25 @@ async def handle_ws(request):
     })
 
     try:
-        reader_task = asyncio.create_task(_ws_reader(ws))
-        writer_task = asyncio.create_task(_ws_writer(ws, queue))
-        done, pending = await asyncio.wait(
+        reader_task = asyncio.create_task(_ws_reader(ws, state))
+        writer_task = asyncio.create_task(_ws_writer(ws, state, queue))
+        _done, pending = await asyncio.wait(
             [reader_task, writer_task], return_when=asyncio.FIRST_COMPLETED
         )
         for t in pending:
             t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
     finally:
+        try:
+            app["ws_clients"].remove(state)
+        except ValueError:
+            pass
         session_mgr.unsubscribe(queue)
 
     return ws
-
-
-async def _ws_reader(ws: web.WebSocketResponse):
-    async for msg in ws:
-        if msg.type == aiohttp.WSMsgType.TEXT:
-            pass  # future: handle client commands over WS
-        elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSE):
-            break
-
-
-async def _ws_writer(ws: web.WebSocketResponse, queue: asyncio.Queue):
-    while True:
-        event = await queue.get()
-        try:
-            await ws.send_json(event)
-        except (ConnectionResetError, RuntimeError):
-            break
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -547,6 +843,9 @@ def _active_dir() -> str:
 
 def create_app() -> web.Application:
     app = web.Application(middlewares=[auth_middleware])
+    app["ws_clients"] = []
+    app.on_startup.append(_ws_startup)
+    app.on_cleanup.append(_ws_cleanup)
 
     # System
     app.router.add_get("/api/ping", handle_ping)

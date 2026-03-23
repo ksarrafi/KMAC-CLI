@@ -7,6 +7,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh" 2>/dev/null
+source "$SCRIPT_DIR/_hooks.sh"
 source "$SCRIPT_DIR/_auth-helper.sh"
 _ensure_claude_auth || exit 1
 
@@ -106,12 +107,18 @@ read -r -p "Choice [y/e/n]: " choice
 
 case "$choice" in
     y|Y)
+        hooks_emit pre-commit
         if $AMEND; then
-            git commit --amend -m "$MSG"
+            if git commit --amend -m "$MSG"; then
+                echo -e "\n✓ Committed!"
+                hooks_emit post-commit
+            fi
         else
-            git commit -m "$MSG"
+            if git commit -m "$MSG"; then
+                echo -e "\n✓ Committed!"
+                hooks_emit post-commit
+            fi
         fi
-        echo -e "\n✓ Committed!"
         ;;
     e|E)
         TMPFILE=$(mktemp)
@@ -119,9 +126,18 @@ case "$choice" in
         ${EDITOR:-vim} "$TMPFILE"
         EDITED=$(cat "$TMPFILE"); rm -f "$TMPFILE"
         if [[ -n "$EDITED" ]]; then
-            if $AMEND; then git commit --amend -m "$EDITED"
-            else git commit -m "$EDITED"; fi
-            echo "✓ Committed!"
+            hooks_emit pre-commit
+            if $AMEND; then
+                if git commit --amend -m "$EDITED"; then
+                    echo "✓ Committed!"
+                    hooks_emit post-commit
+                fi
+            else
+                if git commit -m "$EDITED"; then
+                    echo "✓ Committed!"
+                    hooks_emit post-commit
+                fi
+            fi
         else
             echo "Empty — aborted."
             $AUTO_STAGE && git reset HEAD &>/dev/null

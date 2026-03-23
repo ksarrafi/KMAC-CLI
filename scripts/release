@@ -1,88 +1,88 @@
-#!/bin/bash
-# release — bump version, tag, and create GitHub Release
-# Usage: scripts/release [major|minor|patch]
+#!/usr/bin/env bash
+# release — set VERSION, refresh Homebrew formula metadata, create git tag
+# Usage: ./scripts/release 2.5.0
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-cd "$ROOT_DIR"
+FORMULA="${ROOT_DIR}/homebrew/Formula/kmac.rb"
+REPO_SLUG="ksarrafi/KMAC-CLI"
 
-bump_type="${1:-}"
-if [[ "$bump_type" != "major" && "$bump_type" != "minor" && "$bump_type" != "patch" ]]; then
-  echo "Usage: scripts/release [major|minor|patch]"
-  echo ""
-  echo "  major  — breaking changes  (2.4.1 → 3.0.0)"
-  echo "  minor  — new features      (2.4.1 → 2.5.0)"
-  echo "  patch  — bug fixes         (2.4.1 → 2.4.2)"
+new_version="${1:-}"
+if [[ -z "$new_version" ]] || [[ "${new_version}" == -* ]]; then
+  echo "Usage: ./scripts/release <version>"
+  echo "Example: ./scripts/release 2.5.0"
   exit 1
 fi
 
-current=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
-if [[ -z "$current" ]]; then
-  echo "Error: no existing git tags found. Create an initial tag first:"
-  echo "  git tag -a v1.0.0 -m 'Initial release'"
+if ! [[ "${new_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+  echo "Error: version should look like MAJOR.MINOR.PATCH (e.g. 2.5.0)"
   exit 1
 fi
 
-IFS='.' read -r major minor patch_num <<< "$current"
-
-case "$bump_type" in
-  major) major=$((major + 1)); minor=0; patch_num=0 ;;
-  minor) minor=$((minor + 1)); patch_num=0 ;;
-  patch) patch_num=$((patch_num + 1)) ;;
-esac
-
-new_version="${major}.${minor}.${patch_num}"
 tag="v${new_version}"
 
-echo "Current version: v${current}"
-echo "New version:     ${tag}"
-echo ""
-
-if git rev-parse "$tag" >/dev/null 2>&1; then
-  echo "Error: tag $tag already exists."
+if [[ ! -f "${FORMULA}" ]]; then
+  echo "Error: formula not found at ${FORMULA}"
   exit 1
 fi
 
-# Update the VERSION file for non-git installs
-echo "$new_version" > "$ROOT_DIR/VERSION"
-
-printf "Proceed? [y/N] "
-read -r confirm
-if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-  git checkout -- VERSION
-  echo "Aborted."
-  exit 0
+if git -C "${ROOT_DIR}" rev-parse "${tag}" >/dev/null 2>&1; then
+  echo "Error: git tag ${tag} already exists."
+  exit 1
 fi
 
-git add VERSION
-git commit -m "Bump version to ${tag}"
-git tag -a "$tag" -m "KMac-CLI ${tag}"
+echo "${new_version}" > "${ROOT_DIR}/VERSION"
 
-echo ""
-echo "Tagged ${tag} locally."
-echo ""
-printf "Push tag and create GitHub Release? [y/N] "
-read -r push_confirm
-if [[ "$push_confirm" == "y" || "$push_confirm" == "Y" ]]; then
-  git push origin main
-  git push origin "$tag"
-
-  if command -v gh &>/dev/null; then
-    echo ""
-    echo "Creating GitHub Release..."
-    gh release create "$tag" \
-      --title "${tag}" \
-      --generate-notes
-    echo ""
-    echo "Done! Release: https://github.com/ksarrafi/KMAC-CLI/releases/tag/${tag}"
-  else
-    echo ""
-    echo "gh CLI not found. Create the release manually at:"
-    echo "  https://github.com/ksarrafi/KMAC-CLI/releases/new?tag=${tag}"
-  fi
+# Sync formula version + tarball URL; sha256 must be set after the tag exists on GitHub.
+if grep -q '^  version "' "${FORMULA}"; then
+  sed -i.bak -E "s/^  version \".*\"/  version \"${new_version}\"/" "${FORMULA}" && rm -f "${FORMULA}.bak"
 else
-  echo ""
-  echo "Tag created locally. Push when ready:"
-  echo "  git push origin main && git push origin ${tag}"
+  echo "Error: could not find version line in ${FORMULA}"
+  exit 1
 fi
+
+if grep -q '^  url "https://github.com/' "${FORMULA}"; then
+  sed -i.bak -E "s|^  url \"https://github.com/${REPO_SLUG}/archive/refs/tags/v[^\"]+\\.tar.gz\"|  url \"https://github.com/${REPO_SLUG}/archive/refs/tags/${tag}.tar.gz\"|" "${FORMULA}" && rm -f "${FORMULA}.bak"
+else
+  echo "Error: could not find url line in ${FORMULA}"
+  exit 1
+fi
+
+if grep -q '^  sha256 "' "${FORMULA}"; then
+  sed -i.bak -E 's/^  sha256 "[^"]*"/  sha256 "0000000000000000000000000000000000000000000000000000000000000000"/' "${FORMULA}" && rm -f "${FORMULA}.bak"
+else
+  echo "Error: could not find sha256 line in ${FORMULA}"
+  exit 1
+fi
+
+git -C "${ROOT_DIR}" add VERSION "${FORMULA}"
+
+echo ""
+echo "Updated VERSION to ${new_version} and formula url to tag ${tag}."
+echo "sha256 is set to all zeros — replace it with the real digest after the tag is on GitHub."
+echo ""
+
+if git -C "${ROOT_DIR}" diff --cached --quiet; then
+  echo "Nothing staged (files unchanged?). Skipping commit and tag."
+  exit 1
+fi
+
+git -C "${ROOT_DIR}" commit -m "Bump version to ${tag}"
+git -C "${ROOT_DIR}" tag -a "${tag}" -m "KMac-CLI ${tag}"
+
+echo "Created commit and annotated tag ${tag}."
+echo ""
+echo "--- Push & checksum ---"
+echo "Push branch and tag:"
+echo "  git push origin HEAD"
+echo "  git push origin \"${tag}\""
+echo ""
+echo "After GitHub serves the archive, set the real sha256 in homebrew/Formula/kmac.rb:"
+echo "  curl -sL \"https://github.com/${REPO_SLUG}/archive/refs/tags/${tag}.tar.gz\" | shasum -a 256"
+echo "Replace the all-zero sha256 in homebrew/Formula/kmac.rb with that digest, then commit and push the fix."
+echo ""
+echo "--- GitHub Release ---"
+echo "  gh release create \"${tag}\" --title \"${tag}\" --generate-notes"
+echo "Or: https://github.com/${REPO_SLUG}/releases/new?tag=${tag}"
+echo ""

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+
+      - name: Run test suite
+        run: ./tests/run-tests.sh
+        working-directory: ${{ github.workspace }}
+
+      - name: ShellCheck (optional)
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            # --severity=error: project root scripts have pre-existing style/info
+            # findings; gate CI on errors only. toolkit.sh/install.sh omitted (known SC2168 etc.).
+            shellcheck --severity=error \
+              tests/run-tests.sh \
+              tests/test_toolkit.sh \
+              tests/test_ui.sh \
+              tests/test_vault.sh \
+              tests/test_software.sh \
+              tests/test_plugins.sh \
+              tests/test_dotbackup.sh \
+              tests/test_install.sh \
+              scripts/_ui.sh \
+              scripts/_vault.sh \
+              scripts/software \
+              scripts/dotbackup
+          else
+            echo "shellcheck not available on this runner — skipping"
+          fi
+        working-directory: ${{ github.workspace }}
