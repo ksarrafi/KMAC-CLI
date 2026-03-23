@@ -16,6 +16,9 @@
 #   vault_export <service>            → exports as env var
 #   vault_export_all                  → exports all known mappings
 
+_VAULT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -z "${KMAC_PLATFORM_LOADED:-}" ]] && source "$_VAULT_SCRIPT_DIR/_platform.sh"
+
 VAULT_DIR="${KMAC_VAULT_DIR:-$HOME/.config/kmac}"
 VAULT_FILE="$VAULT_DIR/vault.enc"
 VAULT_REGISTRY="$VAULT_DIR/integrations.json"
@@ -29,11 +32,25 @@ _vault_backend() {
         file)     echo "file" ;;
         docker)   echo "docker" ;;
         auto)
-            if security help &>/dev/null 2>&1; then
-                echo "keychain"
-            else
-                echo "file"
-            fi
+            case "${KMAC_OS:-}" in
+                macos)
+                    if security help &>/dev/null 2>&1; then
+                        echo "keychain"
+                    else
+                        echo "file"
+                    fi
+                    ;;
+                linux)
+                    if command -v secret-tool &>/dev/null; then
+                        echo "keychain"
+                    else
+                        echo "file"
+                    fi
+                    ;;
+                *)
+                    echo "file"
+                    ;;
+            esac
             ;;
     esac
 }
@@ -43,28 +60,76 @@ _vault_backend() {
 _kc_prefix="kmac"
 
 _kc_get() {
-    security find-generic-password -s "${_kc_prefix}-${1}" -w 2>/dev/null
+    platform_keychain_get "${_kc_prefix}-${1}"
 }
 
 _kc_set() {
     local svc="${_kc_prefix}-${1}" val="$2"
-    security add-generic-password -U -s "$svc" -a "$USER" -w "$val" 2>/dev/null \
-        || security add-generic-password -s "$svc" -a "$USER" -w "$val" 2>/dev/null
+    platform_keychain_set "$svc" "$val"
 }
 
 _kc_del() {
-    security delete-generic-password -s "${_kc_prefix}-${1}" 2>/dev/null
+    platform_keychain_del "${_kc_prefix}-${1}"
 }
 
 _kc_has() {
-    security find-generic-password -s "${_kc_prefix}-${1}" -w &>/dev/null
+    local svc="${_kc_prefix}-${1}"
+    if [[ "${KMAC_OS:-}" == macos ]]; then
+        security find-generic-password -s "$svc" -w &>/dev/null
+        return $?
+    fi
+    command -v secret-tool &>/dev/null && secret-tool lookup service "$svc" account "$USER" &>/dev/null
+}
+
+_kc_list_linux_libsecret() {
+    _KMAC_KC_PFX="$_kc_prefix" python3 <<'PY' 2>/dev/null
+import os, sys
+pfx = os.environ.get("_KMAC_KC_PFX", "kmac")
+user = os.environ.get("USER", "")
+try:
+    import dbus
+except ImportError:
+    sys.exit(0)
+try:
+    bus = dbus.SessionBus()
+    secrets = bus.get_object("org.freedesktop.secrets", "/org/freedesktop/secrets")
+    serv = dbus.Interface(secrets, "org.freedesktop.Secret.Service")
+    coll_path = serv.ReadAlias("default")
+    coll = bus.get_object("org.freedesktop.secrets", coll_path)
+    props = dbus.Interface(coll, dbus.PROPERTIES_IFACE)
+    item_paths = props.Get("org.freedesktop.Secret.Collection", "Items")
+    out = set()
+    pre = pfx + "-"
+    for path in item_paths:
+        item = bus.get_object("org.freedesktop.secrets", path)
+        iprops = dbus.Interface(item, dbus.PROPERTIES_IFACE)
+        try:
+            attrs = iprops.Get("org.freedesktop.Secret.Item", "Attributes")
+        except dbus.exceptions.DBusException:
+            continue
+        if attrs.get("account") != user:
+            continue
+        s = attrs.get("service", "")
+        if s.startswith(pre):
+            out.add(s[len(pre):])
+    for k in sorted(out):
+        print(k)
+except Exception:
+    sys.exit(0)
+PY
 }
 
 _kc_list() {
-    security dump-keychain 2>/dev/null \
-        | grep -o "\"svce\"<blob>=\"${_kc_prefix}-[^\"]*\"" \
-        | sed "s/\"svce\"<blob>=\"${_kc_prefix}-//;s/\"//" \
-        | sort -u
+    if [[ "${KMAC_OS:-}" == macos ]]; then
+        security dump-keychain 2>/dev/null \
+            | grep -o "\"svce\"<blob>=\"${_kc_prefix}-[^\"]*\"" \
+            | sed "s/\"svce\"<blob>=\"${_kc_prefix}-//;s/\"//" \
+            | sort -u
+        return
+    fi
+    if [[ "${KMAC_OS:-}" == linux ]] && command -v secret-tool &>/dev/null; then
+        _kc_list_linux_libsecret
+    fi
 }
 
 # ─── Encrypted File Backend ─────────────────────────────────────────────
@@ -480,7 +545,7 @@ _vault_migrate_legacy() {
         local old="${entry%%:*}" new="${entry##*:}"
         if ! vault_has "$new" 2>/dev/null; then
             local val
-            val=$(security find-generic-password -s "$old" -w 2>/dev/null)
+            val=$(platform_keychain_get "$old" 2>/dev/null)
             if [[ -n "$val" ]]; then
                 vault_set "$new" "$val"
                 ((migrated++))

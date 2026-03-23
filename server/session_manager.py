@@ -149,6 +149,7 @@ class Session:
     output_lines: list[str] = field(default_factory=list)
     pid: Optional[int] = None
     stream_json: bool = False
+    master_fd: Optional[int] = None
     _proc: Optional[asyncio.subprocess.Process] = field(default=None, repr=False)
 
     @property
@@ -258,6 +259,28 @@ class SessionManager:
 
         return {"ok": True, "session": session.to_dict()}
 
+    async def write_stdin(self, session_id: str, text: str) -> dict:
+        """Write raw input to a running session's PTY (master side)."""
+        session = self._sessions.get(session_id)
+        if not session:
+            return {"error": "Session not found"}
+        if not session.running:
+            return {"error": "Session not running"}
+        fd = session.master_fd
+        if fd is None:
+            return {"error": "No PTY available"}
+        data = text.encode("utf-8", errors="replace")
+        loop = asyncio.get_event_loop()
+
+        def _write():
+            os.write(fd, data)
+
+        try:
+            await loop.run_in_executor(None, _write)
+        except OSError as e:
+            return {"error": str(e)}
+        return {"ok": True}
+
     async def send_message(self, session_id: str, message: str) -> dict:
         """Send a message to a session — starts the agent with this prompt."""
         session = self._sessions.get(session_id)
@@ -301,6 +324,7 @@ class SessionManager:
             start_new_session=True,
         )
         os.close(slave_fd)
+        session.master_fd = master_fd
         session.pid = session._proc.pid
         asyncio.create_task(self._read_pty_output(session, master_fd))
 
@@ -364,6 +388,7 @@ class SessionManager:
         except Exception as exc:
             log.exception("Error reading PTY output for session %s: %s", session.id, exc)
         finally:
+            session.master_fd = None
             try:
                 os.close(master_fd)
             except OSError:

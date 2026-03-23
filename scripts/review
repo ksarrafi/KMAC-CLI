@@ -8,6 +8,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh" 2>/dev/null
+source "$SCRIPT_DIR/_hooks.sh"
 source "$SCRIPT_DIR/_auth-helper.sh"
 _ensure_claude_auth || exit 1
 
@@ -43,6 +44,8 @@ else DIFF=$(git diff HEAD 2>/dev/null || git diff)
 fi
 
 if [[ -z "$DIFF" ]]; then echo "No changes to review."; exit 0; fi
+
+hooks_emit pre-review
 
 REPO=$(basename "$(git rev-parse --show-toplevel)")
 BRANCH=$(git branch --show-current)
@@ -85,6 +88,7 @@ $FILE_DIFF
 
 $SUMMARY"
     _claude_ask "$SUM_PROMPT" "$REVIEW_MODEL" 1024 "Summarizing"
+    hooks_emit post-review
 else
     # Single-pass review for smaller diffs
     title_box "AI Code Review" "🔍"
@@ -104,4 +108,5 @@ else
 $DIFF
 \`\`\`"
     _claude_ask "$PROMPT" "$REVIEW_MODEL" 4096 "Reviewing"
+    hooks_emit post-review
 fi

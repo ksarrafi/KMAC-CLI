@@ -158,10 +158,10 @@ do_hook() {
     if grep -q "$marker" "$HOME/.zshrc" 2>/dev/null; then
         echo -e "${G}Auto-backup hook already installed.${N}"; return
     fi
-    cat >> "$HOME/.zshrc" << 'HOOK'
+    cat >> "$HOME/.zshrc" << HOOK
 
 # toolkit-dotbackup-hook
-zshexit() { bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/dotbackup" 2>/dev/null; }
+zshexit() { bash "${TOOLKIT_DIR}/scripts/dotbackup" 2>/dev/null; }
 HOOK
     echo -e "${G}✓ Auto-backup hook installed in .zshrc${N}"
     echo -e "${D}Dotfiles will auto-backup when you close a terminal.${N}"
