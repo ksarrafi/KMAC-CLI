@@ -4,7 +4,7 @@
 
 ```bash
 # From GitHub
-git clone https://github.com/ksarrafi/RevestTech.git ~/Projects/KMac-CLI
+git clone https://github.com/ksarrafi/KMAC-CLI.git ~/Projects/KMac-CLI
 cd ~/Projects/KMac-CLI && bash install.sh && source ~/.zshrc
 
 # Or from iCloud Drive
@@ -23,16 +23,16 @@ kmac help         # All CLI commands
 
 | Key | Action | Key | Action |
 |-----|--------|-----|--------|
-| `a` | Ask Claude | `d` | Docker Manager |
-| `v` | AI Code Review | `r` | Remote Terminal |
-| `c` | AI Commit | `n` | Network Info |
-| `+` | Build a Tool (AI) | `k` | Kill Port |
-| `S` | Storage Manager | `.` | Secrets (Keychain) |
-| `p` | Project Launcher | `b` | Backup Dotfiles |
-| `e` | Claude Session | `u` | Check Updates |
-| `x` | Cursor Agent | `?` | Health Check |
-| `P` | Pilot Status | `B` | Bootstrap Mac |
-| `s` | Sessions | `0` | Exit |
+| `a` | Ask Claude | `r` | Remote Terminal |
+| `+` | Build a Tool (AI) | `d` | Docker Manager |
+| `p` | Project Launcher | `n` | Network Info |
+| `e` | Claude Code | `k` | Kill Port |
+| `x` | Cursor Agent | `S` | Storage Manager |
+| `v` | Code Review | `b` | Backup Dotfiles |
+| `c` | Smart Commit | `u` | Check Updates |
+| `P` | Pilot (remote agent) | `.` | Secrets & Keys |
+| `?` | Health Check | `q` | Connection QR |
+| `B` | Bootstrap Mac | `i` | Install/Update |
 
 ## Everyday Commands
 
@@ -86,11 +86,13 @@ cd ios/KMacPilot && xcodegen generate && open KMacPilot.xcodeproj
 
 ## Set Up Secrets
 
-Press `.` in the menu, or manually:
+Press `.` in the menu, or use the CLI:
 
 ```bash
-security add-generic-password -s "toolkit-anthropic" -a "$USER" -w "your-key"
-security add-generic-password -s "toolkit-openai" -a "$USER" -w "your-key"
+kmac secrets                    # Interactive credential manager
+kmac secrets set anthropic      # Store your Anthropic API key
+kmac secrets set openai         # Store your OpenAI key
+kmac secrets backend            # Switch vault backend (Keychain / File / Docker)
 ```
 
 ## Configuration

@@ -24,20 +24,23 @@ Type `kmac` and you get this:
         portable macOS toolkit                       v2.4.0
 
   ┌ services ──────────────────────────────────────────┐
-  │  * Remote Terminal   * Docker (8)   - ngrok        │
+  │  ● Remote Terminal   ● Docker (8)   ○ ngrok        │
   └────────────────────────────────────────────────────┘
 
-    AI                         Dev                        Infra
-    a  Ask Claude              p  Project Launcher        r  Remote Terminal
-    v  AI Code Review          e  Claude Session          d  Docker Manager
-    c  AI Commit               x  Cursor Agent            n  Network Info
-    +  Build a Tool            k  Kill Port               q  Connection QR
-    s  Sessions                P  Pilot (remote agent)
+    AI                        Dev                       Infra
+    a  Ask Claude             p  Project Launcher       r  Remote Terminal
+    +  Build a Tool           e  Claude Code            d  Docker Manager
+                              x  Cursor Agent           n  Network Info
+                              v  Code Review            k  Kill Port
+                              c  Smart Commit
+                              P  Pilot (remote agent)
 
     System
-    S  Storage Manager         b  Backup Dotfiles         u  Check Updates
-    .  Secrets (Keychain)      /  Show Aliases            i  Install/Update
-    ?  Health Check            B  Bootstrap Mac           0  Exit
+    S  Storage Manager        b  Backup Dotfiles        u  Check Updates
+    .  Secrets & Keys         /  Show Aliases           i  Install/Update
+    ?  Health Check           q  Connection QR          B  Bootstrap Mac
+
+    0  Exit
 ```
 
 Every key is one keypress — no Enter needed. Or skip the menu entirely and use CLI commands like `kmac ask "..."`, `kmac docker health`, or `kmac pilot start`.
@@ -46,7 +49,7 @@ Every key is one keypress — no Enter needed. Or skip the menu entirely and use
 
 ```bash
 # From GitHub
-git clone https://github.com/ksarrafi/RevestTech.git ~/Projects/KMac-CLI
+git clone https://github.com/ksarrafi/KMAC-CLI.git ~/Projects/KMac-CLI
 cd ~/Projects/KMac-CLI && bash install.sh && source ~/.zshrc
 
 # Or from iCloud Drive (for multi-Mac sync)
@@ -60,7 +63,7 @@ The installer auto-detects your setup (git clone vs iCloud), makes scripts execu
 
 ### 1. AI-Powered Development
 
-Five tools that put Claude directly in your terminal workflow — from quick questions to full tool generation.
+Tools that put Claude directly in your terminal workflow — from quick questions to full tool generation.
 
 **Ask Claude** (`a` / `kmac ask`) — instant answers from the command line. Pipe in code, git diffs, logs, or files and get contextual analysis. Supports interactive multi-turn conversations and model switching between Sonnet, Opus, and Haiku.
 
@@ -211,7 +214,7 @@ kmac project -c MyApp          # Open in Claude Code
 kmac project -x MyApp          # Open with Cursor Agent
 ```
 
-**Session Browser** (`e` / `kmac sessions`) — browse, search, and resume past Claude Code conversations. Lists recent sessions with timestamps. Resume the most recent, search by keyword, or pick from a list.
+**Claude Code** (`e` / `kmac sessions`) — launch Claude Code on any project, or browse and resume past conversations. Lists recent sessions with timestamps. Resume the most recent, search by keyword, or pick from a list.
 
 ```bash
 kmac sessions                  # Interactive picker
@@ -238,7 +241,7 @@ kmac killport                  # List all listening ports
 
 A private credential vault that turns KMac into your personal command center — securely storing API keys for AI models, cloud providers, MCP servers, and any service you integrate with.
 
-**Credential Manager** (`.` / `kmac secrets`) — a full-featured secret management system with three backends:
+**Secrets & Keys** (`.` / `kmac secrets`) — a full-featured secret management system with three backends:
 
 - **macOS Keychain** (default) — hardware-backed, OS-managed, unlocked by your login password. Secrets survive reboots and app reinstalls. The most secure option on macOS.
 - **Encrypted File Vault** — AES-256-CBC encryption via `openssl` with PBKDF2 key derivation (100,000 iterations). Protected by a master password. Stored at `~/.config/kmac/vault.enc`. Portable — sync via iCloud, git, or USB to other machines.
@@ -302,6 +305,13 @@ kmac dotbackup hook            # Install auto-backup on shell exit
 
 **Bootstrap Mac** (`B`) — new-machine setup in one command. Export your current Brewfile (captures every brew, cask, and tap), install from a Brewfile on a fresh Mac, apply macOS preferences (Dock auto-hide, key repeat speed, Finder path bar, screenshot location), or run the full bootstrap (all of the above plus the toolkit installer).
 
+**New Mac Setup** (`scripts/setup-mac`) — end-to-end bootstrap for a fresh Mac. Installs Homebrew, Oh My Zsh with plugins, runs the KMac installer, restores your backed-up dotfiles, installs Brewfile packages, and launches the vault guided setup for API keys — all in one script.
+
+```bash
+git clone https://github.com/ksarrafi/KMAC-CLI.git ~/Projects/KMac-CLI
+bash ~/Projects/KMac-CLI/scripts/setup-mac
+```
+
 ---
 
 ### 7. Plugin System & Extensibility
@@ -345,7 +355,7 @@ Included plugins:
 │  └──────────┘  └──────────┘  └──────────┘  └───────┬───────┘  │
 │       │              │             │                │          │
 │  ┌────┴──────────────┴─────────────┴────────────────┴───────┐  │
-│  │  _ui.sh  _auth-helper.sh  _ai-fix.sh  (shared libs)     │  │
+│  │  _ui.sh  _vault.sh  _auth-helper.sh  _ai-fix.sh        │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────┬────────────────────────────┘
                                      │
@@ -401,11 +411,17 @@ KMac-CLI/
 │   ├── update-check        Outdated tool checker with AI error diagnosis
 │   ├── claudeme            Claude Code session launcher
 │   ├── cursoragent         Quick Cursor Agent tasks
-│   └── remote-terminal.sh  Browser-based terminal (ttyd + ngrok + caddy)
+│   ├── remote-terminal.sh  Browser-based terminal (ttyd + ngrok + caddy)
+│   ├── setup-mac           New Mac bootstrap (Homebrew, Oh My Zsh, dotfiles, vault)
+│   ├── release             Version bump, git tag, and GitHub Release creator
+│   ├── aicoder             AICoder Enterprise Framework launcher (subagent support)
+│   ├── install-aicoder     AICoder global installer
+│   └── create-aicoder.sh   Create global 'aicoder' command
 ├── server/
 │   ├── app.py              aiohttp REST + WebSocket — auth, routing, WS
 │   ├── config.py           Token management, project dirs, host/port
 │   ├── session_manager.py  Multi-agent PTY streaming with ANSI stripping
+│   ├── agent_manager.py    Agent lifecycle and session coordination
 │   ├── docker_ops.py       Container/image operations via Docker CLI
 │   ├── docker_dashboard.py Health monitoring API + in-memory history
 │   ├── projects.py         Deep git repo discovery (3 levels)
