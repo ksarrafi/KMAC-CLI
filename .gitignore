@@ -1,6 +1,7 @@
 # Secrets — NEVER commit these
 env.sh
-dotfiles/.zshrc
+dotfiles/
+Brewfile
 
 # macOS
 .DS_Store

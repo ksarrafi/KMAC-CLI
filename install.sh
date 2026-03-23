@@ -122,7 +122,7 @@ echo -e "${CYAN}${ICON_INFO} Creating symlinks in ~/bin...${NC}"
 
 mkdir -p ~/bin
 
-for script in aicoder claudeme remote-terminal.sh ask review aicommit sessions project cursoragent killport pilot dotbackup update-check toolmaker; do
+for script in aicoder claudeme remote-terminal.sh ask review aicommit sessions project cursoragent killport pilot dotbackup update-check toolmaker secrets setup-mac release; do
     if [[ -f "$SCRIPTS_DIR/$script" ]]; then
         if [[ ! -e ~/bin/$script ]]; then
             ln -s "$SCRIPTS_DIR/$script" ~/bin/$script

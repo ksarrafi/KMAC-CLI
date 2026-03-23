@@ -18,6 +18,36 @@ G="$GREEN" Y="$YELLOW" R="$RED" D="$DIM" B="$BOLD" N="$NC"
 DOTFILES=("$HOME/.zshrc" "$HOME/.gitconfig" "$HOME/.gitignore_global" "$HOME/.vimrc" "$HOME/.tmux.conf")
 CLAUDE_ITEMS=("$HOME/.claude/agents" "$HOME/.claude/commands" "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json")
 
+# Patterns that indicate secrets — these lines get scrubbed during backup
+SECRET_PATTERNS=(
+    'API_KEY="sk-'
+    'SECRET.*=.*[A-Za-z0-9_-]{20}'
+    'TOKEN="[A-Za-z0-9_-]{20}'
+    'PASSWORD="[^"]*"'
+    '_PASS="[^"]*"'
+)
+
+_scrub_secrets() {
+    local file="$1"
+    local tmp="${file}.scrubbed"
+    cp "$file" "$tmp"
+    for pat in "${SECRET_PATTERNS[@]}"; do
+        if grep -qE "$pat" "$tmp" 2>/dev/null; then
+            local count
+            count=$(grep -cE "$pat" "$tmp" 2>/dev/null || echo 0)
+            echo -e "  ${Y}!${N} Scrubbed $count secret line(s) matching: ${D}${pat%%=*}${N}"
+        fi
+    done
+    sed -E '
+        /API_KEY="sk-/s/="[^"]*"/="REDACTED_USE_KMAC_SECRETS"/
+        /SECRET.*="[A-Za-z0-9_-]{20}/s/="[^"]*"/="REDACTED_USE_KMAC_SECRETS"/
+        /TOKEN="[A-Za-z0-9_-]{20}/s/="[^"]*"/="REDACTED_USE_KMAC_SECRETS"/
+        /PASSWORD="[^"]*"/s/="[^"]*"/="REDACTED_USE_KMAC_SECRETS"/
+        /_PASS="[^"]*"/s/="[^"]*"/="REDACTED_USE_KMAC_SECRETS"/
+    ' "$file" > "$tmp"
+    echo "$tmp"
+}
+
 show_diff() {
     title_box "Dotfile Changes" "📋"
     local changes=0
@@ -46,13 +76,19 @@ do_backup() {
         [[ -f "$f" ]] || continue
         local name=$(basename "$f")
         local dest="$BACKUP_DIR/$name"
-        if [[ -f "$dest" ]] && ! diff -q "$f" "$dest" &>/dev/null; then
-            echo -e "  ${Y}~${N} $name (changed)"
-            diff --unified=2 "$dest" "$f" 2>/dev/null | head -10 | sed 's/^/      /'
-            read -r -p "    Overwrite? [Y/n] " yn
-            [[ "$yn" =~ ^[nN] ]] && { echo "    Skipped."; continue; }
+        local src="$f"
+        # Scrub secrets from .zshrc before backup
+        if [[ "$name" == ".zshrc" ]]; then
+            src=$(_scrub_secrets "$f")
         fi
-        cp "$f" "$dest"
+        if [[ -f "$dest" ]] && ! diff -q "$src" "$dest" &>/dev/null; then
+            echo -e "  ${Y}~${N} $name (changed)"
+            diff --unified=2 "$dest" "$src" 2>/dev/null | head -10 | sed 's/^/      /'
+            read -r -p "    Overwrite? [Y/n] " yn
+            [[ "$yn" =~ ^[nN] ]] && { [[ "$src" != "$f" ]] && rm -f "$src"; echo "    Skipped."; continue; }
+        fi
+        cp "$src" "$dest"
+        [[ "$src" != "$f" ]] && rm -f "$src"
         echo -e "  ${G}✓${N} $name"
     done
     echo ""
