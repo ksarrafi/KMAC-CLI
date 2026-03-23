@@ -3,14 +3,17 @@
 **Your Mac's command center — AI tools, Docker ops, and remote agent control in one keystroke.**
 
 ![macOS](https://img.shields.io/badge/macOS-13%2B-blue)
+![Linux](https://img.shields.io/badge/Linux-Ubuntu%20|%20Fedora%20|%20Arch-orange)
 ![Bash](https://img.shields.io/badge/Bash-3.2%2B-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 ![Docker](https://img.shields.io/badge/Docker-MCP%20Ready-2496ED)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
+![Tests](https://img.shields.io/badge/Tests-60%20passing-brightgreen)
+![Homebrew](https://img.shields.io/badge/Homebrew-brew%20install%20kmac-FBB040)
 
 ---
 
-KMac-CLI is a portable macOS toolkit that puts AI coding assistants, Docker infrastructure, storage management, and remote agent control behind a single interactive terminal menu — or as direct CLI commands. It's built entirely in Bash (3.2-compatible) with a Python API server and a native iOS companion app.
+KMac-CLI is a portable macOS & Linux toolkit that puts AI coding assistants, Docker infrastructure, storage management, and remote agent control behind a single interactive terminal menu — or as direct CLI commands. It's built entirely in Bash (3.2-compatible) with a Python API server and a native iOS companion app. Install via Homebrew with `brew install ksarrafi/tap/kmac` (after tapping `ksarrafi/tap`), or clone from GitHub as below.
 
 Type `kmac` and you get this:
 
@@ -21,7 +24,7 @@ Type `kmac` and you get this:
     ██╔═██╗  ██║╚██╔╝██║ ██╔══██║ ██║
     ██║  ██╗ ██║ ╚═╝ ██║ ██║  ██║ ╚██████╗
     ╚═╝  ╚═╝ ╚═╝     ╚═╝ ╚═╝  ╚═╝  ╚═════╝
-        portable macOS toolkit                       v2.4.0
+        portable macOS toolkit                       v2.5.0
 
   ┌ services ──────────────────────────────────────────┐
   │  ● Remote Terminal   ● Docker (8)   ○ ngrok        │
@@ -39,6 +42,7 @@ Type `kmac` and you get this:
     S  Storage Manager        b  Backup Dotfiles        u  Check Updates
     .  Secrets & Keys         /  Show Aliases           i  Install/Update
     ?  Health Check           q  Connection QR          B  Bootstrap Mac
+    I  Software Manager
 
     0  Exit
 ```
@@ -48,6 +52,10 @@ Every key is one keypress — no Enter needed. Or skip the menu entirely and use
 ## Install
 
 ```bash
+# Via Homebrew
+brew tap ksarrafi/tap https://github.com/ksarrafi/KMAC-CLI
+brew install ksarrafi/tap/kmac
+
 # From GitHub
 git clone https://github.com/ksarrafi/KMAC-CLI.git ~/Projects/KMac-CLI
 cd ~/Projects/KMac-CLI && bash install.sh && source ~/.zshrc
@@ -331,6 +339,14 @@ Extend the toolkit without touching core code. Drop an executable script into `p
 - `TOOLKIT_DESC` — one-line description shown next to the name
 - `TOOLKIT_KEY` — single-character hotkey (validated against builtins to prevent collisions)
 
+Plugins can also declare lifecycle hooks via a header comment (comma-separated):
+
+```
+# TOOLKIT_HOOKS: post-commit,on-startup
+```
+
+**Plugin API v2 — lifecycle hooks.** Eleven hooks are available: `pre-commit`, `post-commit`, `pre-review`, `post-review`, `pre-deploy`, `post-deploy`, `on-error`, `on-startup`, `on-exit`, `session-start`, and `session-end`. They are wired into `aicommit`, `review`, and the toolkit main loop. Failed hooks log warnings and never block the main flow. See **`plugins/git-stats.sh`** for an example plugin that registers `post-commit` and `on-startup`.
+
 Plugins also work as CLI subcommands: `kmac ssl-monitor` will find and execute `plugins/ssl-monitor` or `plugins/ssl-monitor.sh`.
 
 The AI Tool Builder (`kmac make`) generates plugins in this format automatically — describe what you want, iterate with AI, and it installs the result as a plugin with a menu key or as a script with a CLI subcommand.
@@ -338,6 +354,37 @@ The AI Tool Builder (`kmac make`) generates plugins in this format automatically
 Included plugins:
 - **wifi-password** — show the current Wi-Fi network password from Keychain
 - **cleanup** — free disk space by clearing caches, logs, Trash, and Docker resources
+- **git-stats** (`git-stats.sh`) — example hook plugin (`post-commit`, `on-startup`)
+
+---
+
+### 8. Software Manager
+
+Interactive software installation and updates from the toolkit menu (`I`) or the CLI. The manager organizes tools into **five categories**: **Dev Essentials**, **AI & Coding Agents**, **Editors & Apps**, **Infrastructure**, and **Shell & Productivity**. It covers **30+ tools** including git, node, python, rust, claude, chatgpt, gemini, ollama, aider, copilot, cursor, vscode, docker, kubectl, terraform, starship, and oh-my-zsh.
+
+Each entry shows **installed vs not installed** status with **version numbers** where available. You can **install individually**, **by entire category**, or **install all missing** in one pass. **Search** and **update** flows help you find packages and refresh what you already have.
+
+**CLI:** `kmac software`, `kmac software list`, `kmac software install claude`, `kmac software update`.
+
+---
+
+### 9. Cross-Platform Support
+
+KMac uses **`scripts/_platform.sh`** as a cross-platform abstraction layer. It **detects the OS** (macOS vs Linux), **Linux distro** (Ubuntu, Fedora, Arch), and **package manager** (Homebrew, apt, dnf, or pacman). **Wrapper functions** unify clipboard access, desktop notifications, credential storage (**macOS Keychain** vs **`secret-tool`** on Linux), local IP discovery, and common file operations.
+
+The **software installer** translates Homebrew-oriented commands to the **native package manager** on Linux. The **vault** uses **`secret-tool`** on Linux instead of macOS Keychain when storing secrets through the platform layer.
+
+---
+
+### 10. Testing & CI
+
+The repo ships **60 smoke tests** across **eight test files**, driven by a **lightweight Bash test runner** with **no extra dependencies**. **GitHub Actions** runs a **matrix** on **macOS and Ubuntu** and includes **ShellCheck**. Run the suite locally:
+
+```bash
+bash tests/run-tests.sh
+```
+
+---
 
 ## Architecture
 
@@ -355,7 +402,7 @@ Included plugins:
 │  └──────────┘  └──────────┘  └──────────┘  └───────┬───────┘  │
 │       │              │             │                │          │
 │  ┌────┴──────────────┴─────────────┴────────────────┴───────┐  │
-│  │  _ui.sh  _vault.sh  _auth-helper.sh  _ai-fix.sh        │  │
+│  │  _ui.sh  _vault.sh  _auth-helper.sh  _ai-fix.sh  _hooks.sh  _platform.sh │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────┬────────────────────────────┘
                                      │
@@ -388,11 +435,20 @@ KMac-CLI/
 ├── Brewfile                Homebrew package manifest for Bootstrap
 ├── VERSION                 Single source of truth for version
 ├── CHANGELOG.md
+├── .github/
+│   └── workflows/
+│       └── ci.yml          GitHub Actions CI
+├── homebrew/
+│   └── Formula/
+│       └── kmac.rb         Homebrew formula
+├── tests/                  Test suite (8 test files + runner)
 ├── scripts/
 │   ├── _ui.sh              Shared UI — colors, title_box, pause, spinners
 │   ├── _vault.sh           Triple-backend secret vault (Keychain + AES-256 + Docker)
 │   ├── _auth-helper.sh     Claude API auth (vault → env fallback)
 │   ├── _ai-fix.sh          AI self-healing — catches errors, suggests fixes
+│   ├── _hooks.sh           Plugin lifecycle hook engine (11 hooks)
+│   ├── _platform.sh        Cross-platform abstraction (macOS + Linux)
 │   ├── _pilot-lib.sh       Pilot shared constants and helpers
 │   ├── _pilot-bot.sh       Telegram long-poll bot daemon
 │   ├── pilot               Pilot CLI (start/stop/config/server/status)
@@ -400,6 +456,7 @@ KMac-CLI/
 │   ├── docker-health       Docker health report (--json, --history)
 │   ├── storage             Storage Manager — disk analysis + AI + iCloud
 │   ├── secrets             Credential manager + integration hub
+│   ├── software            Software installer & manager (30+ tools)
 │   ├── ask                 Ask Claude from the terminal
 │   ├── review              AI code review on git diffs
 │   ├── aicommit            AI commit message generator
@@ -437,6 +494,7 @@ KMac-CLI/
 │   ├── project.yml         XcodeGen project spec
 │   └── Sources/            App, models, services, views
 ├── plugins/                User plugins (auto-detected by menu)
+│   └── git-stats.sh        Example hook plugin (post-commit, on-startup)
 └── dotfiles/               Backed-up dotfiles and Claude agent configs
 ```
 
@@ -461,7 +519,7 @@ The Python server exposes a REST + WebSocket API for the iOS app, web dashboards
 | POST | `/api/docker/cleanup` | Prune operations (containers, images, volumes, cache, all) |
 | GET | `/docker-dashboard` | Web health dashboard UI |
 | POST | `/api/run` | Execute shell command (allowlisted) |
-| WS | `/ws` | Real-time session output streaming |
+| WS | `/ws` | Real-time two-way communication (auth, subscribe, session control, system metrics, exec) |
 
 All endpoints (except `/api/ping`, `/ws`, `/docker-dashboard`) require `Authorization: Bearer <token>`.
 
@@ -514,6 +572,9 @@ cd ios/KMacPilot && xcodegen generate && open KMacPilot.xcodeproj
 - **Docker Engine API** — direct unix socket calls via `curl --unix-socket` instead of parsing `docker` CLI output. Faster, more reliable, structured JSON.
 - **No heavy dependencies** — the core toolkit needs nothing beyond what macOS provides. Optional tools enhance UX but aren't required.
 - **Plugin protocol** — three comment headers in a script. That's it. No registration, no config files, no compilation.
+- **Cross-platform** — `_platform.sh` provides a compatibility layer so the same scripts work on macOS and Linux. It wraps OS-specific operations (clipboard, keychain, notifications, package management) behind unified functions.
+- **Lifecycle hooks** — plugins can register for eleven lifecycle events without modifying core code. Failed hooks log warnings but never block the main flow.
+- **Tested** — 60 smoke tests run on every push via GitHub Actions across macOS and Ubuntu.
 - **Portable** — works from a git clone or synced from iCloud Drive. The installer detects which and configures paths accordingly.
 
 ## Contributing

@@ -42,8 +42,11 @@ Follow these conventions:
 
 **Bash (scripts)**
 - Must work with **Bash 3.2** (macOS default). No associative arrays, no namerefs, no `mapfile`.
+- Source `_platform.sh` for cross-platform operations.
+- Source `_hooks.sh` if the script needs to emit lifecycle hooks.
 - Source `_ui.sh` for colors, `title_box`, `pause`, `spinner`, and other helpers.
 - Source `_vault.sh` for credential access — never hardcode `security` commands.
+- For Keychain access, use `platform_keychain_*` helpers instead of calling `security` directly.
 - Use `ui_success`, `ui_warn`, `ui_fail` for one-line feedback.
 - Use `spinner "label" command args` for operations that take time.
 - Menu options: green letter keys, `m` for back, consistent indentation.
@@ -62,6 +65,9 @@ Follow these conventions:
 ### 4. Test
 
 ```bash
+# Run the full test suite (60 smoke tests)
+bash tests/run-tests.sh
+
 # Syntax-check all scripts
 for f in scripts/* toolkit.sh; do bash -n "$f" 2>/dev/null || echo "FAIL: $f"; done
 
@@ -71,7 +77,10 @@ bash toolkit.sh
 # Test a specific script
 bash scripts/docker-health --json
 bash scripts/secrets list
+bash scripts/software list
 ```
+
+GitHub Actions CI runs automatically on push and pull requests to `main`, with jobs on macOS and Ubuntu plus ShellCheck.
 
 ### 5. Commit
 
@@ -114,6 +123,14 @@ title_box "My Plugin" "🔧"
 # Your code here
 ```
 
+Plugins can also declare lifecycle hooks (comma-separated):
+
+```bash
+# TOOLKIT_HOOKS: post-commit,on-startup
+```
+
+Available hooks: `pre-commit`, `post-commit`, `pre-review`, `post-review`, `on-error`, `on-startup`, `on-exit`, `pre-deploy`, `post-deploy`, `session-start`, `session-end`.
+
 Plugins are auto-discovered by the menu. The `TOOLKIT_KEY` is the shortcut key (pick an unused one).
 
 ## Version Bumping (Maintainers)
@@ -121,10 +138,8 @@ Plugins are auto-discovered by the menu. The `TOOLKIT_KEY` is the shortcut key (
 Releases are managed with git tags and GitHub Releases:
 
 ```bash
-# Bump version, tag, and release
-scripts/release patch   # 2.4.0 → 2.4.1
-scripts/release minor   # 2.4.0 → 2.5.0
-scripts/release major   # 2.4.0 → 3.0.0
+scripts/release 2.5.1   # Bumps VERSION, updates Homebrew formula, creates git tag v2.5.1
+git push origin main && git push origin v2.5.1
 ```
 
 The toolkit reads its version from `git describe --tags` at runtime, falling back to the `VERSION` file for non-git installs (like ZIP downloads).

@@ -1,5 +1,58 @@
 # Changelog
 
+## 2.5.0 — 2026-03-22
+
+### New: Software Manager (`kmac software` / `I` in menu)
+- Interactive installer with 5 categories: Dev Essentials, AI & Coding Agents, Editors & Apps, Infrastructure, Shell & Productivity
+- 30+ tools: git, python, node, rust, fzf, bat, claude, chatgpt, gemini, ollama, aider, copilot, cursor, vscode, docker, kubectl, terraform, oh-my-zsh, starship, zoxide, atuin
+- Status dashboard showing installed/missing with version numbers
+- Install individually, by category, or all missing at once
+- Search and update capabilities
+- CLI access: `kmac software list`, `kmac software install <name>`, `kmac software update`
+
+### New: Plugin API v2 — Lifecycle Hooks
+- **Hook engine** (`_hooks.sh`): 11 lifecycle hooks for extending toolkit behavior
+  - `pre-commit`, `post-commit` — wired into `aicommit`
+  - `pre-review`, `post-review` — wired into `review`
+  - `on-startup`, `on-exit` — wired into main menu loop
+  - `on-error` — wired into `tool_error`
+  - `pre-deploy`, `post-deploy`, `session-start`, `session-end` — available for plugins
+- **Plugin auto-registration**: plugins declare `# TOOLKIT_HOOKS: post-commit,on-startup` in headers
+- **API**: `hooks_register`, `hooks_emit`, `hooks_list`, `hooks_clear`
+- **Example plugin**: `git-stats.sh` — shows commit streak and active files on startup and after commits
+
+### New: Cross-Platform Linux Support
+- **Platform abstraction** (`_platform.sh`): detects OS, distro, and package manager
+- Wrapper functions: clipboard, notifications, keychain (secret-tool on Linux), local IP, file age, sed
+- Vault updated: uses `secret-tool` on Linux instead of macOS Keychain
+- Software installer routes `brew` commands to `apt`/`dnf`/`pacman` on Linux
+- Startup hook uses cross-platform `stat` for file age
+
+### New: Test Suite & CI
+- **60 smoke tests** across 8 test files covering toolkit, UI, vault, software, plugins, dotbackup, install
+- **Bash test runner** (`tests/run-tests.sh`): assert helpers, per-file subtotals, summary, no external dependencies
+- **GitHub Actions CI** (`.github/workflows/ci.yml`): runs on push/PR to main, matrix: macOS + Ubuntu
+- **ShellCheck** validation on key scripts
+
+### New: WebSocket Client Commands (Server)
+- Full two-way communication replacing the placeholder `_ws_reader`
+- Auth: first message must be `{"type": "auth", "token": "..."}` 
+- Commands: `ping`, `subscribe`/`unsubscribe`, `session.input`, `session.start`, `session.stop`, `session.list`, `system.status`, `exec`
+- System metrics broadcast every 30 seconds to subscribed clients
+- Session output streaming to subscribed clients
+- `session_manager.py`: added `write_stdin` for PTY input from WebSocket
+
+### New: Homebrew Tap
+- **Formula** (`homebrew/Formula/kmac.rb`): `brew install ksarrafi/tap/kmac`
+- Recommended deps: fzf, bat, jq
+- HEAD install support for bleeding edge
+- **Release script** (`scripts/release`): automates VERSION bump, formula update, git tag creation
+
+### Fixed
+- **dotbackup hook**: no longer uses `BASH_SOURCE` inside zsh `zshexit()` — resolves path at install time
+- **startup-hook.sh**: no longer hardcodes iCloud path — resolves toolkit dir dynamically (env var → script location → iCloud → common paths)
+
+
 ## 2.4.0 — 2026-03-22
 
 ### New: Triple-Backend Secrets Vault

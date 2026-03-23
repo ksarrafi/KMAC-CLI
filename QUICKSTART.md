@@ -3,6 +3,10 @@
 ## Install (30 seconds)
 
 ```bash
+# Via Homebrew (easiest)
+brew tap ksarrafi/tap https://github.com/ksarrafi/KMAC-CLI
+brew install ksarrafi/tap/kmac
+
 # From GitHub
 git clone https://github.com/ksarrafi/KMAC-CLI.git ~/Projects/KMac-CLI
 cd ~/Projects/KMac-CLI && bash install.sh && source ~/.zshrc
@@ -33,6 +37,7 @@ kmac help         # All CLI commands
 | `P` | Pilot (remote agent) | `.` | Secrets & Keys |
 | `?` | Health Check | `q` | Connection QR |
 | `B` | Bootstrap Mac | `i` | Install/Update |
+| | | `I` | Software Manager |
 
 ## Everyday Commands
 
@@ -47,6 +52,32 @@ kmac storage big
 kmac make "a script that monitors SSL certs"
 kmac killport 3000
 kmac project
+```
+
+## Software Manager
+
+```bash
+kmac software                   # Interactive installer menu
+kmac software list              # Show all tools with status
+kmac software install claude    # Install a specific tool
+kmac software update            # Update all installed tools
+kmac software search docker     # Search the catalog
+```
+
+## Plugin Hooks
+
+```bash
+# Plugins can register for lifecycle events:
+# TOOLKIT_HOOKS: post-commit,on-startup
+# Available hooks: pre-commit, post-commit, pre-review, post-review,
+#   on-error, on-startup, on-exit, pre-deploy, post-deploy,
+#   session-start, session-end
+```
+
+## Run Tests
+
+```bash
+bash tests/run-tests.sh         # Run all 60 smoke tests
 ```
 
 ## Docker Health
