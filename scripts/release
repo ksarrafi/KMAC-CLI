@@ -1,0 +1,88 @@
+#!/bin/bash
+# release — bump version, tag, and create GitHub Release
+# Usage: scripts/release [major|minor|patch]
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$ROOT_DIR"
+
+bump_type="${1:-}"
+if [[ "$bump_type" != "major" && "$bump_type" != "minor" && "$bump_type" != "patch" ]]; then
+  echo "Usage: scripts/release [major|minor|patch]"
+  echo ""
+  echo "  major  — breaking changes  (2.4.1 → 3.0.0)"
+  echo "  minor  — new features      (2.4.1 → 2.5.0)"
+  echo "  patch  — bug fixes         (2.4.1 → 2.4.2)"
+  exit 1
+fi
+
+current=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+if [[ -z "$current" ]]; then
+  echo "Error: no existing git tags found. Create an initial tag first:"
+  echo "  git tag -a v1.0.0 -m 'Initial release'"
+  exit 1
+fi
+
+IFS='.' read -r major minor patch_num <<< "$current"
+
+case "$bump_type" in
+  major) major=$((major + 1)); minor=0; patch_num=0 ;;
+  minor) minor=$((minor + 1)); patch_num=0 ;;
+  patch) patch_num=$((patch_num + 1)) ;;
+esac
+
+new_version="${major}.${minor}.${patch_num}"
+tag="v${new_version}"
+
+echo "Current version: v${current}"
+echo "New version:     ${tag}"
+echo ""
+
+if git rev-parse "$tag" >/dev/null 2>&1; then
+  echo "Error: tag $tag already exists."
+  exit 1
+fi
+
+# Update the VERSION file for non-git installs
+echo "$new_version" > "$ROOT_DIR/VERSION"
+
+printf "Proceed? [y/N] "
+read -r confirm
+if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+  git checkout -- VERSION
+  echo "Aborted."
+  exit 0
+fi
+
+git add VERSION
+git commit -m "Bump version to ${tag}"
+git tag -a "$tag" -m "KMac-CLI ${tag}"
+
+echo ""
+echo "Tagged ${tag} locally."
+echo ""
+printf "Push tag and create GitHub Release? [y/N] "
+read -r push_confirm
+if [[ "$push_confirm" == "y" || "$push_confirm" == "Y" ]]; then
+  git push origin main
+  git push origin "$tag"
+
+  if command -v gh &>/dev/null; then
+    echo ""
+    echo "Creating GitHub Release..."
+    gh release create "$tag" \
+      --title "${tag}" \
+      --generate-notes
+    echo ""
+    echo "Done! Release: https://github.com/ksarrafi/KMAC-CLI/releases/tag/${tag}"
+  else
+    echo ""
+    echo "gh CLI not found. Create the release manually at:"
+    echo "  https://github.com/ksarrafi/KMAC-CLI/releases/new?tag=${tag}"
+  fi
+else
+  echo ""
+  echo "Tag created locally. Push when ready:"
+  echo "  git push origin main && git push origin ${tag}"
+fi

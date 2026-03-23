@@ -12,7 +12,9 @@ while [[ -L "$_src" ]]; do
 done
 TOOLKIT_DIR="$(cd "$(dirname "$_src")" && pwd)"
 unset _src _dir
-VERSION=$(cat "$TOOLKIT_DIR/VERSION" 2>/dev/null || echo "unknown")
+# Version from git tag (e.g. v2.4.0 → 2.4.0), falls back to VERSION file for non-git installs
+VERSION=$(git -C "$TOOLKIT_DIR" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+[[ -z "$VERSION" ]] && VERSION=$(cat "$TOOLKIT_DIR/VERSION" 2>/dev/null || echo "unknown")
 export TOOLKIT_RUNNING=1
 
 SCRIPTS_DIR="$TOOLKIT_DIR/scripts"
