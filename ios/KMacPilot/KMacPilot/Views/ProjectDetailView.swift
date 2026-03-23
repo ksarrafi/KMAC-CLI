@@ -117,21 +117,33 @@ struct ProjectDetailView: View {
     private func stopSession() {
         Task { @MainActor in
             guard let api = appState.api else { return }
-            _ = try? await api.stopSession(id: session.id)
+            do {
+                _ = try await api.stopSession(id: session.id)
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 
     private func approveChanges() {
         Task { @MainActor in
             guard let api = appState.api else { return }
-            _ = try? await api.approve()
+            do {
+                _ = try await api.approve()
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 
     private func rejectChanges() {
         Task { @MainActor in
             guard let api = appState.api else { return }
-            _ = try? await api.reject()
+            do {
+                _ = try await api.reject()
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -150,7 +162,11 @@ struct ProjectDetailView: View {
     private func refreshSession() {
         Task { @MainActor in
             guard let api = appState.api else { return }
-            currentSession = try? await api.sessionDetail(id: session.id)
+            do {
+                currentSession = try await api.sessionDetail(id: session.id)
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 }
@@ -223,8 +239,12 @@ struct SessionTerminalTab: View {
     private func loadOutput() {
         Task { @MainActor in
             guard let api = appState.api else { return }
-            let output = try? await api.sessionOutput(id: sessionId, tail: 500)
-            outputLines = output?.lines ?? []
+            do {
+                let output = try await api.sessionOutput(id: sessionId, tail: 500)
+                outputLines = output.lines
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -234,15 +254,20 @@ struct SessionTerminalTab: View {
         askText = ""
         isAsking = true
         Task { @MainActor in
+            defer {
+                isAsking = false
+                isInputFocused = true
+            }
             guard let api = appState.api else { return }
-            if let result = try? await api.askSession(id: sessionId, question: q) {
+            do {
+                let result = try await api.askSession(id: sessionId, question: q)
                 if let output = result.output {
                     outputLines.append(contentsOf: ["", "── \(q) ──", ""])
                     outputLines.append(contentsOf: output.components(separatedBy: "\n"))
                 }
+            } catch {
+                appState.errorMessage = error.localizedDescription
             }
-            isAsking = false
-            isInputFocused = true
         }
     }
 
@@ -250,10 +275,13 @@ struct SessionTerminalTab: View {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
             Task { @MainActor in
                 guard let api = appState.api else { return }
-                if let output = try? await api.sessionOutput(id: sessionId, tail: 500) {
+                do {
+                    let output = try await api.sessionOutput(id: sessionId, tail: 500)
                     if output.total > outputLines.count {
                         outputLines = output.lines
                     }
+                } catch {
+                    appState.errorMessage = error.localizedDescription
                 }
             }
         }
@@ -354,8 +382,12 @@ struct ProjectFilesTab: View {
         currentPath = path
         Task { @MainActor in
             guard let api = appState.api else { return }
-            if let result = try? await api.browse(path: path) {
+            do {
+                let result = try await api.browse(path: path)
                 items = result.items ?? []
+            } catch {
+                items = []
+                appState.errorMessage = error.localizedDescription
             }
             isLoading = false
         }
@@ -375,7 +407,11 @@ struct ProjectFilesTab: View {
     private func loadFile(_ path: String) {
         Task { @MainActor in
             guard let api = appState.api else { return }
-            selectedFile = try? await api.readFileAbs(path: path)
+            do {
+                selectedFile = try await api.readFileAbs(path: path)
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -454,10 +490,16 @@ struct ProjectGitTab: View {
         isLoading = true
         Task { @MainActor in
             guard let api = appState.api else { return }
-            async let d = api.diff()
-            async let c = api.gitLog(project: projectName)
-            diff = try? await d
-            commits = (try? await c) ?? []
+            do {
+                async let d = api.diff()
+                async let c = api.gitLog(project: projectName)
+                diff = try await d
+                commits = try await c
+            } catch {
+                appState.errorMessage = error.localizedDescription
+                diff = nil
+                commits = []
+            }
             isLoading = false
         }
     }

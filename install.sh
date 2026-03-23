@@ -122,12 +122,12 @@ fi
 # ─── 6. Symlink scripts to ~/bin (optional) ───────────────────────────────
 echo -e "${CYAN}${ICON_INFO} Creating symlinks in ~/bin...${NC}"
 
-mkdir -p ~/bin
+mkdir -p "$HOME/bin"
 
 for script in aicoder claudeme remote-terminal.sh ask review aicommit sessions project cursoragent killport pilot dotbackup update-check toolmaker secrets setup-mac release software ollama-setup; do
     if [[ -f "$SCRIPTS_DIR/$script" ]]; then
-        if [[ ! -e ~/bin/$script ]]; then
-            ln -s "$SCRIPTS_DIR/$script" ~/bin/$script
+        if [[ ! -e "$HOME/bin/$script" ]]; then
+            ln -s "$SCRIPTS_DIR/$script" "$HOME/bin/$script"
             echo -e "${GREEN}${ICON_SUCCESS} Symlinked $script${NC}"
         else
             echo -e "${YELLOW}${ICON_WARNING} ~/bin/$script already exists${NC}"
@@ -136,8 +136,8 @@ for script in aicoder claudeme remote-terminal.sh ask review aicommit sessions p
 done
 
 # Symlink kmac -> toolkit.sh for direct CLI access
-if [[ ! -e ~/bin/kmac ]]; then
-    ln -s "$TOOLKIT_DIR/toolkit.sh" ~/bin/kmac
+if [[ ! -e "$HOME/bin/kmac" ]]; then
+    ln -s "$TOOLKIT_DIR/toolkit.sh" "$HOME/bin/kmac"
     echo -e "${GREEN}${ICON_SUCCESS} Symlinked kmac${NC}"
 else
     echo -e "${YELLOW}${ICON_WARNING} ~/bin/kmac already exists${NC}"
@@ -159,7 +159,7 @@ if (( ${#MISSING[@]} )); then
     echo -e "${YELLOW}${ICON_WARNING} Missing: ${MISSING[*]}${NC}"
     read -r -p "Install with Homebrew? [y/N] " -n 1 -r
     echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [[ "$REPLY" =~ ^[Yy]$ ]]; then
         if command -v brew &>/dev/null; then
             brew install "${MISSING[@]}"
             echo -e "${GREEN}${ICON_SUCCESS} Installed dependencies${NC}"

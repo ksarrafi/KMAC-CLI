@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.7.0 — 2026-03-22
+
+### Deep Security Hardening (5-round audit, zero remaining issues)
+
+**CRITICAL fixes:**
+- Vault: OpenSSL password no longer visible in `ps` — uses `-pass stdin` / `-pass env:` instead of `-pass "pass:..."`
+- Software manager: all `eval` replaced with type-safe dispatchers for install/check
+- AI fix: auto-run removed entirely — copy-to-clipboard only
+
+**HIGH fixes:**
+- Server: eliminate ALL `create_subprocess_shell` — `system_ops.py` fully rewritten with `create_subprocess_exec` and Python parsing
+- Server: `tail=0` parameter no longer bypasses output limits (Python `[-0:]` quirk)
+- Server: sensitive prompts no longer broadcast to all WebSocket clients
+- Server: prompt size limits (100KB) and leading-dash rejection for CLI argv injection
+- Server: `agent_manager.ask()` now has 120s timeout with kill+wait
+- Server: `agent_manager` output lines capped at 10,000
+- Server: WebSocket clients list protected by `asyncio.Lock`
+- Server: generic error messages in all API responses (no `str(e)` / `str(exc)`)
+- Bash: plugin subcommand path traversal blocked (`/` and `..` rejected)
+- Bash: `safe_run` requires user confirmation before sending logs to AI
+- Bash: `kill -- -"$pid"` replaced with `kill "$pid"` (no accidental group kill)
+- Bash: Telegram `tg_send` uses `--data-urlencode` for proper encoding
+- Bash: `pilot_agent_cmd` deprecated (shell string injection risk)
+- Bash: `create-aicoder` writes to `$HOME/bin` not `/usr/local/bin`
+- iOS: ALL `try?` replaced with `do/catch` + user-visible error messages (20+ call sites)
+- iOS: empty `catch {}` blocks eliminated
+- Config: removed dangerous Claude allowlist entries (`pip install`, `npm i`, `source ~/.zshrc`)
+- Vault: rate-limit map LRU eviction (prevents unbounded memory growth)
+
+**MEDIUM fixes:**
+- Server: directory listing capped at 2,000 items; tree walk capped at 2,000 nodes
+- Server: Docker dashboard history race condition fixed with `asyncio.Lock`
+- Server: Docker dashboard `minutes` parameter clamped (1-1440)
+- Server: `config.py` handles invalid PORT env gracefully
+- Server: narrowed broad `except Exception` to specific exception types across all files
+- Bash: `mkdir -p && chmod` operator precedence fixed (toolkit.sh, startup-hook.sh)
+- Bash: PID file TOCTOU hardened (read+validate before kill)
+- Bash: `install.sh` uses `"$HOME/bin/"` consistently (no unquoted `~/bin/`)
+- Bash: startup-hook.sh removes zsh syntax from bash fallback path
+- Bash: `aliases.sh` uses `python3`, adds `--` to docker xargs
+- Bash: `_pilot-lib.sh` atomic JSON writes via mktemp+mv
+- Bash: `remote-terminal.sh` chmod 600 on Caddyfile, proper PID printf
+- Bash: `_hooks.sh` array-based hook name iteration
+- Bash: `scripts/docker` removes shell interpolation from Python `-c` calls
+- iOS: `TerminalView` guards against `scrollTo(-1)` crash
+- iOS: `ConnectView` placeholder changed to `https://`
+- iOS: `FileBrowserView` stable Identifiable ID
+
 ## 2.6.0 — 2026-03-22
 
 ### Security Hardening (comprehensive audit — 4 rounds, zero remaining issues)

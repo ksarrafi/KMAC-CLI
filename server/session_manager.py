@@ -47,6 +47,10 @@ def _strip_ansi(text: str) -> str:
 
 def _agent_cmd(agent: str, prompt: str) -> tuple[list[str], bool]:
     """Returns (command, is_stream_json)."""
+    if len(prompt) > 100_000:
+        raise ValueError("Prompt too large")
+    if prompt.startswith("-"):
+        prompt = "./" + prompt
     if agent == "cursor":
         return ["cursor", "agent", "--trust", prompt], False
     return ["claude", "-p", "--output-format", "stream-json", "--verbose", prompt], True
@@ -262,7 +266,7 @@ class SessionManager:
             "session_id": sid,
             "project": project,
             "agent": agent_label,
-            "prompt": prompt,
+            "has_prompt": bool(prompt),
         })
 
         # If a prompt was provided, start the agent immediately
@@ -290,8 +294,8 @@ class SessionManager:
         try:
             await loop.run_in_executor(None, _write)
         except OSError:
-            log.warning("Session creation failed", exc_info=True)
-            return {"error": "Session creation failed"}
+            log.warning("Failed to write to session", exc_info=True)
+            return {"error": "Failed to write to session"}
         return {"ok": True}
 
     async def send_message(self, session_id: str, message: str) -> dict:
@@ -323,7 +327,12 @@ class SessionManager:
 
     async def _run_agent(self, session: Session, prompt: str):
         """Launch the agent subprocess inside a PTY for real-time output."""
-        cmd, is_stream = _agent_cmd(session.agent, prompt)
+        try:
+            cmd, is_stream = _agent_cmd(session.agent, prompt)
+        except ValueError as exc:
+            session.status = "failed"
+            await self._emit(session, f"✗ {exc}")
+            return
         session.stream_json = is_stream
         env = _clean_env()
 
@@ -449,7 +458,7 @@ class SessionManager:
 
             try:
                 session.log_path.unlink(missing_ok=True)
-            except Exception:
+            except OSError:
                 log.debug("Failed to remove session log", exc_info=True)
 
             del self._sessions[session_id]

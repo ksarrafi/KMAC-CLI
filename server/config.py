@@ -16,7 +16,10 @@ PILOT_DIR.mkdir(parents=True, exist_ok=True)
 PILOT_DIR.chmod(0o700)
 
 HOST = os.getenv("KMAC_HOST", "127.0.0.1")
-PORT = int(os.getenv("KMAC_PORT", "7890"))
+try:
+    PORT = int(os.getenv("KMAC_PORT", "7890"))
+except ValueError:
+    PORT = 7890
 
 
 def load_config() -> dict:

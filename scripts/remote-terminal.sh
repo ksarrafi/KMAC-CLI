@@ -74,7 +74,7 @@ remote-terminal() {
 
     # ── ttyd ──
     ttyd --writable -p 7681 tmux attach -t remote &>/dev/null &
-    echo $! > "$ttyd_pidfile"
+    printf '%s\n' "$!" > "$ttyd_pidfile"
     sleep 1
     if ! kill -0 "$(cat "$ttyd_pidfile")" 2>/dev/null; then
         _rt_cleanup "ttyd failed to start on port 7681 (port already in use?)"; return 1
@@ -96,9 +96,10 @@ remote-terminal() {
     }
 }
 EOF
+    chmod 600 "$caddyfile"
 
     caddy run --config "$caddyfile" &>/dev/null &
-    echo $! > "$caddy_pidfile"
+    printf '%s\n' "$!" > "$caddy_pidfile"
     sleep 1
     if ! kill -0 "$(cat "$caddy_pidfile")" 2>/dev/null; then
         _rt_cleanup "Caddy failed to start on port 7682"; return 1
@@ -111,7 +112,7 @@ EOF
     else
         ngrok http 7682 &>/dev/null &
     fi
-    echo $! > "$ngrok_pidfile"
+    printf '%s\n' "$!" > "$ngrok_pidfile"
     sleep 2
     if ! kill -0 "$(cat "$ngrok_pidfile")" 2>/dev/null; then
         _rt_cleanup "ngrok failed to start"; return 1
@@ -162,9 +163,8 @@ stop-remote-terminal() {
         fi
     done
 
-    # ── fallback: targeted pkill ──
+    # ── fallback: targeted pkill (caddy stopped via caddy.pid in loop above) ──
     pkill -f 'ttyd -p 7681' 2>/dev/null
-    pkill -f "caddy run --config ${pid_dir}/" 2>/dev/null
     pkill -f 'ngrok http 7682' 2>/dev/null
 
     # ── clean up runtime files ──

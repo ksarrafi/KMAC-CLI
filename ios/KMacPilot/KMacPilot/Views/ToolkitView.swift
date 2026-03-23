@@ -104,9 +104,17 @@ struct DockerTab: View {
     private func load() async {
         guard let api = appState.api else { return }
         isLoading = true
-        dockerAvailable = (try? await api.dockerStatus()) ?? false
-        if dockerAvailable {
-            containers = (try? await api.dockerContainers()) ?? []
+        do {
+            dockerAvailable = try await api.dockerStatus()
+            if dockerAvailable {
+                containers = try await api.dockerContainers()
+            } else {
+                containers = []
+            }
+        } catch {
+            appState.errorMessage = error.localizedDescription
+            dockerAvailable = false
+            containers = []
         }
         isLoading = false
     }
@@ -114,8 +122,12 @@ struct DockerTab: View {
     private func performAction(_ id: String, _ action: String) {
         Task { @MainActor in
             guard let api = appState.api else { return }
-            _ = try? await api.dockerAction(container: id, action: action)
-            try? await Task.sleep(for: .seconds(1))
+            do {
+                _ = try await api.dockerAction(container: id, action: action)
+                try await Task.sleep(for: .seconds(1))
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
             await load()
         }
     }
@@ -123,8 +135,12 @@ struct DockerTab: View {
     private func loadLogs(_ id: String, _ name: String) {
         Task { @MainActor in
             guard let api = appState.api else { return }
-            let logs = (try? await api.dockerLogs(container: id)) ?? ""
-            showLogs = (name, logs)
+            do {
+                let logs = try await api.dockerLogs(container: id)
+                showLogs = (name, logs)
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 }
@@ -247,10 +263,16 @@ struct ServicesTab: View {
     private func load() async {
         guard let api = appState.api else { return }
         isLoading = true
-        async let d = api.services()
-        async let b = api.brewServices()
-        devServices = (try? await d) ?? []
-        brewServices = (try? await b) ?? []
+        do {
+            async let d = api.services()
+            async let b = api.brewServices()
+            devServices = try await d
+            brewServices = try await b
+        } catch {
+            appState.errorMessage = error.localizedDescription
+            devServices = []
+            brewServices = []
+        }
         isLoading = false
     }
 }
@@ -319,10 +341,16 @@ struct SystemTab: View {
     private func load() async {
         guard let api = appState.api else { return }
         isLoading = true
-        async let d = api.disk()
-        async let p = api.processes()
-        disks = (try? await d) ?? []
-        processes = (try? await p) ?? []
+        do {
+            async let d = api.disk()
+            async let p = api.processes()
+            disks = try await d
+            processes = try await p
+        } catch {
+            appState.errorMessage = error.localizedDescription
+            disks = []
+            processes = []
+        }
         isLoading = false
     }
 
@@ -383,7 +411,12 @@ struct NetworkTab: View {
     private func load() async {
         guard let api = appState.api else { return }
         isLoading = true
-        networkInfo = try? await api.network()
+        do {
+            networkInfo = try await api.network()
+        } catch {
+            appState.errorMessage = error.localizedDescription
+            networkInfo = nil
+        }
         isLoading = false
     }
 }

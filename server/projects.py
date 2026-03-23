@@ -13,6 +13,8 @@ SKIP_DIRS = {
 }
 DEEP_SKIP_DIRS = SKIP_DIRS | {"Backup", "Archive", "backup"}
 MAX_SCAN_DEPTH = 3
+MAX_ITEMS = 2000
+MAX_TREE_NODES = 2000
 
 
 def _get_branch(project_path: str) -> str:
@@ -21,7 +23,7 @@ def _get_branch(project_path: str) -> str:
             ["git", "-C", project_path, "branch", "--show-current"],
             stderr=subprocess.DEVNULL, timeout=3,
         ).decode().strip() or None
-    except Exception:
+    except (subprocess.CalledProcessError, OSError):
         return "detached"
 
 
@@ -151,11 +153,18 @@ def file_tree(base_dir: str, sub_path: str = "", max_depth: int = 3) -> list[dic
         root.relative_to(base)
     except ValueError:
         return []
-    return _walk(root, root, 0, max_depth)
+    node_count = [0]
+    return _walk(root, root, 0, max_depth, node_count)
 
 
-def _walk(current: Path, root: Path, depth: int, max_depth: int) -> list[dict]:
-    if depth >= max_depth:
+def _walk(
+    current: Path,
+    root: Path,
+    depth: int,
+    max_depth: int,
+    node_count: list[int],
+) -> list[dict]:
+    if depth >= max_depth or node_count[0] >= MAX_TREE_NODES:
         return []
     items = []
     try:
@@ -164,15 +173,19 @@ def _walk(current: Path, root: Path, depth: int, max_depth: int) -> list[dict]:
         return []
 
     for entry in entries:
+        if node_count[0] >= MAX_TREE_NODES:
+            break
         name = entry.name
         if name in SKIP_DIRS or name.startswith("."):
             continue
         rel = str(entry.relative_to(root))
         if entry.is_dir():
-            children = _walk(entry, root, depth + 1, max_depth)
+            children = _walk(entry, root, depth + 1, max_depth, node_count)
+            node_count[0] += 1
             items.append({"name": name, "path": rel, "type": "dir", "children": children})
         else:
             size = entry.stat().st_size
+            node_count[0] += 1
             items.append({"name": name, "path": rel, "type": "file", "size": size})
     return items
 
@@ -196,6 +209,8 @@ def browse_directory(dir_path: str) -> dict:
         return {"error": "Permission denied", "path": dir_path}
 
     for entry in entries:
+        if len(items) >= MAX_ITEMS:
+            break
         name = entry.name
         if name.startswith("."):
             continue

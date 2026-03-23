@@ -23,7 +23,7 @@ struct ConnectView: View {
                         Label("Server URL", systemImage: "link")
                             .font(.caption.bold())
                             .foregroundStyle(.secondary)
-                        TextField("http://192.168.1.x:7890", text: $appState.serverURL)
+                        TextField("https://192.168.1.x:7890", text: $appState.serverURL)
                             .textFieldStyle(.roundedBorder)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)

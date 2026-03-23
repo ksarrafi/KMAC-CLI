@@ -20,7 +20,8 @@ export TOOLKIT_RUNNING=1
 SCRIPTS_DIR="$TOOLKIT_DIR/scripts"
 PLUGINS_DIR="$TOOLKIT_DIR/plugins"
 KMAC_CACHE_DIR="${HOME}/.cache/kmac"
-[[ -d "$KMAC_CACHE_DIR" ]] || mkdir -p "$KMAC_CACHE_DIR" && chmod 700 "$KMAC_CACHE_DIR"
+if [[ ! -d "$KMAC_CACHE_DIR" ]]; then mkdir -p "$KMAC_CACHE_DIR"; fi
+chmod 700 "$KMAC_CACHE_DIR" 2>/dev/null
 
 # ─── Shared UI (colors, title_box, pause) ─────────────────────────────────
 source "$SCRIPTS_DIR/_ui.sh"
@@ -75,6 +76,9 @@ safe_run() {
             f|F)
                 local captured
                 captured=$(cat "$logfile" 2>/dev/null)
+                echo -e "${YELLOW}Log may contain sensitive data. Send to AI for diagnosis?${NC}"
+                read -r -n1 -p "(y/N) " _confirm; echo ""
+                [[ "$_confirm" == [yY] ]] || { rm -f "$logfile"; return "$exit_code"; }
                 ai_diagnose "$captured" "$label"
                 ;;
             r|R) safe_run "$label" "$@" ;;
@@ -87,7 +91,7 @@ safe_run() {
 
 check_rt() {
     local pf="$HOME/.config/kmac/remote-terminal/ttyd.pid"
-    [[ -f "$pf" ]] && kill -0 "$(cat "$pf" 2>/dev/null)" 2>/dev/null && echo "up" || echo "down"
+    local _pid; _pid=""; [[ -f "$pf" ]] && read -r _pid < "$pf" 2>/dev/null; [[ "$_pid" =~ ^[0-9]+$ ]] && kill -0 "$_pid" 2>/dev/null && echo "up" || echo "down"
 }
 check_docker() {
     docker info &>/dev/null 2>&1 &
@@ -208,8 +212,8 @@ animate_intro() {
         case $(( frame % 6 )) in
             0) pc=33;; 1) pc=39;; 2) pc=45;; 3) pc=49;; 4) pc=45;; 5) pc=39;;
         esac
-        printf '\033[6;%dH\033[38;5;%dm\033[1m █▄▀  █▀▄▀█  ▄▀█  █▀▀\033[0m' $text_c $pc
-        printf '\033[7;%dH\033[38;5;%dm\033[1m █ █  █ ▀ █  █▀█  █▄▄\033[0m  \033[2mCLI\033[0m' $text_c $pc
+        printf '\033[6;%dH\033[38;5;%dm\033[1m █▄▀  █▀▄▀█  ▄▀█  █▀▀\033[0m' "$text_c" "$pc"
+        printf '\033[7;%dH\033[38;5;%dm\033[1m █ █  █ ▀ █  █▀█  █▄▄\033[0m  \033[2mCLI\033[0m' "$text_c" "$pc"
         printf '\033[9;14H\033[2mportable macOS toolkit\033[0m'
 
         sleep 0.06
@@ -855,6 +859,10 @@ if [[ $# -gt 0 ]]; then
             echo -e "${DIM}Run 'toolkit' or 'kmac' with no args for the interactive menu.${NC}"
             ;;
         *)
+            if [[ "$subcmd" == *"/"* || "$subcmd" == *".."* ]]; then
+                echo "Invalid plugin name." >&2
+                exit 1
+            fi
             if [[ -x "$PLUGINS_DIR/$subcmd" || -x "$PLUGINS_DIR/${subcmd}.sh" ]]; then
                 p="$PLUGINS_DIR/$subcmd"
                 [[ -x "$p" ]] || p="${p}.sh"

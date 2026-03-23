@@ -46,6 +46,13 @@ def _rate_limit_allow(client_ip: str) -> bool:
     q = _ip_request_times.setdefault(client_ip, deque())
     while q and q[0] < now - RATE_WINDOW_SEC:
         q.popleft()
+    if len(_ip_request_times) > 10_000:
+        oldest = sorted(
+            _ip_request_times.keys(),
+            key=lambda k: _ip_request_times[k][-1] if _ip_request_times[k] else 0,
+        )
+        for k in oldest[: len(_ip_request_times) - 5000]:
+            del _ip_request_times[k]
     if len(q) >= RATE_MAX_PER_WINDOW:
         return False
     q.append(now)
@@ -95,6 +102,7 @@ def _load_token() -> str:
         os.makedirs(os.path.dirname(TOKEN_PATH), exist_ok=True)
         with open(TOKEN_PATH, "w") as f:
             f.write(_token_cache)
+        os.chmod(TOKEN_PATH, 0o600)
     return _token_cache
 
 
@@ -131,7 +139,7 @@ class VaultHandler(BaseHTTPRequestHandler):
             return hmac.compare_digest(
                 token.encode("utf-8"), _load_token().encode("utf-8")
             )
-        except Exception:
+        except (UnicodeEncodeError, TypeError):
             return False
 
     def _json_response(self, data: dict, status: int = 200):

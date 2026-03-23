@@ -13,9 +13,19 @@ from config import PILOT_DIR, active_agent, load_config
 
 log = logging.getLogger(__name__)
 
+_MAX_OUTPUT_LINES = 10_000
+
 TASK_FILE = PILOT_DIR / "task.json"
 AGENT_LOG = PILOT_DIR / "agent.log"
 AGENT_PID = PILOT_DIR / "agent.pid"
+
+
+def _prepare_agent_prompt(prompt: str) -> str:
+    if len(prompt) > 100_000:
+        raise ValueError("Prompt too large")
+    if prompt.startswith("-"):
+        prompt = "./" + prompt
+    return prompt
 
 
 class AgentManager:
@@ -77,6 +87,11 @@ class AgentManager:
         if not os.path.isdir(project_dir):
             return {"error": f"Directory not found: {project_dir}"}
 
+        try:
+            prompt = _prepare_agent_prompt(prompt)
+        except ValueError:
+            return {"error": "Invalid prompt"}
+
         agent = agent or active_agent()
         agent_label = "Cursor Agent" if agent == "cursor" else "Claude Code"
 
@@ -124,6 +139,8 @@ class AgentManager:
             async for raw_line in self._proc.stdout:
                 line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
                 self._output_lines.append(line)
+                if len(self._output_lines) > _MAX_OUTPUT_LINES:
+                    self._output_lines = self._output_lines[-_MAX_OUTPUT_LINES:]
 
                 with open(AGENT_LOG, "a") as f:
                     f.write(line + "\n")
@@ -183,6 +200,10 @@ class AgentManager:
             context = "Previous context:\n" + "\n".join(tail) + "\n\nFollow-up: "
 
         prompt = context + question
+        try:
+            prompt = _prepare_agent_prompt(prompt)
+        except ValueError:
+            return {"error": "Invalid prompt"}
 
         if agent == "cursor":
             cmd = ["cursor", "agent", prompt]
@@ -196,10 +217,18 @@ class AgentManager:
             cwd=project_dir,
         )
 
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {"error": "Agent timed out", "output": ""}
+
         output = stdout.decode("utf-8", errors="replace") if stdout else ""
 
         self._output_lines = output.splitlines()
+        if len(self._output_lines) > _MAX_OUTPUT_LINES:
+            self._output_lines = self._output_lines[-_MAX_OUTPUT_LINES:]
         AGENT_LOG.write_text(output)
 
         return {"ok": True, "output": output, "exit_code": proc.returncode}

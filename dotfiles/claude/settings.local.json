@@ -3,7 +3,6 @@
     "allow": [
       "Bash(claude doctor)",
       "Bash(mkdir:*)",
-      "Bash(python3 -m pip install -r requirements.txt:*)",
       "Bash(docker ps:*)",
       "Bash(docker logs:*)",
       "Bash(docker images:*)",
@@ -13,7 +12,6 @@
       "Bash(docker context:*)",
       "Bash(open -a:*)",
       "Bash(docker buildx:*)",
-      "Bash(source ~/.zshrc)",
       "Bash(du:*)",
       "Bash(tmutil listlocalsnapshots:*)",
       "Bash(tmutil listbackups:*)",
@@ -22,9 +20,7 @@
       "Bash(ls:*)",
       "Bash(xattr:*)",
       "Bash(brctl log:*)",
-      "Bash(~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/.sync-test)",
-      "Bash(defaults read:*)",
-      "Bash(npm i:*)"
+      "Bash(defaults read:*)"
     ],
     "deny": [
       "Bash(rm -rf /:*)",

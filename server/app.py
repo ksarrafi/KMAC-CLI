@@ -79,19 +79,27 @@ async def handle_ping(_request):
 
 
 async def handle_system(_request):
-    proc_up = await asyncio.create_subprocess_shell(
-        "uptime | sed 's/.*up /up /' | sed 's/,.*//'",
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    proc_up = await asyncio.create_subprocess_exec(
+        "uptime",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
     )
     stdout_up, _ = await proc_up.communicate()
-    uptime = stdout_up.decode().strip() if stdout_up else "?"
+    raw_up = stdout_up.decode(errors="replace").strip() if stdout_up else ""
+    idx = raw_up.find(" up ")
+    if idx >= 0:
+        rest = raw_up[idx + 1 :].strip()
+        c = rest.find(",")
+        uptime = rest[:c] if c >= 0 else rest
+    else:
+        uptime = raw_up or "?"
 
-    proc_ld = await asyncio.create_subprocess_shell(
-        "sysctl -n vm.loadavg 2>/dev/null",
+    proc_ld = await asyncio.create_subprocess_exec(
+        "sysctl", "-n", "vm.loadavg",
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
     )
     stdout_ld, _ = await proc_ld.communicate()
-    load = stdout_ld.decode().split() if stdout_ld else []
+    load = stdout_ld.decode(errors="replace").split() if stdout_ld else []
     cfg = load_config()
     return json_ok({
         "hostname": platform.node(),
@@ -268,6 +276,7 @@ async def handle_session_output(request):
         tail = int(request.query.get("tail", "100"))
     except ValueError:
         tail = 100
+    tail = max(1, min(tail, 10000))
     lines = session.output_lines[-tail:]
     return json_ok({"lines": lines, "total": len(session.output_lines), "session_id": sid})
 
@@ -358,6 +367,7 @@ async def handle_task_output(request):
         tail = int(request.query.get("tail", "50"))
     except ValueError:
         tail = 50
+    tail = max(1, min(tail, 10000))
     return json_ok({"lines": s.output_lines[-tail:], "total": len(s.output_lines)})
 
 
@@ -694,13 +704,13 @@ def _ws_should_deliver(state: WSClientState, event: dict) -> bool:
 async def _ws_build_system_status_dict() -> dict:
     mem = await memory_info()
     disks = await disk_usage()
-    proc_ld = await asyncio.create_subprocess_shell(
-        "sysctl -n vm.loadavg 2>/dev/null",
+    proc_ld = await asyncio.create_subprocess_exec(
+        "sysctl", "-n", "vm.loadavg",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
     stdout_ld, _ = await proc_ld.communicate()
-    load = stdout_ld.decode().strip() if stdout_ld else ""
+    load = stdout_ld.decode(errors="replace").strip() if stdout_ld else ""
     docker_block: dict = {"available": docker_available()}
     if docker_block["available"]:
         try:
@@ -719,7 +729,12 @@ async def _ws_system_broadcast_loop(app: web.Application) -> None:
     try:
         while True:
             await asyncio.sleep(30)
-            clients = list(app.get("ws_clients", []))
+            lock = app.get("ws_lock")
+            if lock:
+                async with lock:
+                    clients = list(app.get("ws_clients", []))
+            else:
+                clients = list(app.get("ws_clients", []))
             if not any(c.system for c in clients):
                 continue
             try:
@@ -958,12 +973,12 @@ async def handle_ws(request):
     if not await _ws_handshake_auth(ws, request):
         return ws
 
-    if len(app["ws_clients"]) >= _WS_MAX_CLIENTS:
-        await ws.close(code=1013, message=b"Too many connections")
-        return ws
-
     state = WSClientState(ws)
-    app["ws_clients"].append(state)
+    async with app["ws_lock"]:
+        if len(app["ws_clients"]) >= _WS_MAX_CLIENTS:
+            await ws.close(code=1013, message=b"Too many connections")
+            return ws
+        app["ws_clients"].append(state)
     queue = await session_mgr.subscribe()
 
     sessions = [s.to_dict() for s in session_mgr.sessions]
@@ -986,10 +1001,11 @@ async def handle_ws(request):
             except asyncio.CancelledError:
                 pass
     finally:
-        try:
-            app["ws_clients"].remove(state)
-        except ValueError:
-            pass
+        async with app["ws_lock"]:
+            try:
+                app["ws_clients"].remove(state)
+            except ValueError:
+                pass
         await session_mgr.unsubscribe(queue)
 
     return ws
@@ -1012,6 +1028,7 @@ def _active_dir() -> str:
 def create_app() -> web.Application:
     app = web.Application(middlewares=[auth_middleware])
     app["ws_clients"] = []
+    app["ws_lock"] = asyncio.Lock()
     app.on_startup.append(_ws_startup)
     app.on_cleanup.append(_ws_cleanup)
 

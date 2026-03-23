@@ -36,10 +36,16 @@ echo -e "${GREEN}${ICON_SUCCESS} Found AICoder framework: $AICODER_DIR${NC}"
 
 # Create the global aicoder command
 create_global_aicoder() {
-    echo -e "${CYAN}${ICON_INFO} Creating global aicoder command...${NC}"
-    
-    # Create the global command script
-    cat > "/usr/local/bin/aicoder" << 'EOF'
+    echo -e "${CYAN}${ICON_INFO} Creating aicoder command in ~/bin...${NC}"
+
+    mkdir -p "$HOME/bin"
+    if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
+        echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.zshrc" 2>/dev/null || true
+        echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc" 2>/dev/null || true
+        echo -e "${GREEN}${ICON_SUCCESS} Added ~/bin to PATH${NC}"
+    fi
+
+    cat > "$HOME/bin/aicoder" << 'EOF'
 #!/usr/bin/env bash
 # aicoder — AICoder Enterprise Framework launcher
 # Similar to claudeme but for AICoder with subagent support
@@ -134,14 +140,14 @@ pick_subagent_menu() {
     echo "" >&2
     read -r -p "Enter choice (1-${#SUBAGENTS[@]}): " choice
     case "$choice" in
-        [1-9]*)
-            local idx=$((choice-1))
-            if (( idx >= 0 && idx < ${#SUBAGENTS[@]} )); then
+        ''|*[!0-9]*) echo "Invalid choice" >&2; echo "" ;;
+        *)
+            local idx=$((choice - 1))
+            if (( choice >= 1 && choice <= ${#SUBAGENTS[@]} )); then
                 IFS=':' read -r name description <<< "${SUBAGENTS[$idx]}"
                 echo "$name"
             fi
             ;;
-        *) echo "" ;;
     esac
 }
 
@@ -271,8 +277,8 @@ case "${1:-help}" in
 esac
 EOF
 
-    chmod +x "/usr/local/bin/aicoder"
-    echo -e "${GREEN}${ICON_SUCCESS} Global aicoder command created: /usr/local/bin/aicoder${NC}"
+    chmod +x "$HOME/bin/aicoder"
+    echo -e "${GREEN}${ICON_SUCCESS} aicoder command created: $HOME/bin/aicoder${NC}"
 }
 
 # Create local bin alternative
@@ -384,14 +390,14 @@ pick_subagent_menu() {
     echo "" >&2
     read -r -p "Enter choice (1-${#SUBAGENTS[@]}): " choice
     case "$choice" in
-        [1-9]*)
-            local idx=$((choice-1))
-            if (( idx >= 0 && idx < ${#SUBAGENTS[@]} )); then
+        ''|*[!0-9]*) echo "Invalid choice" >&2; echo "" ;;
+        *)
+            local idx=$((choice - 1))
+            if (( choice >= 1 && choice <= ${#SUBAGENTS[@]} )); then
                 IFS=':' read -r name description <<< "${SUBAGENTS[$idx]}"
                 echo "$name"
             fi
             ;;
-        *) echo "" ;;
     esac
 }
 
@@ -525,34 +531,10 @@ EOF
     echo -e "${GREEN}${ICON_SUCCESS} Local aicoder command created: ~/bin/aicoder${NC}"
 }
 
-# Main installation
+# Main installation (always ~/bin — no root required)
 main() {
-    # Try to create global command (requires sudo)
-    if command -v sudo >/dev/null 2>&1; then
-        echo -e "${CYAN}${ICON_INFO} Attempting to create global aicoder command...${NC}"
-        if sudo -n true 2>/dev/null; then
-            create_global_aicoder
-            echo -e "${GREEN}${ICON_SUCCESS} Global aicoder command installed successfully!${NC}"
-            echo ""
-            echo -e "${BOLD}Usage:${NC}"
-            echo "  aicoder                    # Interactive mode"
-            echo "  aicoder install            # Install AICoder in current directory"
-            echo "  aicoder start              # Start development session"
-            echo "  aicoder start --agent architect  # Start with specific subagent"
-            echo "  aicoder agents             # List all subagents"
-            echo ""
-            echo -e "${CYAN}${ICON_ROCKET} Ready to use from anywhere!${NC}"
-            return
-        fi
-    fi
-    
-    # Fallback to local bin
-    echo -e "${YELLOW}${ICON_WARNING} Cannot create global command (no sudo access)${NC}"
-    echo -e "${CYAN}${ICON_INFO} Creating local aicoder command instead...${NC}"
-    
-    create_local_aicoder
-    
-    echo -e "${GREEN}${ICON_SUCCESS} Local aicoder command installed successfully!${NC}"
+    create_global_aicoder
+    echo -e "${GREEN}${ICON_SUCCESS} aicoder command installed successfully!${NC}"
     echo ""
     echo -e "${BOLD}Usage:${NC}"
     echo "  aicoder                    # Interactive mode"

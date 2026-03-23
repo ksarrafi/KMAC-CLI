@@ -749,7 +749,7 @@ cmd_stop() {
 
     local pid
     pid=$(cat "$PILOT_AGENT_PID" 2>/dev/null)
-    kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null
+    kill "$pid" 2>/dev/null
     rm -f "$PILOT_AGENT_PID"
 
     if [[ -f "$PILOT_TASK_FILE" ]]; then

@@ -27,7 +27,8 @@ fi
 
 _toolkit_update_check() {
     local kmac_cache="${HOME}/.cache/kmac"
-    [[ -d "$kmac_cache" ]] || mkdir -p "$kmac_cache" && chmod 700 "$kmac_cache"
+    if [[ ! -d "$kmac_cache" ]]; then mkdir -p "$kmac_cache"; fi
+    chmod 700 "$kmac_cache" 2>/dev/null
     local cache="$kmac_cache/last-check.json"
     local cache_age_limit=14400  # 4 hours
 
@@ -46,8 +47,8 @@ _toolkit_update_check() {
     local toolkit_dir=""
     if [[ -n "$KMAC_DIR" && -d "$KMAC_DIR" ]]; then
         toolkit_dir="$KMAC_DIR"
-    elif [[ -n "${BASH_SOURCE[0]:-${(%):-%x}}" ]]; then
-        local _hook_src="${BASH_SOURCE[0]:-${(%):-%x}}"
+    elif [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+        local _hook_src="${BASH_SOURCE[0]:-}"
         [[ -f "$_hook_src" ]] && toolkit_dir="$(cd "$(dirname "$_hook_src")" && pwd)"
     fi
     if [[ -z "$toolkit_dir" || ! -f "$toolkit_dir/scripts/update-check" ]]; then

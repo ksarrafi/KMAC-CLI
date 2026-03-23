@@ -57,6 +57,7 @@ struct TerminalView: View {
                     .background(Color.black)
                     .onTapGesture { isInputFocused = true }
                     .onChange(of: history.count) { _, _ in
+                        guard history.count > 0 else { return }
                         withAnimation {
                             proxy.scrollTo(history.count - 1)
                         }

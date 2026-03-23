@@ -159,8 +159,8 @@ _vault_decrypt() {
     [[ -f "$VAULT_FILE" ]] || { echo "{}"; return; }
     _vault_get_master || return 1
     local plain
-    plain=$(openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-        -in "$VAULT_FILE" -pass "pass:${_vault_master_password}" 2>/dev/null)
+    plain=$(printf '%s' "$_vault_master_password" | openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+        -in "$VAULT_FILE" -pass stdin 2>/dev/null)
     if [[ $? -ne 0 || -z "$plain" ]]; then
         echo "" >&2
         echo "  Wrong password or corrupted vault." >&2
@@ -174,8 +174,8 @@ _vault_encrypt() {
     local json="$1"
     _vault_get_master || return 1
     mkdir -p "$VAULT_DIR"
-    echo "$json" | openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-        -out "$VAULT_FILE" -pass "pass:${_vault_master_password}" 2>/dev/null
+    KMAC_VAULT_PASS="$_vault_master_password" openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
+        -out "$VAULT_FILE" -pass env:KMAC_VAULT_PASS <<< "$json" 2>/dev/null
     chmod 600 "$VAULT_FILE" 2>/dev/null || true
 }
 
@@ -490,6 +490,7 @@ registry = [
 with open(path, 'w') as f:
     json.dump(registry, f, indent=2)
 PYEOF
+    chmod 600 "$VAULT_REGISTRY" 2>/dev/null || true
 }
 
 _vault_load_registry() {

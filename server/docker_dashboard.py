@@ -3,7 +3,6 @@
 import asyncio
 import json
 import os
-import subprocess
 import time
 from collections import deque
 from pathlib import Path
@@ -23,6 +22,7 @@ CPU_HIGH = 80
 # In-memory history (24h at ~1min intervals = ~1440 points)
 _history: deque = deque(maxlen=1440)
 _last_snapshot_ts: float = 0
+_history_lock = asyncio.Lock()
 
 
 def _docker_sock() -> str:
@@ -86,7 +86,7 @@ async def collect_health() -> dict:
                     disk_info["status"] = "SEVERE"
                 elif pct >= DISK_HEALTHY:
                     disk_info["status"] = "WARNING"
-    except Exception:
+    except (ValueError, IndexError, OSError):
         pass
 
     # Container stats
@@ -178,23 +178,26 @@ async def collect_health() -> dict:
 
     # Save to history
     global _last_snapshot_ts
-    if ts - _last_snapshot_ts >= 60:
-        _history.append({
-            "ts": int(ts),
-            "disk_pct": disk_info["pct"],
-            "running": running,
-            "alert_count": len(alerts),
-            "avg_cpu": sum(c["cpu_val"] for c in containers) / max(len(containers), 1),
-            "avg_mem": sum(c["mem_val"] for c in containers) / max(len(containers), 1),
-        })
-        _last_snapshot_ts = ts
+    async with _history_lock:
+        if ts - _last_snapshot_ts >= 60:
+            _history.append({
+                "ts": int(ts),
+                "disk_pct": disk_info["pct"],
+                "running": running,
+                "alert_count": len(alerts),
+                "avg_cpu": sum(c["cpu_val"] for c in containers) / max(len(containers), 1),
+                "avg_mem": sum(c["mem_val"] for c in containers) / max(len(containers), 1),
+            })
+            _last_snapshot_ts = ts
 
     return result
 
 
 async def get_history(minutes: int = 60) -> list[dict]:
+    minutes = max(1, min(minutes, 1440))
     cutoff = time.time() - (minutes * 60)
-    return [h for h in _history if h["ts"] > cutoff]
+    async with _history_lock:
+        return [h for h in _history if h["ts"] > cutoff]
 
 
 async def run_cleanup(cleanup_type: str) -> dict:

@@ -144,10 +144,13 @@ struct SessionDetailView: View {
         isSending = true
 
         Task { @MainActor in
+            defer { isSending = false }
             guard let api = appState.api else { return }
-            _ = try? await api.sendMessage(id: sessionId, message: msg)
-            isSending = false
-            // Refresh to pick up new output
+            do {
+                _ = try await api.sendMessage(id: sessionId, message: msg)
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
             await refreshOutput()
         }
     }
@@ -155,7 +158,11 @@ struct SessionDetailView: View {
     private func stopSession() {
         Task { @MainActor in
             guard let api = appState.api else { return }
-            _ = try? await api.stopSession(id: sessionId)
+            do {
+                _ = try await api.stopSession(id: sessionId)
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
             await refreshOutput()
         }
     }
@@ -163,19 +170,27 @@ struct SessionDetailView: View {
     private func loadSession() {
         Task { @MainActor in
             guard let api = appState.api else { return }
-            session = try? await api.sessionDetail(id: sessionId)
-            let output = try? await api.sessionOutput(id: sessionId, tail: 500)
-            outputLines = output?.lines ?? []
+            do {
+                session = try await api.sessionDetail(id: sessionId)
+                let output = try await api.sessionOutput(id: sessionId, tail: 500)
+                outputLines = output.lines
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 
+    @MainActor
     private func refreshOutput() async {
         guard let api = appState.api else { return }
-        session = try? await api.sessionDetail(id: sessionId)
-        if let output = try? await api.sessionOutput(id: sessionId, tail: 500) {
+        do {
+            session = try await api.sessionDetail(id: sessionId)
+            let output = try await api.sessionOutput(id: sessionId, tail: 500)
             if output.total != outputLines.count {
                 outputLines = output.lines
             }
+        } catch {
+            appState.errorMessage = error.localizedDescription
         }
     }
 

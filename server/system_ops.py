@@ -1,16 +1,18 @@
 """System operations — expose toolkit-level commands over the API."""
 
 import asyncio
-import os
 import shutil
 
 
-async def _run(cmd: str, timeout: int = 10) -> str:
-    proc = await asyncio.create_subprocess_shell(
-        cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
+async def _run(cmd: list[str], timeout: int = 10) -> str:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+    except FileNotFoundError:
+        return ""
     try:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         return stdout.decode("utf-8", errors="replace").strip()
@@ -20,10 +22,29 @@ async def _run(cmd: str, timeout: int = 10) -> str:
         return ""
 
 
+async def _run_returncode(argv: list[str], timeout: int = 10) -> int:
+    """Run argv with stdout/stderr discarded; return process exit code."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return -1
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return -1
+    return proc.returncode if proc.returncode is not None else -1
+
+
 async def disk_usage() -> list[dict]:
-    out = await _run("df -h / /System/Volumes/Data 2>/dev/null | tail -n +2")
+    out = await _run(["df", "-h", "/", "/System/Volumes/Data"])
     disks = []
-    for line in out.splitlines():
+    for line in out.splitlines()[1:]:
         parts = line.split()
         if len(parts) >= 9:
             disks.append({
@@ -38,11 +59,12 @@ async def disk_usage() -> list[dict]:
 
 
 async def memory_info() -> dict:
-    pages = await _run("vm_stat")
-    total_raw = await _run("sysctl -n hw.memsize")
+    pages = await _run(["vm_stat"])
+    total_raw = await _run(["sysctl", "-n", "hw.memsize"])
     total_gb = int(total_raw.strip()) / (1024**3) if total_raw.strip().isdigit() else 0
 
-    pressure = await _run("memory_pressure 2>/dev/null | head -1")
+    pressure_full = await _run(["memory_pressure"])
+    pressure = pressure_full.splitlines()[0] if pressure_full else ""
 
     return {
         "total_gb": round(total_gb, 1),
@@ -52,10 +74,10 @@ async def memory_info() -> dict:
 
 
 async def top_processes(count: int = 15) -> list[dict]:
-    out = await _run(f"ps aux -r | head -n {count + 1}")
+    out = await _run(["ps", "aux", "-r"])
     procs = []
     lines = out.splitlines()
-    for line in lines[1:]:
+    for line in lines[1 : count + 1]:
         parts = line.split(None, 10)
         if len(parts) >= 11:
             procs.append({
@@ -69,12 +91,25 @@ async def top_processes(count: int = 15) -> list[dict]:
 
 
 async def network_info() -> dict:
-    ip_local = await _run("ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null")
-    ip_public = await _run("curl -s --max-time 3 ifconfig.me 2>/dev/null")
-    ports = await _run("lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null | tail -20")
+    ip_local = ""
+    for iface in ("en0", "en1"):
+        out = await _run(["ipconfig", "getifaddr", iface], timeout=5)
+        if out.strip():
+            ip_local = out.strip()
+            break
+
+    ip_public = await _run(
+        ["curl", "-s", "--max-time", "3", "https://ifconfig.me"],
+        timeout=10,
+    )
+
+    ports_raw = await _run(["lsof", "-iTCP", "-sTCP:LISTEN", "-nP"], timeout=15)
+    port_lines = ports_raw.splitlines()
+    data_lines = port_lines[1:] if len(port_lines) > 1 else []
+    tail_lines = data_lines[-20:] if len(data_lines) > 20 else data_lines
 
     listening = []
-    for line in ports.splitlines()[1:]:
+    for line in tail_lines:
         parts = line.split()
         if len(parts) >= 9:
             listening.append({
@@ -92,26 +127,36 @@ async def network_info() -> dict:
 
 async def services_status() -> list[dict]:
     """Check common dev services."""
-    checks = [
-        ("Docker", "docker info > /dev/null 2>&1 && echo running || echo stopped"),
-        ("PostgreSQL", "pg_isready -q 2>/dev/null && echo running || echo stopped"),
-        ("Redis", "redis-cli ping 2>/dev/null | grep -q PONG && echo running || echo stopped"),
-        ("Nginx", "pgrep -x nginx > /dev/null && echo running || echo stopped"),
-        ("Node", "pgrep -x node > /dev/null && echo running || echo stopped"),
-        ("Python", "pgrep -x python3 > /dev/null 2>&1 && echo running || echo stopped"),
-    ]
-
     services = []
-    for name, cmd in checks:
-        status = await _run(cmd)
-        services.append({"name": name, "status": status.strip()})
+
+    rc = await _run_returncode(["docker", "info"], timeout=10)
+    services.append({"name": "Docker", "status": "running" if rc == 0 else "stopped"})
+
+    rc = await _run_returncode(["pg_isready", "-q"], timeout=5)
+    services.append({"name": "PostgreSQL", "status": "running" if rc == 0 else "stopped"})
+
+    out = await _run(["redis-cli", "ping"], timeout=5)
+    services.append({
+        "name": "Redis",
+        "status": "running" if out.strip().upper() == "PONG" else "stopped",
+    })
+
+    rc = await _run_returncode(["pgrep", "-x", "nginx"], timeout=5)
+    services.append({"name": "Nginx", "status": "running" if rc == 0 else "stopped"})
+
+    rc = await _run_returncode(["pgrep", "-x", "node"], timeout=5)
+    services.append({"name": "Node", "status": "running" if rc == 0 else "stopped"})
+
+    rc = await _run_returncode(["pgrep", "-x", "python3"], timeout=5)
+    services.append({"name": "Python", "status": "running" if rc == 0 else "stopped"})
+
     return services
 
 
 async def homebrew_services() -> list[dict]:
     if not shutil.which("brew"):
         return []
-    out = await _run("brew services list 2>/dev/null")
+    out = await _run(["brew", "services", "list"])
     services = []
     for line in out.splitlines()[1:]:
         parts = line.split()

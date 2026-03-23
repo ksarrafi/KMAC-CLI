@@ -197,7 +197,9 @@ struct FileBrowserView: View {
             guard let api = appState.api else { return }
             do {
                 roots = try await api.browseRoots()
-            } catch {}
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
             isLoading = false
         }
     }
@@ -238,6 +240,7 @@ struct FileBrowserView: View {
             } catch {
                 items = []
                 isGitRepo = false
+                appState.errorMessage = error.localizedDescription
             }
             isLoading = false
         }
@@ -258,7 +261,9 @@ struct FileBrowserView: View {
             do {
                 let content = try await api.readFileAbs(path: path)
                 selectedFile = content
-            } catch {}
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 }
@@ -354,7 +359,7 @@ struct FileRow: View {
 }
 
 extension FileContent: @retroactive Identifiable {
-    public var id: String { path ?? UUID().uuidString }
+    public var id: String { path ?? "unknown" }
 }
 
 struct FileContentView: View {

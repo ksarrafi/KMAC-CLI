@@ -30,13 +30,14 @@ pilot_get_config() {
 pilot_set_config() {
     local key="$1" value="$2"
     pilot_ensure_dirs
+    local tmp tmpfile
     if [[ -f "$PILOT_CONFIG" ]]; then
-        local tmp
         tmp=$(jq --arg k "$key" --arg v "$value" '.[$k] = $v' "$PILOT_CONFIG")
-        echo "$tmp" > "$PILOT_CONFIG"
     else
-        jq -n --arg k "$key" --arg v "$value" '{($k): $v}' > "$PILOT_CONFIG"
+        tmp=$(jq -n --arg k "$key" --arg v "$value" '{($k): $v}')
     fi
+    tmpfile=$(mktemp "${PILOT_CONFIG}.XXXXXX")
+    printf '%s\n' "$tmp" > "$tmpfile" && mv -f "$tmpfile" "$PILOT_CONFIG"
 }
 
 pilot_token()   { pilot_get_config "telegram_token"; }
@@ -49,14 +50,15 @@ pilot_agent() {
     echo "${a:-claude}"
 }
 
-# Build the CLI command for the active agent
-pilot_agent_cmd() {
-    local task="$1"
-    case "$(pilot_agent)" in
-        cursor) echo "cursor agent \"$task\"" ;;
-        *)      echo "claude --print \"$task\"" ;;
-    esac
-}
+# Deprecated: embedding $task in a shell string is unsafe (quote-breaking / injection).
+# Not referenced elsewhere; use explicit argv arrays at call sites if this is revived.
+# pilot_agent_cmd() {
+#     local task="$1"
+#     case "$(pilot_agent)" in
+#         cursor) echo "cursor agent \"$task\"" ;;
+#         *)      echo "claude --print \"$task\"" ;;
+#     esac
+# }
 
 pilot_agent_label() {
     case "$(pilot_agent)" in
@@ -192,7 +194,7 @@ tg_send() {
     fi
     tg_call "sendMessage" \
         -d "chat_id=$chat_id" \
-        -d "text=$text" \
+        --data-urlencode "text=$text" \
         -d "parse_mode=Markdown" \
         -d "disable_web_page_preview=true" 2>/dev/null
 }
@@ -204,7 +206,7 @@ tg_send_plain() {
     fi
     tg_call "sendMessage" \
         -d "chat_id=$chat_id" \
-        -d "text=$text" \
+        --data-urlencode "text=$text" \
         -d "disable_web_page_preview=true" 2>/dev/null
 }
 

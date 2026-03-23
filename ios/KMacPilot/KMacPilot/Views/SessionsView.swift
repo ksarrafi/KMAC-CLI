@@ -84,13 +84,17 @@ struct SessionsView: View {
     }
 
     private func deleteSessions(at offsets: IndexSet) {
-        for offset in offsets {
-            let session = completedSessions[offset]
-            Task { @MainActor in
-                guard let api = appState.api else { return }
-                _ = try? await api.deleteSession(id: session.id)
-                await appState.refreshStatus()
+        let toDelete = offsets.map { completedSessions[$0] }
+        Task { @MainActor in
+            guard let api = appState.api else { return }
+            for session in toDelete {
+                do {
+                    _ = try await api.deleteSession(id: session.id)
+                } catch {
+                    appState.errorMessage = error.localizedDescription
+                }
             }
+            await appState.refreshStatus()
         }
     }
 

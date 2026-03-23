@@ -39,15 +39,15 @@ alias gl="git log --oneline --graph --decorate"
 alias dps="docker ps"
 alias dcu="docker-compose up"
 alias dcd="docker-compose down"
-drm()  { local ids; ids=$(docker ps -a -q); [[ -z "$ids" ]] || echo "$ids" | xargs docker rm; }
-drmi() { local ids; ids=$(docker images -q); [[ -z "$ids" ]] || echo "$ids" | xargs docker rmi; }
+drm()  { local ids; ids=$(docker ps -a -q); [[ -z "$ids" ]] || echo "$ids" | xargs docker rm --; }
+drmi() { local ids; ids=$(docker images -q); [[ -z "$ids" ]] || echo "$ids" | xargs docker rmi --; }
 alias dimg="docker images"
 
 # ─── Networking ──────────────────────────────────────────────────────────
 alias ip="ipconfig getifaddr en0"
 
 # ─── Dev Servers ─────────────────────────────────────────────────────────
-alias rserver="python -m http.server"
+alias rserver="python3 -m http.server"
 alias serve="python manage.py runserver"
 
 # ─── VS Code ─────────────────────────────────────────────────────────────

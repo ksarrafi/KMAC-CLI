@@ -31,7 +31,9 @@ _hooks_warn() {
 _hooks_valid_hook() {
     local h="$1"
     local k
-    for k in $_KMAC_KNOWN_HOOKS; do
+    local _kmac_hook_arr
+    read -r -a _kmac_hook_arr <<< "$_KMAC_KNOWN_HOOKS"
+    for k in "${_kmac_hook_arr[@]}"; do
         [[ "$k" == "$h" ]] && return 0
     done
     return 1

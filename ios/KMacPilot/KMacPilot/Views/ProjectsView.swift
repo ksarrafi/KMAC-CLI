@@ -38,7 +38,11 @@ struct ProjectsView: View {
                     Button {
                         Task { @MainActor in
                             guard let api = appState.api else { return }
-                            appState.projects = try await api.projects()
+                            do {
+                                appState.projects = try await api.projects()
+                            } catch {
+                                appState.errorMessage = error.localizedDescription
+                            }
                         }
                     } label: {
                         Image(systemName: "arrow.clockwise")
