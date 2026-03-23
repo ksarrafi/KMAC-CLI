@@ -33,7 +33,7 @@ Type `kmac` and you get this:
     AI                        Dev                       Infra
     a  Ask Claude             p  Project Launcher       r  Remote Terminal
     +  Build a Tool           e  Claude Code            d  Docker Manager
-                              x  Cursor Agent           n  Network Info
+    o  Ollama (Local AI)      x  Cursor Agent           n  Network Info
                               v  Code Review            k  Kill Port
                               c  Smart Commit
                               P  Pilot (remote agent)
@@ -106,6 +106,16 @@ kmac aicommit --amend          # Rewrite the last commit message
 ```bash
 kmac make "a script that monitors SSL certificate expiry across domains"
 kmac make "wifi password viewer that pulls from Keychain"
+```
+
+**Ollama Local AI** (`o` / `kmac ollama`) — install, configure, and manage Ollama for running LLMs locally on your Mac or Linux machine. Full setup flow with RAM-based model recommendations (1b for 8GB, 3b for 16GB, 8b for 32GB+). Catalog of 13 popular models including Llama 3.2, Code Llama, Mistral, Mixtral, Phi-3, Gemma 2, Qwen 2.5, DeepSeek Coder, and StarCoder 2. Interactive model management with pull, remove, and chat. Server controls built in.
+
+```bash
+kmac ollama                     # Interactive menu
+kmac ollama install             # Install + pull recommended model
+kmac ollama models              # Manage models (pull/remove/list)
+kmac ollama chat                # Chat with a local model
+kmac ollama status              # Check server + model status
 ```
 
 **AI Self-Healing** — built into every tool. When a command fails, KMac catches the error output, sends it to Claude with context about what was attempted, and presents a suggested fix command. Handles shell environments like nvm and rvm automatically. You choose to apply the fix, retry, or skip.
@@ -461,6 +471,7 @@ KMac-CLI/
 │   ├── review              AI code review on git diffs
 │   ├── aicommit            AI commit message generator
 │   ├── toolmaker           AI tool builder — describe → build → install
+│   ├── ollama-setup        Ollama local AI manager (install, models, chat)
 │   ├── sessions            Claude session browser and resume picker
 │   ├── project             fzf project launcher with IDE integration
 │   ├── killport            Kill process by port

@@ -42,6 +42,14 @@
 - Session output streaming to subscribed clients
 - `session_manager.py`: added `write_stdin` for PTY input from WebSocket
 
+### New: Ollama Local AI Manager (`kmac ollama` / `o` in menu)
+- Full setup flow: install Ollama, start server, pull models with RAM-based recommendations
+- Model catalog: 13 popular models (Llama 3.2, Code Llama, Mistral, Mixtral, Phi-3, Gemma 2, Qwen 2.5, DeepSeek Coder, StarCoder 2, nomic-embed)
+- Interactive model management: pull, remove, list installed with sizes
+- Quick chat launcher with model picker
+- Server management: start, status check
+- CLI: `kmac ollama install`, `kmac ollama models`, `kmac ollama chat`, `kmac ollama status`
+
 ### New: Homebrew Tap
 - **Formula** (`homebrew/Formula/kmac.rb`): `brew install ksarrafi/tap/kmac`
 - Recommended deps: fzf, bat, jq

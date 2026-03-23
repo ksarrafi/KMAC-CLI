@@ -37,7 +37,7 @@ kmac help         # All CLI commands
 | `P` | Pilot (remote agent) | `.` | Secrets & Keys |
 | `?` | Health Check | `q` | Connection QR |
 | `B` | Bootstrap Mac | `i` | Install/Update |
-| | | `I` | Software Manager |
+| `o` | Ollama (Local AI) | `I` | Software Manager |
 
 ## Everyday Commands
 
@@ -62,6 +62,17 @@ kmac software list              # Show all tools with status
 kmac software install claude    # Install a specific tool
 kmac software update            # Update all installed tools
 kmac software search docker     # Search the catalog
+```
+
+## Ollama (Local AI)
+
+```bash
+kmac ollama                     # Interactive menu
+kmac ollama install             # Install + pull recommended model for your RAM
+kmac ollama models              # Pull, remove, list models
+kmac ollama chat                # Chat with an installed model
+kmac ollama status              # Server + model status
+kmac ollama serve               # Start the Ollama server
 ```
 
 ## Plugin Hooks
