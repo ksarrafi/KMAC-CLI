@@ -10,7 +10,7 @@ class Kmac < Formula
   # After pushing tag vX.Y.Z, run:
   #   curl -sL "https://github.com/ksarrafi/KMAC-CLI/archive/refs/tags/vX.Y.Z.tar.gz" | shasum -a 256
   url "https://github.com/ksarrafi/KMAC-CLI/archive/refs/tags/v2.6.0.tar.gz"
-  sha256 "27e27937e604b5e362802da7e705319309f7f8cec85416178933b2f97dac903a"
+  sha256 "2bdb399b78c5796d7a219288be7f20c1ec7f34e87f6c89678a4fb522eb7a726f"
 
   head "https://github.com/ksarrafi/KMAC-CLI.git", branch: "main"
 
