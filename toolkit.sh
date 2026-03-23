@@ -484,7 +484,7 @@ welcome_wizard() {
     echo ""
 
     # Step 1: Check essentials
-    section "Step 1 of 3 — Health Check"
+    section "Step 1 of 4 — Health Check"
     local ok=0 total=0
     for dep in git python3 curl docker brew; do
         ((total++))
@@ -500,18 +500,92 @@ welcome_wizard() {
     echo ""
     read -r -n1 -p "  Press any key to continue..."; echo ""
 
-    # Step 2: Guided API key setup
+    # Step 2: Choose vault backend
     clear
     echo ""
-    section "Step 2 of 3 — Connect Your Services"
+    section "Step 2 of 4 — Choose Your Secret Vault"
+    echo ""
+    echo -e "  KMac stores API keys and credentials in a secure vault."
+    echo -e "  ${DIM}Pick where you'd like secrets stored:${NC}"
+    echo ""
+    echo -e "   ${GREEN}1${NC})  ${BOLD}macOS Keychain${NC} ${DIM}(recommended)${NC}"
+    echo -e "      ${DIM}Hardware-backed, unlocked by your login password.${NC}"
+    echo -e "      ${DIM}Best for most users. Secrets survive reinstalls.${NC}"
+    echo ""
+    echo -e "   ${GREEN}2${NC})  ${BOLD}Encrypted File${NC}"
+    echo -e "      ${DIM}AES-256 encrypted vault at ~/.config/kmac/vault.enc${NC}"
+    echo -e "      ${DIM}Portable — sync via iCloud or USB to other machines.${NC}"
+    echo ""
+    if command -v docker &>/dev/null; then
+        echo -e "   ${GREEN}3${NC})  ${BOLD}Docker Container${NC}"
+        echo -e "      ${DIM}Isolated vault in a local container (kmac-vault).${NC}"
+        echo -e "      ${DIM}Portable — export the Docker volume to move it.${NC}"
+        echo ""
+    fi
+    echo -e "  ${DIM}You can switch anytime with:${NC} ${GREEN}kmac secrets backend${NC}"
+    echo ""
+    read -r -n1 -p "  Choose [1/2/3]: " _vault_choice; echo ""
+
+    # Source the guided setup functions from secrets
+    source "$SCRIPTS_DIR/secrets" _source_only 2>/dev/null
+
+    case "$_vault_choice" in
+        2)
+            export KMAC_VAULT_BACKEND="file"
+            _write_backend_pref "file"
+            echo ""
+            echo -e "  ${BOLD}Create your vault master password:${NC}"
+            echo -e "  ${DIM}You'll need this each session to unlock your secrets.${NC}"
+            echo ""
+            read -r -s -p "  Master password: " _pw1; echo ""
+            read -r -s -p "  Confirm: " _pw2; echo ""
+            if [[ "$_pw1" == "$_pw2" && -n "$_pw1" ]]; then
+                _vault_master_password="$_pw1"
+                _vault_encrypt "{}"
+                ui_success "Encrypted file vault created"
+            else
+                ui_warn "Passwords didn't match — defaulting to Keychain for now"
+                export KMAC_VAULT_BACKEND="keychain"
+                _write_backend_pref "keychain"
+            fi
+            ;;
+        3)
+            if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+                echo ""
+                echo -e "  ${DIM}Starting Docker vault container...${NC}"
+                if docker_vault_start 2>/dev/null; then
+                    export KMAC_VAULT_BACKEND="docker"
+                    _write_backend_pref "docker"
+                    ui_success "Docker vault running on 127.0.0.1:${VAULT_DOCKER_PORT}"
+                else
+                    ui_warn "Docker vault failed to start — using Keychain instead"
+                    export KMAC_VAULT_BACKEND="keychain"
+                    _write_backend_pref "keychain"
+                fi
+            else
+                ui_warn "Docker not running — using Keychain instead"
+                export KMAC_VAULT_BACKEND="keychain"
+                _write_backend_pref "keychain"
+            fi
+            ;;
+        *)
+            export KMAC_VAULT_BACKEND="keychain"
+            _write_backend_pref "keychain"
+            ui_success "Using macOS Keychain"
+            ;;
+    esac
+    echo ""
+    read -r -n1 -p "  Press any key to continue..."; echo ""
+
+    # Step 3: Guided API key setup
+    clear
+    echo ""
+    section "Step 3 of 4 — Connect Your Services"
     echo ""
     echo -e "  KMac works best with API keys for AI, GitHub, and other services."
     echo -e "  ${DIM}I'll open the signup page for each one and walk you through it.${NC}"
     echo -e "  ${DIM}Skip any you don't need — you can always add them later with${NC} ${GREEN}kmac secrets${NC}"
     echo ""
-
-    # Source the guided setup functions from secrets
-    source "$SCRIPTS_DIR/secrets" _source_only 2>/dev/null
 
     local -a _wiz_services=("anthropic" "openai" "github" "ngrok")
     local -a _wiz_labels=("Anthropic (Claude AI)" "OpenAI (GPT)" "GitHub" "ngrok (tunnels)")
@@ -556,10 +630,10 @@ welcome_wizard() {
     echo ""
     read -r -n1 -p "  Press any key to continue..."; echo ""
 
-    # Step 3: Quick orientation
+    # Step 4: Quick orientation
     clear
     echo ""
-    section "Step 3 of 3 — Quick Tour"
+    section "Step 4 of 4 — Quick Tour"
     echo ""
     echo -e "  ${BOLD}How to use KMac:${NC}"
     echo ""
