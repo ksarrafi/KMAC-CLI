@@ -2,7 +2,7 @@
 # _pilot-lib.sh — Shared constants and helpers for KMac Pilot
 # Source this in pilot scripts: source "$(dirname "${BASH_SOURCE[0]}")/_pilot-lib.sh"
 
-PILOT_DIR="/tmp/kmac-pilot"
+PILOT_DIR="${XDG_RUNTIME_DIR:-$HOME/.config/kmac-pilot/run}"
 PILOT_PID_FILE="$PILOT_DIR/bot.pid"
 PILOT_AGENT_PID="$PILOT_DIR/agent.pid"
 PILOT_AGENT_LOG="$PILOT_DIR/agent.log"
@@ -18,7 +18,7 @@ TELEGRAM_API="https://api.telegram.org/bot"
 # ─── Config helpers ──────────────────────────────────────────────────────
 
 pilot_ensure_dirs() {
-    mkdir -p "$PILOT_DIR"
+    mkdir -p "$PILOT_DIR" && chmod 700 "$PILOT_DIR"
     mkdir -p "$(dirname "$PILOT_CONFIG")"
 }
 

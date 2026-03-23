@@ -63,10 +63,16 @@ if (( FILE_COUNT > 8 )) && [[ "$MODE" != "quick" ]]; then
     echo "Large changeset ($FILE_COUNT files) — reviewing file by file..."
     echo ""
     FILES=$(echo "$DIFF" | grep '^diff --git' | sed 's|diff --git a/||' | sed 's| b/.*||')
-    SUMMARY=""
-    for file in $FILES; do
+    SUMMARY_FILE=$(mktemp)
+    : > "$SUMMARY_FILE"
+    echo "$FILES" | while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
         echo -e "\033[2mReviewing: $file\033[0m"
-        FILE_DIFF=$(git diff HEAD -- "$file" 2>/dev/null || git diff -- "$file")
+        if $STAGED_ONLY; then
+            FILE_DIFF=$(git diff --cached -- "$file" 2>/dev/null)
+        else
+            FILE_DIFF=$(git diff HEAD -- "$file" 2>/dev/null || git diff -- "$file")
+        fi
         [[ -z "$FILE_DIFF" ]] && continue
         PROMPT="Review ONLY this file diff from '$REPO'. Be brief — 2-3 bullet points max. Flag only real issues.
 
@@ -77,10 +83,12 @@ $FILE_DIFF
         if [[ -n "$RESULT" ]]; then
             echo -e "\n\033[1m$file:\033[0m"
             echo "$RESULT"
-            SUMMARY="${SUMMARY}\n$file: $RESULT\n"
+            printf '\n%s: %s\n' "$file" "$RESULT" >> "$SUMMARY_FILE"
             echo ""
         fi
     done
+    SUMMARY=$(cat "$SUMMARY_FILE" 2>/dev/null || true)
+    rm -f "$SUMMARY_FILE"
 
     # Overall summary
     echo -e "\n\033[1m━━━ Overall Summary ━━━\033[0m\n"

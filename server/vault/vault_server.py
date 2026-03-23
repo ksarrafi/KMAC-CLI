@@ -1,32 +1,55 @@
 #!/usr/bin/env python3
 """KMac Docker Vault — encrypted key-value store for secrets.
 
-Runs inside a Docker container. Data encrypted at rest with AES-256-GCM
-in a SQLite database stored on a Docker volume. Only listens on the
-container's loopback — exposed to host via port mapping on 127.0.0.1.
+Runs inside a Docker container. Values are encrypted at rest with Fernet
+(AES-128-CBC + HMAC-SHA256) in a SQLite database stored on a Docker volume.
+Listens only on 127.0.0.1 inside the container — expose to host via port
+mapping on 127.0.0.1 if needed.
 
 Auth: Bearer token read from /vault/token (mounted from host).
 """
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import secrets
 import sqlite3
 import sys
+import time
+from collections import deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from typing import Optional
+
+try:
+    from cryptography.fernet import Fernet
+except ImportError as exc:
+    print(
+        "cryptography (Fernet) is required; install with: pip install cryptography",
+        file=sys.stderr,
+    )
+    raise SystemExit(1) from exc
 
 DB_PATH = "/vault/data/secrets.db"
 TOKEN_PATH = "/vault/token"
 PORT = 9999
+MAX_BODY_BYTES = 64 * 1024
+RATE_WINDOW_SEC = 60.0
+RATE_MAX_PER_WINDOW = 100
 
-# AES via cryptography lib (installed in container) or fallback to Fernet
-try:
-    from cryptography.fernet import Fernet
-    _HAS_CRYPTO = True
-except ImportError:
-    _HAS_CRYPTO = False
+_ip_request_times: dict[str, deque[float]] = {}
+
+
+def _rate_limit_allow(client_ip: str) -> bool:
+    now = time.monotonic()
+    q = _ip_request_times.setdefault(client_ip, deque())
+    while q and q[0] < now - RATE_WINDOW_SEC:
+        q.popleft()
+    if len(q) >= RATE_MAX_PER_WINDOW:
+        return False
+    q.append(now)
+    return True
 
 
 def _derive_key():
@@ -38,24 +61,18 @@ def _derive_key():
 
 def _encrypt(plaintext: str) -> str:
     key = _derive_key()
-    if _HAS_CRYPTO:
-        f = Fernet(key)
-        return f.encrypt(plaintext.encode()).decode()
-    return base64.urlsafe_b64encode(
-        bytes(a ^ b for a, b in zip(plaintext.encode(), key * (len(plaintext) // 32 + 1)))
-    ).decode()
+    f = Fernet(key)
+    return f.encrypt(plaintext.encode()).decode()
 
 
 def _decrypt(ciphertext: str) -> str:
     key = _derive_key()
-    if _HAS_CRYPTO:
-        f = Fernet(key)
-        return f.decrypt(ciphertext.encode()).decode()
-    raw = base64.urlsafe_b64decode(ciphertext)
-    return bytes(a ^ b for a, b in zip(raw, key * (len(raw) // 32 + 1))).decode()
+    f = Fernet(key)
+    return f.decrypt(ciphertext.encode()).decode()
 
 
 _token_cache = None
+
 
 def _load_token() -> str:
     global _token_cache
@@ -93,10 +110,20 @@ class VaultHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # silent
 
+    def _client_ip(self) -> str:
+        return self.client_address[0] if self.client_address else "unknown"
+
     def _auth_ok(self) -> bool:
         auth = self.headers.get("Authorization", "")
         token = auth.removeprefix("Bearer ").strip()
-        return token == _load_token()
+        if not token:
+            return False
+        try:
+            return hmac.compare_digest(
+                token.encode("utf-8"), _load_token().encode("utf-8")
+            )
+        except Exception:
+            return False
 
     def _json_response(self, data: dict, status: int = 200):
         body = json.dumps(data).encode()
@@ -106,16 +133,48 @@ class VaultHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_body(self) -> dict:
-        length = int(self.headers.get("Content-Length", 0))
+    def _read_body(self) -> Optional[dict]:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            return None
+        if length > MAX_BODY_BYTES:
+            return None
         if length == 0:
             return {}
+        raw = self.rfile.read(length)
+        if len(raw) != length:
+            return {}
         try:
-            return json.loads(self.rfile.read(length))
+            return json.loads(raw.decode())
         except json.JSONDecodeError:
             return {}
 
+    def _content_length_allowed(self) -> bool:
+        cl = self.headers.get("Content-Length")
+        if cl is None or cl == "":
+            return True
+        try:
+            if int(cl) > MAX_BODY_BYTES:
+                self._json_response({"error": "payload too large"}, 413)
+                return False
+        except ValueError:
+            self._json_response({"error": "invalid Content-Length"}, 400)
+            return False
+        return True
+
+    def _preflight(self) -> bool:
+        if not self._content_length_allowed():
+            return False
+        if not _rate_limit_allow(self._client_ip()):
+            self._json_response({"error": "rate limited"}, 429)
+            return False
+        return True
+
     def do_GET(self):
+        if not self._preflight():
+            return
+
         if self.path == "/health":
             self._json_response({"ok": True, "backend": "docker"})
             return
@@ -149,12 +208,18 @@ class VaultHandler(BaseHTTPRequestHandler):
             self._json_response({"error": "not found"}, 404)
 
     def do_POST(self):
+        if not self._preflight():
+            return
+
         if not self._auth_ok():
             self._json_response({"error": "unauthorized"}, 401)
             return
 
         if self.path == "/set":
             body = self._read_body()
+            if body is None:
+                self._json_response({"error": "body too large or invalid"}, 413)
+                return
             key = body.get("key", "")
             value = body.get("value", "")
             if not key or not value:
@@ -187,9 +252,9 @@ if __name__ == "__main__":
     print(f"  Port:  {PORT}")
     print(f"  DB:    {DB_PATH}")
     print(f"  Token: {token[:8]}...")
-    print(f"  Crypto: {'Fernet (AES-128-CBC)' if _HAS_CRYPTO else 'XOR fallback'}")
+    print(f"  Crypto: Fernet (AES-128-CBC + HMAC-SHA256)")
     print()
-    server = HTTPServer(("0.0.0.0", PORT), VaultHandler)
+    server = HTTPServer(("127.0.0.1", PORT), VaultHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

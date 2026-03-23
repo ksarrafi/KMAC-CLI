@@ -1,5 +1,45 @@
 import Foundation
+import Security
 import SwiftUI
+
+private enum KeychainHelper {
+    static func save(key: String, value: String) {
+        guard let data = value.data(using: .utf8) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecAttrService as String: "com.kmac.pilot"
+        ]
+        SecItemDelete(query as CFDictionary)
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        SecItemAdd(addQuery as CFDictionary, nil)
+    }
+
+    static func load(key: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecAttrService as String: "com.kmac.pilot",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func delete(key: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecAttrService as String: "com.kmac.pilot"
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
 
 @MainActor
 class AppState: ObservableObject {
@@ -28,7 +68,13 @@ class AppState: ObservableObject {
 
     init() {
         serverURL = UserDefaults.standard.string(forKey: urlKey) ?? ""
-        token = UserDefaults.standard.string(forKey: tokenKey) ?? ""
+        if let stored = KeychainHelper.load(key: tokenKey) {
+            token = stored
+        } else if let legacy = UserDefaults.standard.string(forKey: tokenKey), !legacy.isEmpty {
+            KeychainHelper.save(key: tokenKey, value: legacy)
+            UserDefaults.standard.removeObject(forKey: tokenKey)
+            token = legacy
+        }
 
         if !serverURL.isEmpty && !token.isEmpty {
             Task { await connect() }
@@ -56,7 +102,8 @@ class AppState: ObservableObject {
             self.isConnected = true
 
             UserDefaults.standard.set(url, forKey: urlKey)
-            UserDefaults.standard.set(token, forKey: tokenKey)
+            KeychainHelper.save(key: tokenKey, value: token)
+            UserDefaults.standard.removeObject(forKey: tokenKey)
 
             ws.connect(baseURL: url, token: token)
 

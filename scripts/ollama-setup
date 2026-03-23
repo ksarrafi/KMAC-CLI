@@ -4,6 +4,7 @@
 #        ollama-setup install       (install Ollama + pull starter models)
 #        ollama-setup models        (manage models)
 #        ollama-setup serve         (start Ollama server)
+#        ollama-setup stop          (stop server started by kmac)
 #        ollama-setup status        (check if running + list models)
 #        ollama-setup chat <model>  (quick chat session)
 
@@ -11,6 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh"
 
 OLLAMA_API="http://localhost:11434"
+OLLAMA_PID_FILE="${HOME}/.config/kmac/ollama.pid"
 
 # ─── Popular Models ─────────────────────────────────────────────────────
 # name|size|description
@@ -36,6 +38,39 @@ _parse_model() {
 
 _ollama_running() {
     curl -sf --max-time 2 "$OLLAMA_API/api/tags" &>/dev/null
+}
+
+_ollama_ensure_server() {
+    _ollama_running && return 0
+    if ! command -v ollama &>/dev/null; then
+        return 1
+    fi
+    mkdir -p "$(dirname "$OLLAMA_PID_FILE")"
+    ollama serve &>/dev/null &
+    echo $! > "$OLLAMA_PID_FILE"
+    disown 2>/dev/null
+    sleep 2
+    if _ollama_running; then
+        return 0
+    fi
+    rm -f "$OLLAMA_PID_FILE"
+    return 1
+}
+
+do_stop() {
+    if [[ ! -f "$OLLAMA_PID_FILE" ]]; then
+        ui_warn "No PID file — server may not have been started by kmac"
+        return 1
+    fi
+    local pid
+    pid=$(cat "$OLLAMA_PID_FILE" 2>/dev/null)
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+        ui_success "Stopped Ollama server (PID $pid)"
+    else
+        ui_warn "Process not running (stale PID file)"
+    fi
+    rm -f "$OLLAMA_PID_FILE"
 }
 
 _installed_models() {
@@ -86,10 +121,7 @@ do_install() {
 
     if ! _ollama_running; then
         ui_info "Starting Ollama server..."
-        ollama serve &>/dev/null &
-        disown 2>/dev/null
-        sleep 2
-        if _ollama_running; then
+        if _ollama_ensure_server; then
             ui_success "Ollama server is running"
         else
             ui_warn "Server didn't start — try 'ollama serve' manually"
@@ -208,10 +240,7 @@ do_models() {
             read -r -n1 -p "  > " ch; echo ""
             case "$ch" in
                 s|S)
-                    ollama serve &>/dev/null &
-                    disown 2>/dev/null
-                    sleep 2
-                    _ollama_running && ui_success "Server started" || ui_fail "Failed to start"
+                    _ollama_ensure_server && ui_success "Server started" || ui_fail "Failed to start"
                     sleep 1
                     ;;
                 *) return ;;
@@ -327,11 +356,7 @@ do_serve() {
     fi
 
     ui_info "Starting Ollama server..."
-    ollama serve &>/dev/null &
-    disown 2>/dev/null
-    sleep 2
-
-    if _ollama_running; then
+    if _ollama_ensure_server; then
         ui_success "Ollama server started at $OLLAMA_API"
     else
         ui_fail "Failed to start. Try running 'ollama serve' directly."
@@ -345,9 +370,7 @@ do_chat() {
 
     if ! _ollama_running; then
         ui_warn "Starting Ollama server first..."
-        ollama serve &>/dev/null &
-        disown 2>/dev/null
-        sleep 2
+        _ollama_ensure_server || true
     fi
 
     if [[ -z "$model" ]]; then
@@ -432,6 +455,7 @@ case "${1:-}" in
     install|setup)  do_install; [[ -t 0 ]] && pause ;;
     models)         shift; do_models ;;
     serve|start)    do_serve ;;
+    stop|kill)      do_stop ;;
     status)         do_status; [[ -t 0 ]] && pause ;;
     chat|run)       shift; do_chat "$@" ;;
     *)              do_menu ;;

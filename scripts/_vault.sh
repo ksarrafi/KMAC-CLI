@@ -179,15 +179,18 @@ _vault_encrypt() {
 }
 
 _file_get() {
-    local json
+    local json name="$1"
     json=$(_vault_decrypt) || return 1
-    echo "$json" | python3 -c "
-import sys,json
+    KMAC_VAULT_NAME="$name" python3 -c "
+import os, sys, json
+name = os.environ['KMAC_VAULT_NAME']
 d = json.load(sys.stdin)
-v = d.get('$1','')
-if v: print(v)
-else: sys.exit(1)
-" 2>/dev/null
+v = d.get(name, '')
+if v:
+    print(v)
+else:
+    sys.exit(1)
+" <<< "$json" 2>/dev/null
 }
 
 _file_set() {
@@ -198,35 +201,39 @@ _file_set() {
     else
         json="{}"
     fi
-    json=$(echo "$json" | python3 -c "
-import sys,json
+    json=$(KMAC_VAULT_NAME="$svc" KMAC_VAULT_VAL="$val" python3 -c "
+import os, json, sys
+name = os.environ['KMAC_VAULT_NAME']
+val = os.environ['KMAC_VAULT_VAL']
 d = json.load(sys.stdin)
-d['$svc'] = '''$val'''
+d[name] = val
 print(json.dumps(d))
-" 2>/dev/null) || return 1
+" <<< "$json" 2>/dev/null) || return 1
     _vault_encrypt "$json"
 }
 
 _file_del() {
-    local json
+    local json name="$1"
     json=$(_vault_decrypt) || return 1
-    json=$(echo "$json" | python3 -c "
-import sys,json
+    json=$(KMAC_VAULT_NAME="$name" python3 -c "
+import os, json, sys
+name = os.environ['KMAC_VAULT_NAME']
 d = json.load(sys.stdin)
-d.pop('$1', None)
+d.pop(name, None)
 print(json.dumps(d))
-" 2>/dev/null) || return 1
+" <<< "$json" 2>/dev/null) || return 1
     _vault_encrypt "$json"
 }
 
 _file_has() {
-    local json
+    local json name="$1"
     json=$(_vault_decrypt) || return 1
-    echo "$json" | python3 -c "
-import sys,json
+    KMAC_VAULT_NAME="$name" python3 -c "
+import os, sys, json
+name = os.environ['KMAC_VAULT_NAME']
 d = json.load(sys.stdin)
-sys.exit(0 if '$1' in d and d['$1'] else 1)
-" 2>/dev/null
+sys.exit(0 if name in d and d[name] else 1)
+" <<< "$json" 2>/dev/null
 }
 
 _file_list() {
@@ -326,10 +333,12 @@ _docker_get() {
 
 _docker_set() {
     docker_vault_start || return 1
+    local json
+    json=$(python3 -c "import json,sys; print(json.dumps({'key':sys.argv[1],'value':sys.argv[2]}))" "$1" "$2")
     curl -sf -X POST "$(_docker_vault_url)/set" \
         -H "Authorization: Bearer $(_docker_vault_token)" \
         -H "Content-Type: application/json" \
-        -d "{\"key\":\"$1\",\"value\":\"$2\"}" >/dev/null 2>&1
+        -d "$json" >/dev/null 2>&1
 }
 
 _docker_del() {

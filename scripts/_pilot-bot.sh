@@ -119,7 +119,7 @@ cmd_start_message() {
 `/projects [filter]` — List projects
 `/tree [subdir]` — Directory tree
 `/cat <file>` — View a file
-`/run <command>` — Run shell cmd
+`/run <cmd>` — Allowed read-only cmds only (see /help)
 
 ✅ *Review*
 `/log` — Agent output
@@ -555,6 +555,14 @@ Example: \`/cat src/app/page.tsx\`
     fi
 
     local full_path="$project_dir/$filepath"
+    local project_real
+    project_real="$(realpath "$project_dir" 2>/dev/null)" || { tg_send "$cid" "Invalid path"; return; }
+    full_path="$(realpath "$full_path" 2>/dev/null)" || { tg_send "$cid" "Invalid path"; return; }
+    if [[ "$full_path" != "$project_real" && "$full_path" != "$project_real"/* ]]; then
+        tg_send "$cid" "Access denied: path outside project"
+        return
+    fi
+
     if [[ ! -f "$full_path" ]]; then
         tg_send "$cid" "File not found: \`$filepath\`"
         return
@@ -588,6 +596,14 @@ cmd_tree() {
     local target="$project_dir"
     [[ -n "$subdir" ]] && target="$project_dir/$subdir"
 
+    local project_real
+    project_real="$(realpath "$project_dir" 2>/dev/null)" || { tg_send "$cid" "Invalid path"; return; }
+    target="$(realpath "$target" 2>/dev/null)" || { tg_send "$cid" "Invalid path"; return; }
+    if [[ "$target" != "$project_real" && "$target" != "$project_real"/* ]]; then
+        tg_send "$cid" "Access denied: path outside project"
+        return
+    fi
+
     if [[ ! -d "$target" ]]; then
         tg_send "$cid" "Directory not found: \`$subdir\`"
         return
@@ -614,14 +630,65 @@ cmd_tree() {
     tg_send_plain "$cid" "$(printf '📁 %s%s:\n```\n%s\n```' "$project_name" "${subdir:+/$subdir}" "$tree_output")"
 }
 
+# Strict allowlist for /run — first word (and git/docker/brew subcommand) must match.
+pilot_run_allowed() {
+    local line="$1"
+    read -r -a words <<< "$line"
+    ((${#words[@]} == 0)) && return 1
+    local w0="${words[0]}"
+    local w1="${words[1]:-}"
+    local w2="${words[2]:-}"
+
+    case "$w0" in
+        ls|cat|head|tail|wc|pwd|whoami|date|uptime|df|du)
+            return 0
+            ;;
+        git)
+            case "$w1" in
+                status|log|diff|branch) return 0 ;;
+                *) return 1 ;;
+            esac
+            ;;
+        docker)
+            case "$w1" in
+                ps|images|logs) return 0 ;;
+                *) return 1 ;;
+            esac
+            ;;
+        brew)
+            [[ "$w1" == "list" ]] && return 0
+            [[ "$w1" == "services" && "$w2" == "list" ]] && return 0
+            return 1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+pilot_run_allowed_list_msg() {
+    cat <<'MSG'
+*Allowed /run commands*
+
+*Single commands:* `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `whoami`, `date`, `uptime`, `df`, `du`
+
+*Git:* `git status`, `git log`, `git diff`, `git branch`
+
+*Docker:* `docker ps`, `docker images`, `docker logs`
+
+*Brew:* `brew list`, `brew services list`
+
+Anything else is rejected. Set chat via `kmac pilot config`.
+MSG
+}
+
 cmd_run() {
     local cid="$1" shell_cmd="$2"
 
     if [[ -z "$shell_cmd" ]]; then
-        tg_send "$cid" "Usage: \`/run <command>\`
-Example: \`/run npm test\`
-\`/run git log --oneline -5\`
-\`/run ls -la src/\`"
+        tg_send_plain "$cid" "$(pilot_run_allowed_list_msg)
+Usage: \`/run <command>\`
+Examples: \`/run ls -la src/\`, \`/run git log --oneline -5\`, \`/run docker ps\`"
         return
     fi
 
@@ -632,10 +699,10 @@ Example: \`/run npm test\`
         return
     fi
 
-    # Safety: block destructive commands
-    if [[ "$shell_cmd" == *"rm -rf"* ]] || [[ "$shell_cmd" == *"mkfs"* ]] || \
-       [[ "$shell_cmd" == *"dd if="* ]] || [[ "$shell_cmd" == *":()"* ]]; then
-        tg_send "$cid" "Blocked: that command looks destructive."
+    if ! pilot_run_allowed "$shell_cmd"; then
+        tg_send_plain "$cid" "Command not allowed.
+
+$(pilot_run_allowed_list_msg)"
         return
     fi
 
@@ -701,20 +768,18 @@ handle_message() {
 
     [[ -z "$cid" || -z "$text" ]] && return
 
-    # Security: only respond to authorized chat
-    if [[ -n "$CHAT_ID" && "$cid" != "$CHAT_ID" ]]; then
-        log "Unauthorized message from chat $cid (expected $CHAT_ID)"
-        # On first use, tell user their chat ID so they can configure it
-        tg_send "$cid" "Unauthorized. Your chat ID is: \`$cid\`
-Set it with: \`pilot config chat_id $cid\`"
+    # Require explicit chat_id — never auto-bind from first sender
+    if [[ -z "$CHAT_ID" ]]; then
+        tg_send "$cid" "Bot not configured. Run \`kmac pilot config\` to set up."
         return
     fi
 
-    # If no chat_id configured yet, save this one
-    if [[ -z "$CHAT_ID" ]]; then
-        CHAT_ID="$cid"
-        pilot_set_config "chat_id" "$cid"
-        log "Auto-configured chat_id: $cid"
+    # Security: only respond to authorized chat
+    if [[ "$cid" != "$CHAT_ID" ]]; then
+        log "Unauthorized message from chat $cid (expected $CHAT_ID)"
+        tg_send "$cid" "Unauthorized. Your chat ID is: \`$cid\`
+Set it with: \`kmac pilot config\` (or \`pilot config chat_id $cid\`)"
+        return
     fi
 
     local cmd args

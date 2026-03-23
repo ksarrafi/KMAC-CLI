@@ -111,12 +111,7 @@ print(d.get('KernelVersion','?'))
     local containers idx=0 alerts=""
     containers=$(_api "/containers/json")
 
-    echo "$containers" | _py "
-import sys, json
-cs = json.load(sys.stdin)
-for c in cs:
-    print(c['Id'][:12] + '|' + c['Names'][0].lstrip('/') + '|' + c.get('Status',''))
-" | while IFS='|' read -r cid name status; do
+    while IFS='|' read -r cid name status; do
         ((idx++))
 
         # Health status from inspect
@@ -177,7 +172,12 @@ print(f'{cpu_pct:.1f} {mem_h} {h(rx)} {h(tx)}')")
         if (( cpu_num > 80 )); then
             alerts+="  ${RED}⚠${NC}  ${BOLD}${name}${NC}: CPU at ${cpu_pct}%\n"
         fi
-    done
+    done < <(echo "$containers" | _py "
+import sys, json
+cs = json.load(sys.stdin)
+for c in cs:
+    print(c['Id'][:12] + '|' + c['Names'][0].lstrip('/') + '|' + c.get('Status',''))
+")
 
     if [[ -n "$alerts" ]]; then
         echo ""
@@ -750,10 +750,11 @@ _mcp_troubleshoot() {
     [[ -n "$crashed" ]] && diag+="CRASHED:"$'\n'"$crashed"$'\n'
 
     # Get logs from unhealthy containers
-    docker ps --filter health=unhealthy --format '{{.Names}}' 2>/dev/null | while read -r name; do
+    while read -r name; do
+        [[ -z "$name" ]] && continue
         diag+="UNHEALTHY LOGS ($name):"$'\n'
         diag+="$(docker logs --tail 20 "$name" 2>&1)"$'\n'
-    done
+    done < <(docker ps --filter health=unhealthy --format '{{.Names}}' 2>/dev/null)
 
     local prompt="You are a Docker expert. Analyze this Docker system state and provide:
 1. A brief health summary (1-2 sentences)

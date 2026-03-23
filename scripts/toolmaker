@@ -70,6 +70,11 @@ gather_spec() {
     read -r -p "  Tool name (lowercase, no spaces): " TOOL_NAME
     TOOL_NAME=$(echo "$TOOL_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
 
+    if [[ ! "$TOOL_NAME" =~ ^[a-z0-9][-a-z0-9]*$ ]]; then
+        echo "Invalid tool name. Use lowercase letters, numbers, and hyphens only."
+        return 1
+    fi
+
     if [[ "$TOOL_TYPE" == "plugin" ]]; then
         echo ""
         read -r -n1 -p "  Menu shortcut key (single letter/number): " TOOL_KEY; echo ""

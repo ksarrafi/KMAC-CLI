@@ -106,19 +106,30 @@ _claude_ask() {
     # Start spinner
     _ai_spin_start "$spin_label" "$model_short"
 
-    local response
-    response=$(curl -s --max-time 60 https://api.anthropic.com/v1/messages \
-        -H "content-type: application/json" \
-        -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
-        -d "$(cat <<ENDJSON
+    local json_body
+    if command -v jq &>/dev/null; then
+        json_body=$(jq -n \
+            --arg model "$model" \
+            --argjson max_tokens "$max_tokens" \
+            --arg msg "$prompt" \
+            '{model: $model, max_tokens: $max_tokens, messages: [{role: "user", content: $msg}]}')
+    else
+        json_body=$(cat <<ENDJSON
 {
     "model": "$model",
     "max_tokens": $max_tokens,
     "messages": [{"role": "user", "content": $(echo "$prompt" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')}]
 }
 ENDJSON
-)")
+)
+    fi
+
+    local response
+    response=$(curl -s --max-time 60 https://api.anthropic.com/v1/messages \
+        -H "content-type: application/json" \
+        -H "x-api-key: $ANTHROPIC_API_KEY" \
+        -H "anthropic-version: 2023-06-01" \
+        -d "$json_body")
 
     # Stop spinner
     _ai_spin_stop

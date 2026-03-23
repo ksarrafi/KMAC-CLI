@@ -4,8 +4,10 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_vault.sh" 2>/dev/null
 
+RT_RUNTIME_DIR="${KMAC_RT_RUNTIME_DIR:-$HOME/.config/kmac/remote-terminal}"
+
 remote-terminal() {
-    local pid_dir="/tmp/remote-terminal"
+    local pid_dir="$RT_RUNTIME_DIR"
     local ttyd_pidfile="$pid_dir/ttyd.pid"
     local caddy_pidfile="$pid_dir/caddy.pid"
     local ngrok_pidfile="$pid_dir/ngrok.pid"
@@ -30,7 +32,7 @@ remote-terminal() {
         return 1
     fi
 
-    mkdir -p "$pid_dir"
+    mkdir -p "$pid_dir" && chmod 700 "$pid_dir"
 
     # ── cleanup helper (kills whatever has been started so far) ──
     _rt_cleanup() {
@@ -137,14 +139,14 @@ EOF
     echo "============================================"
     echo "  URL:      $url"
     echo "  Username: $RT_USER"
-    echo "  Password: $RT_PASS"
+    echo "  Password: ******** (stored in vault — use toolkit Remote Terminal → 'p' to reveal, or: kmac secrets get rt-password)"
     echo "============================================"
     echo ""
     qrencode -t UTF8 "$url"
 }
 
 stop-remote-terminal() {
-    local pid_dir="/tmp/remote-terminal"
+    local pid_dir="$RT_RUNTIME_DIR"
     local stopped=()
     local svc pf pid
 
@@ -162,7 +164,7 @@ stop-remote-terminal() {
 
     # ── fallback: targeted pkill ──
     pkill -f 'ttyd -p 7681' 2>/dev/null
-    pkill -f 'caddy run --config /tmp/remote-terminal' 2>/dev/null
+    pkill -f "caddy run --config ${pid_dir}/" 2>/dev/null
     pkill -f 'ngrok http 7682' 2>/dev/null
 
     # ── clean up runtime files ──

@@ -22,13 +22,8 @@ run_tests() {
 
   assert_contains "$(grep -E '^[[:space:]]*"git\|' "$sw" || true)" "git|" "registry defines git"
 
-  # do_search uses ${var,,} (bash 4+); skip live search on older bash.
-  if bash -c 'x=Ab; [[ "${x,,}" == "ab" ]]' 2>/dev/null; then
-    out=$(bash "$sw" search git 2>&1) || true
-    assert_contains "$out" "git" "search finds git"
-  else
-    test_pass "skip software search (requires bash 4+ for case folding)"
-  fi
+  out=$(bash "$sw" search git 2>&1) || true
+  assert_contains "$out" "git" "search finds git"
 
   assert_exit_code 1 bash "$sw" install __no_such_kmac_package__ 2>/dev/null
   out=$(bash "$sw" install __no_such_kmac_package__ 2>&1) || true

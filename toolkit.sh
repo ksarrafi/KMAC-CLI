@@ -26,8 +26,8 @@ source "$SCRIPTS_DIR/_ui.sh"
 # ─── Vault (secret management) ───────────────────────────────────────────
 source "$SCRIPTS_DIR/_vault.sh" 2>/dev/null
 
-# Auto-export vault credentials into environment so all tools can use them
-vault_export_all 2>/dev/null
+# Registry-backed secrets are exported lazily in main() so sourcing this file
+# for one-shot subcommands (e.g. kmac review) does not unlock/export everything at startup.
 
 # ─── AI Self-Healing ──────────────────────────────────────────────────────
 source "$SCRIPTS_DIR/_ai-fix.sh" 2>/dev/null
@@ -57,7 +57,9 @@ si_plain() { [[ "$1" == "up" ]] && echo "*" || echo "-"; }
 # Captures output via tee on first run (never re-executes commands)
 safe_run() {
     local label="$1"; shift
-    local logfile="/tmp/toolkit-safe-run-$$.log"
+    local logfile
+    logfile="$(mktemp "${TMPDIR:-/tmp}/toolkit-safe-run.XXXXXX")" || return 1
+    chmod 600 "$logfile"
 
     "$@" 2>&1 | tee "$logfile"
     local exit_code=${PIPESTATUS[0]}
@@ -82,16 +84,47 @@ safe_run() {
 # ─── Status Checks ───────────────────────────────────────────────────────
 
 check_rt() {
-    local pf="/tmp/remote-terminal/ttyd.pid"
+    local pf="$HOME/.config/kmac/remote-terminal/ttyd.pid"
     [[ -f "$pf" ]] && kill -0 "$(cat "$pf" 2>/dev/null)" 2>/dev/null && echo "up" || echo "down"
 }
 check_docker() {
-    if timeout 2 docker info &>/dev/null 2>&1; then
-        echo "up:$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')"
-    else echo "down:0"; fi
+    docker info &>/dev/null 2>&1 &
+    local pid=$! i
+    for ((i = 0; i < 20; i++)); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid"
+            local ec=$?
+            if ((ec == 0)); then
+                echo "up:$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')"
+            else
+                echo "down:0"
+            fi
+            return
+        fi
+        sleep 0.1
+    done
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    echo "down:0"
 }
 check_ngrok() {
     curl -sf --max-time 1 http://localhost:4040/api/tunnels &>/dev/null && echo "up" || echo "down"
+}
+
+_MENU_CACHE_TS=0
+_MENU_CACHE_RT=""
+_MENU_CACHE_DK=""
+_MENU_CACHE_NG=""
+
+_refresh_status_cache() {
+    local now
+    now=$(date +%s)
+    if ((now - _MENU_CACHE_TS > 5)); then
+        _MENU_CACHE_RT=$(check_rt)
+        _MENU_CACHE_DK=$(check_docker)
+        _MENU_CACHE_NG=$(check_ngrok)
+        _MENU_CACHE_TS=$now
+    fi
 }
 
 # ─── Plugin Discovery ────────────────────────────────────────────────────
@@ -215,7 +248,8 @@ print_menu() {
     clear
     discover_plugins
 
-    local rt=$(check_rt) dk=$(check_docker) ng=$(check_ngrok)
+    _refresh_status_cache
+    local rt="$_MENU_CACHE_RT" dk="$_MENU_CACHE_DK" ng="$_MENU_CACHE_NG"
     local dk_state="${dk%%:*}" dk_count="${dk##*:}"
 
     # ─── Logo ───
@@ -296,11 +330,11 @@ do_remote_terminal() {
             | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
         echo -e "  Status: ${GREEN}● Running${NC}"
         echo -e "  URL:    ${GREEN}${url:-unknown}${NC}"
-        local _rt_pass
-        _rt_pass=$(vault_get "rt-password" 2>/dev/null || echo "(stored in vault)")
-        echo -e "  Auth:   user / ${_rt_pass}"
+        echo -e "  Auth:   user / ******** ${DIM}(stored in vault)${NC}"
+        echo -e "  ${DIM}Press 'p' to reveal password${NC}"
         echo ""
         echo -e "  ${GREEN}q${NC}) Show QR code"
+        echo -e "  ${GREEN}p${NC}) Reveal password"
         echo -e "  ${GREEN}r${NC}) Restart"
         echo -e "  ${GREEN}s${NC}) Stop"
         echo -e "  ${GREEN}t${NC}) Re-attach tmux (reconnect only)"
@@ -308,6 +342,11 @@ do_remote_terminal() {
         echo ""
         read -r -n1 -p "  > " rt_ch; echo ""
         case "$rt_ch" in
+            p|P)
+                local _rt_pass
+                _rt_pass=$(vault_get "rt-password" 2>/dev/null)
+                [[ -n "$_rt_pass" ]] && echo -e "  Password: ${_rt_pass}" || echo -e "  ${YELLOW}(not in vault)${NC}"
+                ;;
             q|Q)
                 [[ -n "$url" ]] && qrencode -t UTF8 "$url" 2>/dev/null || echo "No URL available"
                 ;;
@@ -342,11 +381,17 @@ do_show_qr() {
     title_box "Remote Terminal — QR" "📡"
     echo -e "  URL:      ${GREEN}${url:-unknown}${NC}"
     echo -e "  Username: ${GREEN}user${NC}"
-    local _rt_pass
-    _rt_pass=$(vault_get "rt-password" 2>/dev/null || echo "(stored in vault)")
-    echo -e "  Password: ${GREEN}${_rt_pass}${NC}"
+    echo -e "  Password: ${GREEN}********${NC} ${DIM}(stored in vault)${NC}"
+    echo -e "  ${DIM}Press 'p' to reveal password${NC}"
     echo ""
     [[ -n "$url" ]] && qrencode -t UTF8 "$url" 2>/dev/null
+    echo ""
+    read -r -n1 -p "  > " _qrpw; echo ""
+    if [[ "$_qrpw" == [pP] ]]; then
+        local _rp
+        _rp=$(vault_get "rt-password" 2>/dev/null)
+        [[ -n "$_rp" ]] && echo -e "  Password: ${_rp}" || echo -e "  ${YELLOW}(not in vault)${NC}"
+    fi
     pause
 }
 
@@ -671,6 +716,9 @@ welcome_wizard() {
 main() {
     mkdir -p "$PLUGINS_DIR" 2>/dev/null
 
+    # Interactive menu only: export vault-backed API tokens env vars for built-in tools.
+    vault_export_all 2>/dev/null
+
     if is_first_run; then
         welcome_wizard
     else
@@ -699,7 +747,7 @@ main() {
             r) clear; do_remote_terminal ;;
             d) clear; do_docker ;;
             n) clear; do_network ;;
-            k) clear; echo -e "${BOLD}Kill Port:${NC}"; read -r -p "Port (blank=list): " pt; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" $pt; pause ;;
+            k) clear; echo -e "${BOLD}Kill Port:${NC}"; read -r -p "Port (blank=list): " pt; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" "$pt"; pause ;;
             q) clear; do_show_qr ;;
             # System
             .) clear; do_secrets ;;
@@ -773,7 +821,7 @@ if [[ $# -gt 0 ]]; then
             echo -e "  ${BOLD}AI${NC}"
             echo "    ask \"question\"        Ask Claude (or -i for interactive, -m opus)"
             echo "    make \"description\"    Build a new tool with AI"
-            echo "    ollama [cmd]          Local AI setup (install|models|serve|status|chat)"
+            echo "    ollama [cmd]          Local AI setup (install|models|serve|stop|status|chat)"
             echo ""
             echo -e "  ${BOLD}Dev${NC}"
             echo "    project               Project launcher with fzf"
@@ -805,7 +853,7 @@ if [[ $# -gt 0 ]]; then
             ;;
         *)
             if [[ -x "$PLUGINS_DIR/$subcmd" || -x "$PLUGINS_DIR/${subcmd}.sh" ]]; then
-                local p="$PLUGINS_DIR/$subcmd"
+                p="$PLUGINS_DIR/$subcmd"
                 [[ -x "$p" ]] || p="${p}.sh"
                 exec bash "$p" "$@"
             fi

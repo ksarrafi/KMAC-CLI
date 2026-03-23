@@ -263,7 +263,7 @@ async def handle_session_stop(request):
 
 async def handle_session_delete(request):
     sid = request.match_info["id"]
-    result = session_mgr.remove_session(sid)
+    result = await session_mgr.remove_session(sid)
     return json_ok(result, 200 if result.get("ok") else 400)
 
 
@@ -440,54 +440,157 @@ _BLOCKED_PATTERNS = [
     re.compile(r"\bcurl\b.*\|\s*(ba)?sh"),             # pipe to shell
 ]
 
-_ALLOWED_PREFIXES = (
-    "ls", "cat", "head", "tail", "wc", "grep", "rg", "find", "file",
-    "git", "npm", "yarn", "pnpm", "bun", "node", "python", "python3",
-    "pip", "pip3", "cargo", "go", "make", "swift", "xcodebuild",
-    "echo", "env", "printenv", "which", "whoami", "date", "uptime",
-    "df", "du", "pwd", "tree", "sort", "uniq", "awk", "sed", "cut",
-    "docker", "brew", "pod", "flutter", "ruby", "gem", "bundler",
-)
+# None => read-only command, allow any argv after program name.
+# List => argv[1] must be one of these subcommands (see git/brew for extras).
+_ALLOWED_COMMANDS: dict[str, Optional[list[str]]] = {
+    "ls": None,
+    "cat": None,
+    "head": None,
+    "tail": None,
+    "wc": None,
+    "du": None,
+    "df": None,
+    "uname": None,
+    "whoami": None,
+    "date": None,
+    "uptime": None,
+    "which": None,
+    "echo": None,
+    "pwd": None,
+    "git": ["status", "log", "diff", "branch", "remote", "show"],
+    "docker": ["ps", "images", "logs", "inspect", "stats"],
+    "brew": ["list", "info", "outdated"],
+    "npm": ["list", "ls", "outdated"],
+    "pip3": ["list", "show"],
+}
+
+_MAX_RUN_OUTPUT_BYTES = 1_048_576
 
 
-def _validate_run_command(cmd: str) -> tuple[Optional[str], Optional[str]]:
-    """Return (error_message, first_token). error_message is None if OK."""
+def _validate_run_argv(argv: list[str]) -> Optional[str]:
+    """Return error message or None if argv is allowed."""
+    if not argv:
+        return "command required"
+    prog = os.path.basename(argv[0])
+    if prog not in _ALLOWED_COMMANDS:
+        return f"Command not allowed: {prog}"
+    allowed = _ALLOWED_COMMANDS[prog]
+    if allowed is None:
+        return None
+
+    if prog == "git":
+        if len(argv) < 2:
+            return "git: subcommand required"
+        sub = argv[1]
+        if sub == "stash":
+            if len(argv) < 3 or argv[2] != "list":
+                return "git: only 'stash list' allowed for stash"
+            return None
+        if sub in allowed:
+            return None
+        return f"git: subcommand not allowed: {sub}"
+
+    if prog == "brew":
+        if len(argv) < 2:
+            return "brew: subcommand required"
+        if argv[1] in allowed:
+            return None
+        if argv[1] == "services" and len(argv) >= 3 and argv[2] == "list":
+            return None
+        return "brew: only list, info, outdated, or services list"
+
+    if len(argv) < 2:
+        return f"{prog}: subcommand required"
+    if argv[1] not in allowed:
+        return f"{prog}: subcommand not allowed: {argv[1]}"
+    return None
+
+
+def _validate_run_command(cmd: str) -> tuple[Optional[str], Optional[list[str]]]:
+    """Return (error_message, argv). error_message is None if OK."""
     if not cmd:
         return "command required", None
     for pat in _BLOCKED_PATTERNS:
         if pat.search(cmd):
             return "Blocked: potentially destructive command", None
     try:
-        first_token = shlex.split(cmd)[0]
+        argv = shlex.split(cmd)
     except ValueError:
         return "Malformed command", None
-    if first_token not in _ALLOWED_PREFIXES:
-        return f"Command not allowed: {first_token}", None
-    return None, first_token
+    err = _validate_run_argv(argv)
+    if err:
+        return err, argv
+    return None, argv
+
+
+async def _read_process_output_limited(
+    proc: asyncio.subprocess.Process, limit: int, timeout: float
+) -> tuple[bytes, Optional[str]]:
+    """Read merged stdout/stderr up to `limit` bytes. Returns (data, error_tag)."""
+    assert proc.stdout is not None
+    chunks: list[bytes] = []
+    total = 0
+    timed_out = False
+
+    async def _drain():
+        nonlocal total
+        while True:
+            chunk = await proc.stdout.read(65536)
+            if not chunk:
+                break
+            if total + len(chunk) > limit:
+                chunks.append(chunk[: limit - total])
+                total = limit
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+
+    try:
+        await asyncio.wait_for(_drain(), timeout=timeout)
+    except asyncio.TimeoutError:
+        timed_out = True
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+    await proc.wait()
+    data = b"".join(chunks)
+    if timed_out:
+        return data, "timeout"
+    if total >= limit:
+        return data, "truncated"
+    return data, None
 
 
 async def _execute_run_command(cmd: str, cwd: str) -> dict:
     """Run shell command with the same rules as /api/run. cwd must be a directory."""
-    err, first_token = _validate_run_command(cmd)
-    if err:
-        return {"error": err, "first_token": first_token}
+    err, argv = _validate_run_command(cmd)
+    if err or not argv:
+        return {"error": err or "command required", "argv": argv}
+    prog = os.path.basename(argv[0])
     proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
-            *shlex.split(cmd),
+            *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=cwd,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        stdout, out_err = await _read_process_output_limited(
+            proc, _MAX_RUN_OUTPUT_BYTES, 30.0
+        )
         output = stdout.decode("utf-8", errors="replace") if stdout else ""
-        return {"stdout": output, "exit_code": proc.returncode}
-    except asyncio.TimeoutError:
-        if proc:
-            proc.kill()
-        return {"error": "Command timed out (30s)", "exit_code": -1}
+        if out_err == "timeout":
+            return {"error": "Command timed out (30s)", "exit_code": -1}
+        if out_err == "truncated":
+            output += "\n[output truncated at 1MB limit]"
+        return {"stdout": output, "exit_code": proc.returncode if proc.returncode is not None else -1}
     except FileNotFoundError:
-        return {"error": f"Command not found: {first_token}", "exit_code": -1}
+        return {"error": f"Command not found: {prog}", "exit_code": -1}
 
 
 def _resolve_exec_cwd(cwd_raw: str) -> tuple[Optional[str], Optional[str]]:
@@ -515,7 +618,7 @@ async def handle_run(request):
     cmd = body.get("command", "")
     project = body.get("project", "")
 
-    err, _ft = _validate_run_command(cmd)
+    err, _argv = _validate_run_command(cmd)
     if err:
         code = 403 if ("Blocked" in err or "not allowed" in err) else 400
         return json_ok({"error": err}, code)
@@ -796,7 +899,7 @@ async def handle_ws(request):
 
     state = WSClientState(ws)
     app["ws_clients"].append(state)
-    queue = session_mgr.subscribe()
+    queue = await session_mgr.subscribe()
 
     sessions = [s.to_dict() for s in session_mgr.sessions]
     await ws.send_json({
@@ -822,7 +925,7 @@ async def handle_ws(request):
             app["ws_clients"].remove(state)
         except ValueError:
             pass
-        session_mgr.unsubscribe(queue)
+        await session_mgr.unsubscribe(queue)
 
     return ws
 
@@ -924,4 +1027,4 @@ if __name__ == "__main__":
     print(f"  Token: {AUTH_TOKEN[:8]}…")
     print(f"  Agent: {active_agent()}")
     print()
-    web.run_app(create_app(), host=None, port=PORT, print=None)
+    web.run_app(create_app(), host=HOST, port=PORT, print=None)

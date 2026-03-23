@@ -5,15 +5,17 @@ import os
 import secrets
 from pathlib import Path
 
-PILOT_DIR = Path("/tmp/kmac-pilot")
+PILOT_DIR = Path.home() / ".config" / "kmac-pilot" / "run"
 CONFIG_DIR = Path.home() / ".config" / "kmac-pilot"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 SERVER_TOKEN_FILE = CONFIG_DIR / "server_token"
 
-PILOT_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_DIR.chmod(0o700)
+PILOT_DIR.mkdir(parents=True, exist_ok=True)
+PILOT_DIR.chmod(0o700)
 
-HOST = os.getenv("KMAC_HOST", "0.0.0.0")
+HOST = os.getenv("KMAC_HOST", "127.0.0.1")
 PORT = int(os.getenv("KMAC_PORT", "7890"))
 
 

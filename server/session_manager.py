@@ -17,6 +17,7 @@ from config import PILOT_DIR, active_agent
 
 log = logging.getLogger(__name__)
 
+_MAX_OUTPUT_LINES = 10_000
 
 SESSIONS_DIR = PILOT_DIR / "sessions"
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -179,12 +180,18 @@ class Session:
         return d
 
 
+def _trim_output_lines(session: Session) -> None:
+    while len(session.output_lines) > _MAX_OUTPUT_LINES:
+        session.output_lines.pop(0)
+
+
 class SessionManager:
     """Manages multiple concurrent AI agent sessions."""
 
     def __init__(self):
         self._sessions: dict[str, Session] = {}
         self._subscribers: list[asyncio.Queue] = []
+        self._state_lock = asyncio.Lock()
 
     # ── queries ──────────────────────────────────────────────────────
 
@@ -205,17 +212,21 @@ class SessionManager:
 
     # ── pub/sub ──────────────────────────────────────────────────────
 
-    def subscribe(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue()
-        self._subscribers.append(q)
+    async def subscribe(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        async with self._state_lock:
+            self._subscribers.append(q)
         return q
 
-    def unsubscribe(self, q: asyncio.Queue):
-        if q in self._subscribers:
-            self._subscribers.remove(q)
+    async def unsubscribe(self, q: asyncio.Queue):
+        async with self._state_lock:
+            if q in self._subscribers:
+                self._subscribers.remove(q)
 
     async def _broadcast(self, event: dict):
-        for q in self._subscribers:
+        async with self._state_lock:
+            subs = list(self._subscribers)
+        for q in subs:
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
@@ -242,8 +253,9 @@ class SessionManager:
             status="idle" if not prompt else "running",
             started=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         )
-        self._sessions[sid] = session
-        session.log_path.write_text("")
+        async with self._state_lock:
+            self._sessions[sid] = session
+            session.log_path.write_text("")
 
         await self._broadcast({
             "type": "session_created",
@@ -270,7 +282,7 @@ class SessionManager:
         if fd is None:
             return {"error": "No PTY available"}
         data = text.encode("utf-8", errors="replace")
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _write():
             os.write(fd, data)
@@ -294,6 +306,7 @@ class SessionManager:
         session.output_lines.append("")
         session.output_lines.append(user_line)
         session.output_lines.append("")
+        _trim_output_lines(session)
 
         await self._broadcast({"type": "output", "session_id": session.id, "line": ""})
         await self._broadcast({"type": "output", "session_id": session.id, "line": user_line})
@@ -331,6 +344,7 @@ class SessionManager:
     async def _emit(self, session: Session, line: str):
         """Append a line to session output and broadcast it."""
         session.output_lines.append(line)
+        _trim_output_lines(session)
         with open(session.log_path, "a") as f:
             f.write(line + "\n")
         await self._broadcast({
@@ -369,7 +383,7 @@ class SessionManager:
 
     async def _read_pty_output(self, session: Session, master_fd: int):
         """Read from a PTY, process each line, broadcast to subscribers."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         buf = ""
         try:
             while True:
@@ -424,19 +438,20 @@ class SessionManager:
         })
         return {"ok": True}
 
-    def remove_session(self, session_id: str) -> dict:
-        session = self._sessions.get(session_id)
-        if not session:
-            return {"error": "Session not found"}
-        if session.running:
-            return {"error": "Stop session first"}
+    async def remove_session(self, session_id: str) -> dict:
+        async with self._state_lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return {"error": "Session not found"}
+            if session.running:
+                return {"error": "Stop session first"}
 
-        try:
-            session.log_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+            try:
+                session.log_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
-        del self._sessions[session_id]
+            del self._sessions[session_id]
         return {"ok": True}
 
     # ── ask (legacy — kept for backward compat) ──────────────────────

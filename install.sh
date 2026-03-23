@@ -42,7 +42,9 @@ fi
 echo -e "${CYAN}${ICON_INFO} Making scripts executable...${NC}"
 chmod +x "$TOOLKIT_DIR/toolkit.sh" 2>/dev/null || true
 chmod +x "$TOOLKIT_DIR/install.sh" 2>/dev/null || true
-chmod +x "$SCRIPTS_DIR"/* 2>/dev/null || true
+for script in _ui.sh _vault.sh _auth-helper.sh _ai-fix.sh _hooks.sh _platform.sh _pilot-lib.sh _pilot-bot.sh ask review aicommit sessions project cursoragent claudeme killport pilot dotbackup update-check toolmaker secrets setup-mac release software ollama-setup docker docker-health storage remote-terminal.sh aicoder install-aicoder create-aicoder.sh; do
+    [[ -f "$SCRIPTS_DIR/$script" ]] && chmod +x "$SCRIPTS_DIR/$script"
+done
 echo -e "${GREEN}${ICON_SUCCESS} Scripts are executable${NC}"
 
 # ─── 3. Add toolkit alias to .zshrc (if zsh is available) ────────────────

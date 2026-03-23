@@ -67,7 +67,6 @@ $error_output
 Reply in EXACTLY this format (no markdown, no backticks):
 DIAGNOSIS: one-line explanation of what went wrong
 FIX: the exact shell command to fix it
-SAFE: yes or no (is this safe to run automatically?)
 NOTE: optional one-line note if the user should know something"
 
     local response
@@ -79,10 +78,9 @@ NOTE: optional one-line note if the user should know something"
     fi
 
     # Parse response
-    local diagnosis fix safe note
+    local diagnosis fix note
     diagnosis=$(echo "$response" | grep -i '^DIAGNOSIS:' | sed 's/^DIAGNOSIS: *//')
     fix=$(echo "$response" | grep -i '^FIX:' | sed 's/^FIX: *//')
-    safe=$(echo "$response" | grep -i '^SAFE:' | sed 's/^SAFE: *//' | tr '[:upper:]' '[:lower:]')
     note=$(echo "$response" | grep -i '^NOTE:' | sed 's/^NOTE: *//')
 
     echo ""
@@ -96,30 +94,25 @@ NOTE: optional one-line note if the user should know something"
     if [[ -n "$fix" && "$fix" != "none" && "$fix" != "N/A" ]]; then
         AI_FIX_CMD="$fix"
         echo ""
-        echo -e "   Suggested fix:"
+        echo -e "${BOLD}Suggested fix command:${NC}"
         echo -e "   ${GREEN}$ ${fix}${NC}"
         echo ""
-
-        if [[ "$safe" == "yes" ]]; then
-            echo -e "   ${GREEN}a)${NC} Run fix automatically"
-        else
-            echo -e "   ${YELLOW}a)${NC} Run fix ${YELLOW}(AI says: review first)${NC}"
-        fi
-        echo -e "   ${GREEN}c)${NC} Copy fix to clipboard"
+        echo -e "   ${GREEN}r)${NC} Run this command"
+        echo -e "   ${GREEN}c)${NC} Copy to clipboard"
         echo -e "   ${GREEN}s)${NC} Skip"
         echo ""
         read -r -n1 -p "   > " fix_choice
         echo ""
 
         case "$fix_choice" in
-            a|A)
+            r|R)
                 echo ""
                 # Prepare the command — auto-source nvm/rvm if needed
-                local prepared_cmd
-                prepared_cmd=$(_prepare_shell_env "$fix")
-                echo -e "${DIM}Running: $prepared_cmd${NC}"
+                local fix_cmd
+                fix_cmd=$(_prepare_shell_env "$fix")
+                echo -e "${DIM}Running: $fix_cmd${NC}"
                 echo ""
-                eval "$prepared_cmd" 2>&1
+                bash -c "$fix_cmd" 2>&1
                 local rc=$?
                 if (( rc == 0 )); then
                     echo -e "\n${GREEN}✓ Fix applied successfully!${NC}"

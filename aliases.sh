@@ -39,8 +39,8 @@ alias gl="git log --oneline --graph --decorate"
 alias dps="docker ps"
 alias dcu="docker-compose up"
 alias dcd="docker-compose down"
-alias drm='docker rm $(docker ps -a -q)'
-alias drmi='docker rmi $(docker images -q)'
+drm()  { local ids; ids=$(docker ps -a -q); [[ -n "$ids" ]] && docker rm $ids; }
+drmi() { local ids; ids=$(docker images -q); [[ -n "$ids" ]] && docker rmi $ids; }
 alias dimg="docker images"
 
 # ─── Networking ──────────────────────────────────────────────────────────

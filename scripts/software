@@ -552,11 +552,18 @@ do_search() {
     [[ -z "$query" ]] && { read -r -p "  Search: " query; }
     [[ -z "$query" ]] && return
 
+    local q_lower
+    q_lower=$(echo "$query" | tr '[:upper:]' '[:lower:]')
+
     echo ""
     local found=0
     for entry in "${REGISTRY[@]}"; do
         _parse_entry "$entry"
-        if [[ "${SW_NAME,,}" == *"${query,,}"* || "${SW_DESC,,}" == *"${query,,}"* || "${SW_CAT,,}" == *"${query,,}"* ]]; then
+        local sw_lower desc_lower cat_lower
+        sw_lower=$(echo "$SW_NAME" | tr '[:upper:]' '[:lower:]')
+        desc_lower=$(echo "$SW_DESC" | tr '[:upper:]' '[:lower:]')
+        cat_lower=$(echo "$SW_CAT" | tr '[:upper:]' '[:lower:]')
+        if [[ "$sw_lower" == *"$q_lower"* || "$desc_lower" == *"$q_lower"* || "$cat_lower" == *"$q_lower"* ]]; then
             if _is_installed "$SW_CHECK"; then
                 printf "   ${GREEN}●${NC}  %-14s %-32s ${DIM}%s${NC}\n" "$SW_NAME" "$SW_DESC" "$(_cat_label "$SW_CAT")"
             else

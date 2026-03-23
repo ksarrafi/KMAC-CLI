@@ -15,11 +15,11 @@ ICLOUD_AVAIL=false
 human_size() {
     local bytes=$1
     if (( bytes >= 1073741824 )); then
-        printf "%.1f GB" "$(echo "scale=1; $bytes/1073741824" | bc)"
+        printf "%.1f GB" "$(awk "BEGIN {printf \"%.1f\", $bytes/1073741824}")"
     elif (( bytes >= 1048576 )); then
-        printf "%.1f MB" "$(echo "scale=1; $bytes/1048576" | bc)"
+        printf "%.1f MB" "$(awk "BEGIN {printf \"%.1f\", $bytes/1048576}")"
     elif (( bytes >= 1024 )); then
-        printf "%.0f KB" "$(echo "scale=0; $bytes/1024" | bc)"
+        printf "%.0f KB" "$(awk "BEGIN {printf \"%.0f\", $bytes/1024}")"
     else
         printf "%d B" "$bytes"
     fi
