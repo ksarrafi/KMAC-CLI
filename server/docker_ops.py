@@ -24,6 +24,7 @@ async def _run(args: list[str], timeout: int = 15) -> tuple[str, int]:
         return stdout.decode("utf-8", errors="replace").strip(), proc.returncode or 0
     except asyncio.TimeoutError:
         proc.kill()
+        await proc.wait()
         return "Command timed out", -1
 
 
@@ -69,6 +70,7 @@ async def container_action(container_id: str, action: str) -> dict:
 
 
 async def container_logs(container_id: str, tail: int = 100) -> dict:
+    tail = max(1, min(tail, 10000))
     if not _SAFE_ID.match(container_id):
         return {"logs": "Invalid container ID", "container": container_id}
     out, rc = await _run(["docker", "logs", "--tail", str(tail), container_id], timeout=10)

@@ -19,6 +19,8 @@ export TOOLKIT_RUNNING=1
 
 SCRIPTS_DIR="$TOOLKIT_DIR/scripts"
 PLUGINS_DIR="$TOOLKIT_DIR/plugins"
+KMAC_CACHE_DIR="${HOME}/.cache/kmac"
+[[ -d "$KMAC_CACHE_DIR" ]] || mkdir -p "$KMAC_CACHE_DIR" && chmod 700 "$KMAC_CACHE_DIR"
 
 # ─── Shared UI (colors, title_box, pause) ─────────────────────────────────
 source "$SCRIPTS_DIR/_ui.sh"
@@ -58,7 +60,7 @@ si_plain() { [[ "$1" == "up" ]] && echo "*" || echo "-"; }
 safe_run() {
     local label="$1"; shift
     local logfile
-    logfile="$(mktemp "${TMPDIR:-/tmp}/toolkit-safe-run.XXXXXX")" || return 1
+    logfile="$(mktemp "$KMAC_CACHE_DIR/safe-run.XXXXXX")" || return 1
     chmod 600 "$logfile"
 
     "$@" 2>&1 | tee "$logfile"
@@ -157,7 +159,8 @@ discover_plugins() {
             PLUGIN_KEYS+=("${key:-}")
             if [[ -n "$hooks_raw" ]]; then
                 hooks_raw="${hooks_raw//,/ }"
-                for hook_entry in $hooks_raw; do
+                read -r -a _hook_entries <<< "$hooks_raw"
+                for hook_entry in "${_hook_entries[@]}"; do
                     [[ -n "$hook_entry" ]] && hooks_register_plugin "$hook_entry" "$plugin"
                 done
             fi
@@ -186,7 +189,7 @@ animate_intro() {
 
     local frame
     for ((frame=0; frame<32; frame++)); do
-        read -r -t 0.001 -n1 _ 2>/dev/null && { skipped=1; break; }
+        read -r -t 1 -n1 _ 2>/dev/null && { skipped=1; break; }
 
         local bright=$(( frame % np ))
         local p
@@ -266,7 +269,7 @@ print_menu() {
 
     echo -e "  ${DIM}│${NC}  ${rt_label}    ${dk_label}    ${ng_label}             ${DIM}│${NC}"
 
-    local _cache="/tmp/toolkit-update-cache/last-check.json"
+    local _cache="$KMAC_CACHE_DIR/last-check.json"
     if [[ -s "$_cache" ]]; then
         local _ucount
         _ucount=$(wc -l < "$_cache" 2>/dev/null | tr -d ' ')
@@ -768,7 +771,7 @@ main() {
                         clear; bash "${PLUGIN_PATHS[$idx]}"; pause; matched=true; break
                     fi
                 done
-                $matched || { echo -e "${RED}Unknown: '$choice'${NC}"; sleep 0.5; }
+                [[ "$matched" == true ]] || { echo -e "${RED}Unknown: '$choice'${NC}"; sleep 0.5; }
                 ;;
         esac
     done

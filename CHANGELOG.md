@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.6.0 — 2026-03-22
+
+### Security Hardening (comprehensive audit — 4 rounds, zero remaining issues)
+
+**CRITICAL fixes:**
+- Pilot `/run`: reject shell metacharacters, execute as array instead of `bash -c` — prevents command chaining bypass
+- AI self-healing: disabled auto-run of AI-suggested commands — copy-only for safety
+- Vault registry: all Python calls use env vars + heredocs — eliminates code injection
+- `create-aicoder.sh`: resolved binary path instead of trusting CWD `./aicoder`
+- Software manager: replaced all `eval` with type-safe dispatchers for install/check
+- All `curl | sh` installer patterns: download to temp file + user confirmation first
+
+**HIGH fixes:**
+- Server `resolve_project`: validate names, realpath containment — blocks `..` path traversal
+- Server `/api/run`: reject dangerous flags (`--exec`, `--upload-pack`, `-c`, `--config`, `--privileged`)
+- Server: clamp git log count (max 200) and docker log tail (max 10,000)
+- Server: require Bearer auth for Docker dashboard (was unauthenticated)
+- Server: resolve file paths once (TOCTOU fix), generic error messages (no info leaks)
+- Server: WebSocket client cap (100), subscription cap (50), command type validation
+- Server: `await proc.wait()` after all `proc.kill()` calls (no zombie processes)
+- Server: timing-safe token comparison with `hmac.compare_digest`
+- iOS: WebSocket auth via first message instead of URL query parameter (no token in logs/proxies)
+- iOS: `@MainActor` isolation on ALL `Task` blocks that touch UI state (20+ views fixed)
+- iOS: Keychain write error handling, sanitized log messages
+- Vault Docker: non-root user, pinned `cryptography==44.0.0`, volume ownership
+
+**MEDIUM fixes:**
+- Vault: per-deployment random PBKDF2 salt (not static), `chmod 600` on encrypted files
+- Hooks: reject unknown hooks, validate no `|` in handler paths
+- Platform: safe `osascript` via argv (no string interpolation injection)
+- Pilot: reject glob metacharacters in project names for `find -name`
+- `install.sh`: `compgen -G` instead of unquoted `ls` for iCloud detection
+- `toolkit.sh`: integer `read -t` timeout for Bash 3.2 compatibility
+- CI: skip fork PR test execution, pinned checkout SHA
+- Claude settings: removed broad `find`/`ln` from allowlist
+- Software registry: fixed Gemini package name (was wrong vendor)
+- `startup-hook.sh`: safe iCloud path resolution via loop
+
+**LOW fixes:**
+- All `/tmp/` references migrated to `~/.cache/kmac/` (storage, toolmaker, docker-health, safe_run)
+- Docker aliases use `xargs` pipe pattern
+- Boolean variable patterns use explicit `[[ "$var" == true ]]`
+- Vault token cache uses `is not None` check
+- Server: logged swallowed exceptions, removed token prefix from startup output
+- Ollama: model name validation (`^[A-Za-z0-9._:/-]+$`)
+- `setup-mac`: explicit Homebrew env exports instead of `eval`
+- `update-check`: quoted `$NPM_BIN` in command positions
+
 ## 2.5.0 — 2026-03-22
 
 ### New: Software Manager (`kmac software` / `I` in menu)

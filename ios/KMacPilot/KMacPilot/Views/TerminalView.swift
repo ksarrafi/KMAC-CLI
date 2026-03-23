@@ -111,7 +111,7 @@ struct TerminalView: View {
         command = ""
         isRunning = true
 
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             do {
                 let project = appState.selectedProject?.name ?? appState.taskStatus?.task.project ?? ""

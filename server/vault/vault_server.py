@@ -53,9 +53,18 @@ def _rate_limit_allow(client_ip: str) -> bool:
 
 
 def _derive_key():
-    """Derive encryption key from the auth token (deterministic)."""
+    """Derive encryption key from the auth token using a per-deployment salt."""
+    salt_path = DB_PATH + ".salt"
+    if os.path.exists(salt_path):
+        with open(salt_path, "rb") as f:
+            salt = f.read()
+    else:
+        salt = os.urandom(32)
+        with open(salt_path, "wb") as f:
+            f.write(salt)
+        os.chmod(salt_path, 0o600)
     token = _load_token()
-    key = hashlib.pbkdf2_hmac("sha256", token.encode(), b"kmac-vault-salt", 200_000)
+    key = hashlib.pbkdf2_hmac("sha256", token.encode(), salt, 200_000)
     return base64.urlsafe_b64encode(key[:32])
 
 
@@ -71,12 +80,12 @@ def _decrypt(ciphertext: str) -> str:
     return f.decrypt(ciphertext.encode()).decode()
 
 
-_token_cache = None
+_token_cache: Optional[str] = None
 
 
 def _load_token() -> str:
     global _token_cache
-    if _token_cache:
+    if _token_cache is not None:
         return _token_cache
     if os.path.exists(TOKEN_PATH):
         with open(TOKEN_PATH) as f:
@@ -251,7 +260,7 @@ if __name__ == "__main__":
     print(f"KMac Docker Vault")
     print(f"  Port:  {PORT}")
     print(f"  DB:    {DB_PATH}")
-    print(f"  Token: {token[:8]}...")
+    print("  Token: loaded")
     print(f"  Crypto: Fernet (AES-128-CBC + HMAC-SHA256)")
     print()
     server = HTTPServer(("127.0.0.1", PORT), VaultHandler)

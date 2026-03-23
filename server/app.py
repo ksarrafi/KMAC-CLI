@@ -2,6 +2,7 @@
 """KMac Pilot Server — REST API + WebSocket for remote AI agent control."""
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -19,7 +20,15 @@ from config import HOST, PORT, get_or_create_token, load_config, active_agent
 from session_manager import SessionManager
 from projects import list_projects, resolve_project, file_tree, read_file, browse_directory, get_browse_roots
 from git_ops import diff_stat, approve, reject, log_oneline
-from docker_ops import docker_available, containers, images, container_action, container_logs, system_df
+from docker_ops import (
+    _SAFE_ID,
+    docker_available,
+    containers,
+    images,
+    container_action,
+    container_logs,
+    system_df,
+)
 from docker_dashboard import register_routes as register_docker_health_routes
 from system_ops import disk_usage, memory_info, top_processes, network_info, services_status, homebrew_services
 
@@ -27,6 +36,9 @@ log = logging.getLogger(__name__)
 
 session_mgr = SessionManager()
 AUTH_TOKEN = get_or_create_token()
+
+_WS_MAX_CLIENTS = 100
+_WS_MAX_SESSION_SUBS = 50
 
 
 class WSClientState:
@@ -43,11 +55,15 @@ class WSClientState:
 
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
-    if request.path in ("/api/ping", "/ws", "/docker-dashboard") or request.path.startswith("/static/"):
+    if request.path in ("/api/ping", "/ws") or request.path.startswith("/static/"):
         return await handler(request)
 
     token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    if not token or token != AUTH_TOKEN:
+    if (
+        not token
+        or len(token) != len(AUTH_TOKEN)
+        or not hmac.compare_digest(token, AUTH_TOKEN)
+    ):
         return web.json_response({"error": "Unauthorized"}, status=401)
     return await handler(request)
 
@@ -137,9 +153,9 @@ async def handle_file_read_abs(request):
         return json_ok({"error": "path required"}, 400)
 
     from pathlib import Path as P
-    fp = P(file_path)
+    fp = P(file_path).resolve()
     try:
-        fp.resolve().relative_to(P.home().resolve())
+        fp.relative_to(P.home().resolve())
     except ValueError:
         return json_ok({"error": "Access denied"}, 403)
 
@@ -152,8 +168,8 @@ async def handle_file_read_abs(request):
 
     try:
         content = fp.read_text(errors="replace")
-    except Exception as e:
-        return json_ok({"error": str(e)}, 500)
+    except Exception:
+        return json_ok({"error": "Internal server error"}, 500)
 
     return json_ok({
         "path": str(fp),
@@ -200,6 +216,7 @@ async def handle_git_log(request):
         count = int(request.query.get("count", "20"))
     except ValueError:
         count = 20
+    count = max(1, min(count, 200))
     return json_ok({"commits": log_oneline(project_dir, count)})
 
 
@@ -485,8 +502,14 @@ def _validate_run_argv(argv: list[str]) -> Optional[str]:
         if sub == "stash":
             if len(argv) < 3 or argv[2] != "list":
                 return "git: only 'stash list' allowed for stash"
+            for arg in argv[2:]:
+                if arg.startswith('-') and arg in ('--exec', '--upload-pack', '-c', '--config'):
+                    return f"git: flag not allowed: {arg}"
             return None
         if sub in allowed:
+            for arg in argv[2:]:
+                if arg.startswith('-') and arg in ('--exec', '--upload-pack', '-c', '--config'):
+                    return f"git: flag not allowed: {arg}"
             return None
         return f"git: subcommand not allowed: {sub}"
 
@@ -498,6 +521,21 @@ def _validate_run_argv(argv: list[str]) -> Optional[str]:
         if argv[1] == "services" and len(argv) >= 3 and argv[2] == "list":
             return None
         return "brew: only list, info, outdated, or services list"
+
+    if prog == "docker":
+        if len(argv) < 2:
+            return "docker: subcommand required"
+        if argv[1] not in allowed:
+            return f"docker: subcommand not allowed: {argv[1]}"
+        for arg in argv[2:]:
+            if arg.startswith('-') and arg in ('--privileged', '--pid', '--network'):
+                return f"docker: flag not allowed: {arg}"
+        sub_d = argv[1]
+        if sub_d in ("logs", "inspect", "stats"):
+            non_flags = [a for a in argv[2:] if not a.startswith('-')]
+            if non_flags and not _SAFE_ID.match(non_flags[-1]):
+                return "docker: invalid container ID"
+        return None
 
     if len(argv) < 2:
         return f"{prog}: subcommand required"
@@ -735,6 +773,9 @@ async def _ws_dispatch(ws: web.WebSocketResponse, state: WSClientState, data: di
             if not session_mgr.get(sid):
                 await _ws_safe_send(ws, {"type": "error", "message": "Session not found"})
                 return
+            if len(state.sessions) >= _WS_MAX_SESSION_SUBS:
+                await _ws_safe_send(ws, {"type": "error", "message": "Too many subscriptions"})
+                return
             state.sessions.add(sid)
             return
         await _ws_safe_send(ws, {"type": "error", "message": "Unknown channel"})
@@ -780,6 +821,9 @@ async def _ws_dispatch(ws: web.WebSocketResponse, state: WSClientState, data: di
         if not project_dir:
             await _ws_safe_send(ws, {"type": "error", "message": f"Project '{project_name}' not found"})
             return
+        if len(state.sessions) >= _WS_MAX_SESSION_SUBS:
+            await _ws_safe_send(ws, {"type": "error", "message": "Too many subscriptions"})
+            return
         result = await session_mgr.create_session(project_name, project_dir, task, agent)
         if not result.get("ok"):
             await _ws_safe_send(ws, {"type": "error", "message": result.get("error", "Failed to start session")})
@@ -807,14 +851,18 @@ async def _ws_dispatch(ws: web.WebSocketResponse, state: WSClientState, data: di
     if cmd == "system.status":
         try:
             body = await _ws_build_system_status_dict()
-        except Exception as e:
-            await _ws_safe_send(ws, {"type": "error", "message": str(e)})
+        except Exception:
+            log.exception("WebSocket system.status failed")
+            await _ws_safe_send(ws, {"type": "error", "message": "Internal server error"})
             return
         await _ws_safe_send(ws, {"type": "system.status", **body})
         return
 
     if cmd == "exec":
         command = data.get("command", "")
+        if not isinstance(command, str):
+            await _ws_safe_send(ws, {"type": "error", "message": "Invalid command type"})
+            return
         cwd_raw = data.get("cwd", "")
         if not command:
             await _ws_safe_send(ws, {"type": "error", "message": "command required"})
@@ -868,7 +916,13 @@ async def _ws_writer(ws: web.WebSocketResponse, state: WSClientState, queue: asy
             break
 
 
-async def _ws_handshake_auth(ws: web.WebSocketResponse) -> bool:
+async def _ws_handshake_auth(ws: web.WebSocketResponse, request: web.Request) -> bool:
+    query_token = request.rel_url.query.get("token", "").strip()
+    if query_token and len(query_token) == len(AUTH_TOKEN) and hmac.compare_digest(
+        query_token, AUTH_TOKEN
+    ):
+        return True
+
     msg = await ws.receive()
     if msg.type == aiohttp.WSMsgType.CLOSE:
         return False
@@ -882,7 +936,14 @@ async def _ws_handshake_auth(ws: web.WebSocketResponse) -> bool:
         await _ws_safe_send(ws, {"type": "error", "message": "Invalid JSON"})
         await ws.close()
         return False
-    if not isinstance(data, dict) or data.get("type") != "auth" or data.get("token") != AUTH_TOKEN:
+    if not isinstance(data, dict) or data.get("type") != "auth":
+        await _ws_safe_send(ws, {"type": "error", "message": "Unauthorized"})
+        await ws.close()
+        return False
+    msg_token = data.get("token", "")
+    if not isinstance(msg_token, str) or len(msg_token) != len(AUTH_TOKEN) or not hmac.compare_digest(
+        msg_token, AUTH_TOKEN
+    ):
         await _ws_safe_send(ws, {"type": "error", "message": "Unauthorized"})
         await ws.close()
         return False
@@ -894,7 +955,11 @@ async def handle_ws(request):
     await ws.prepare(request)
     app = request.app
 
-    if not await _ws_handshake_auth(ws):
+    if not await _ws_handshake_auth(ws, request):
+        return ws
+
+    if len(app["ws_clients"]) >= _WS_MAX_CLIENTS:
+        await ws.close(code=1013, message=b"Too many connections")
         return ws
 
     state = WSClientState(ws)
@@ -1024,7 +1089,7 @@ if __name__ == "__main__":
     print(f"\n  KMac Pilot Server")
     print(f"  ─────────────────")
     print(f"  URL:   http://{HOST}:{PORT}")
-    print(f"  Token: {AUTH_TOKEN[:8]}…")
+    print("  Token: loaded")
     print(f"  Agent: {active_agent()}")
     print()
     web.run_app(create_app(), host=HOST, port=PORT, print=None)

@@ -97,7 +97,7 @@ logdbg() { [[ "${AICODER_DEBUG:-0}" = "1" ]] && echo "[aicoder] $*" >&2 || true;
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
-    cat <<EOF
+    cat <<USAGE_EOF
 Usage: $(basename "$0") [command] [options]
 
 Commands:
@@ -120,7 +120,7 @@ Examples:
   aicoder agents                     # List all subagents
   aicoder agent-help architect       # Get help for specific agent
 
-EOF
+USAGE_EOF
 }
 
 pick_subagent_menu() {
@@ -202,6 +202,13 @@ ensure_aicoder_installed() {
     fi
 }
 
+# Exec project aicoder via absolute path (never trust ./aicoder in CWD)
+run_aicoder() {
+    local AICODER_DIR
+    AICODER_DIR="$(pwd -P)"
+    exec "${AICODER_DIR}/aicoder" "$@"
+}
+
 # Main command handling
 case "${1:-help}" in
     "install")
@@ -213,7 +220,7 @@ case "${1:-help}" in
         ;;
     "init"|"start"|"agents"|"agent-help"|"context"|"subagents"|"clean"|"help"|"version")
         ensure_aicoder_installed
-        exec ./aicoder "$@"
+        run_aicoder "$@"
         ;;
     "interactive"|"i")
         ensure_aicoder_installed
@@ -227,18 +234,18 @@ case "${1:-help}" in
         echo ""
         read -r -p "Enter choice (1-5): " choice
         case "$choice" in
-            1) exec ./aicoder init ;;
-            2) exec ./aicoder start ;;
+            1) run_aicoder init ;;
+            2) run_aicoder start ;;
             3)
                 subagent="$(pick_subagent_interactive || true)"
                 if [[ -n "$subagent" ]]; then
-                    exec ./aicoder start --agent "$subagent"
+                    run_aicoder start --agent "$subagent"
                 else
-                    exec ./aicoder start
+                    run_aicoder start
                 fi
                 ;;
-            4) exec ./aicoder agents ;;
-            5) exec ./aicoder help ;;
+            4) run_aicoder agents ;;
+            5) run_aicoder help ;;
             *) echo "Invalid choice" && exit 1 ;;
         esac
         ;;
@@ -340,7 +347,7 @@ logdbg() { [[ "${AICODER_DEBUG:-0}" = "1" ]] && echo "[aicoder] $*" >&2 || true;
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
-    cat <<EOF
+    cat <<USAGE_EOF
 Usage: $(basename "$0") [command] [options]
 
 Commands:
@@ -363,7 +370,7 @@ Examples:
   aicoder agents                     # List all subagents
   aicoder agent-help architect       # Get help for specific agent
 
-EOF
+USAGE_EOF
 }
 
 pick_subagent_menu() {
@@ -445,6 +452,13 @@ ensure_aicoder_installed() {
     fi
 }
 
+# Exec project aicoder via absolute path (never trust ./aicoder in CWD)
+run_aicoder() {
+    local AICODER_DIR
+    AICODER_DIR="$(pwd -P)"
+    exec "${AICODER_DIR}/aicoder" "$@"
+}
+
 # Main command handling
 case "${1:-help}" in
     "install")
@@ -456,7 +470,7 @@ case "${1:-help}" in
         ;;
     "init"|"start"|"agents"|"agent-help"|"context"|"subagents"|"clean"|"help"|"version")
         ensure_aicoder_installed
-        exec ./aicoder "$@"
+        run_aicoder "$@"
         ;;
     "interactive"|"i")
         ensure_aicoder_installed
@@ -470,18 +484,18 @@ case "${1:-help}" in
         echo ""
         read -r -p "Enter choice (1-5): " choice
         case "$choice" in
-            1) exec ./aicoder init ;;
-            2) exec ./aicoder start ;;
+            1) run_aicoder init ;;
+            2) run_aicoder start ;;
             3)
                 subagent="$(pick_subagent_interactive || true)"
                 if [[ -n "$subagent" ]]; then
-                    exec ./aicoder start --agent "$subagent"
+                    run_aicoder start --agent "$subagent"
                 else
-                    exec ./aicoder start
+                    run_aicoder start
                 fi
                 ;;
-            4) exec ./aicoder agents ;;
-            5) exec ./aicoder help ;;
+            4) run_aicoder agents ;;
+            5) run_aicoder help ;;
             *) echo "Invalid choice" && exit 1 ;;
         esac
         ;;

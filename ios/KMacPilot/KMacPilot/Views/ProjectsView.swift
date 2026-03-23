@@ -36,7 +36,7 @@ struct ProjectsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task {
+                        Task { @MainActor in
                             guard let api = appState.api else { return }
                             appState.projects = try await api.projects()
                         }

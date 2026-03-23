@@ -97,7 +97,7 @@ NOTE: optional one-line note if the user should know something"
         echo -e "${BOLD}Suggested fix command:${NC}"
         echo -e "   ${GREEN}$ ${fix}${NC}"
         echo ""
-        echo -e "   ${GREEN}r)${NC} Run this command"
+        echo -e "   ${GREEN}r)${NC} Copy command (review before running)"
         echo -e "   ${GREEN}c)${NC} Copy to clipboard"
         echo -e "   ${GREEN}s)${NC} Skip"
         echo ""
@@ -107,25 +107,19 @@ NOTE: optional one-line note if the user should know something"
         case "$fix_choice" in
             r|R)
                 echo ""
-                # Prepare the command — auto-source nvm/rvm if needed
-                local fix_cmd
-                fix_cmd=$(_prepare_shell_env "$fix")
-                echo -e "${DIM}Running: $fix_cmd${NC}"
+                echo -e "${YELLOW}Auto-run disabled for safety. Copy and review before executing:${NC}"
+                echo -e "   ${GREEN}$ ${fix}${NC}"
                 echo ""
-                bash -c "$fix_cmd" 2>&1
-                local rc=$?
-                if (( rc == 0 )); then
-                    echo -e "\n${GREEN}✓ Fix applied successfully!${NC}"
+                if command -v pbcopy &>/dev/null; then
+                    echo -n "$fix" | pbcopy
+                    echo -e "   ${GREEN}✓ Copied to clipboard — paste in your terminal to run${NC}"
+                elif command -v xclip &>/dev/null; then
+                    echo -n "$fix" | xclip -selection clipboard
+                    echo -e "   ${GREEN}✓ Copied to clipboard — paste in your terminal to run${NC}"
                 else
-                    echo -e "\n${RED}Fix command exited with code $rc${NC}"
-                    echo -e "${DIM}You may need to run it manually or try a different approach.${NC}"
+                    echo -e "   ${DIM}(clipboard not available — copy the command above manually)${NC}"
                 fi
-                # Refresh update cache so menu reflects the new state
-                local _cache="/tmp/toolkit-update-cache/last-check.json"
-                if [[ -f "$_cache" ]]; then
-                    rm -f "$_cache"
-                fi
-                return $rc
+                return 0
                 ;;
             c|C)
                 echo -n "$fix" | pbcopy

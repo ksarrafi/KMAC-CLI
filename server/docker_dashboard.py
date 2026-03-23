@@ -46,6 +46,7 @@ async def _run(args: list[str], timeout: int = 15) -> tuple[str, int]:
         return stdout.decode("utf-8", errors="replace").strip(), proc.returncode or 0
     except asyncio.TimeoutError:
         proc.kill()
+        await proc.wait()
         return "", -1
 
 

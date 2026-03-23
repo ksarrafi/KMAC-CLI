@@ -98,7 +98,7 @@ struct DashboardView: View {
                                 .font(.title3)
                         }
                         Button {
-                            Task { await appState.refreshAll() }
+                            Task { @MainActor in await appState.refreshAll() }
                         } label: {
                             Image(systemName: "arrow.clockwise")
                         }
@@ -161,7 +161,7 @@ struct DashboardView: View {
 
     private func startPolling() {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { _ in
-            Task { await appState.refreshStatus() }
+            Task { @MainActor in await appState.refreshStatus() }
         }
     }
 

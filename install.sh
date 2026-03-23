@@ -30,7 +30,7 @@ echo ""
 # ─── 1. Check for iCloud Drive ────────────────────────────────────────────
 # Detect install method
 ICLOUD_GLOB=~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit
-if ls $ICLOUD_GLOB &>/dev/null 2>&1; then
+if compgen -G "$ICLOUD_GLOB" &>/dev/null; then
     INSTALL_MODE="icloud"
     echo -e "${GREEN}${ICON_SUCCESS} iCloud Drive detected — syncs across all Macs${NC}"
 else

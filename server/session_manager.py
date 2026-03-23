@@ -289,8 +289,9 @@ class SessionManager:
 
         try:
             await loop.run_in_executor(None, _write)
-        except OSError as e:
-            return {"error": str(e)}
+        except OSError:
+            log.warning("Session creation failed", exc_info=True)
+            return {"error": "Session creation failed"}
         return {"ok": True}
 
     async def send_message(self, session_id: str, message: str) -> dict:
@@ -449,7 +450,7 @@ class SessionManager:
             try:
                 session.log_path.unlink(missing_ok=True)
             except Exception:
-                pass
+                log.debug("Failed to remove session log", exc_info=True)
 
             del self._sessions[session_id]
         return {"ok": True}

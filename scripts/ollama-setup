@@ -36,8 +36,28 @@ _parse_model() {
     IFS='|' read -r M_NAME M_SIZE M_DESC <<< "$1"
 }
 
+_validate_model_name() {
+    local name="$1"
+    if [[ ! "$name" =~ ^[A-Za-z0-9._:/-]+$ ]]; then
+        ui_fail "Invalid model name: $name"
+        return 1
+    fi
+}
+
 _ollama_running() {
     curl -sf --max-time 2 "$OLLAMA_API/api/tags" &>/dev/null
+}
+
+_ollama_download_and_install() {
+    local _tmpsh
+    _tmpsh=$(mktemp "${TMPDIR:-/tmp}/ollama-install.XXXXXX")
+    curl -fsSL https://ollama.com/install.sh -o "$_tmpsh" || { rm -f "$_tmpsh"; ui_fail "Download failed"; return 1; }
+    ui_warn "Review installer: $_tmpsh"
+    read -r -p "Proceed with installation? [y/N] " _ans
+    if [[ "$_ans" =~ ^[Yy] ]]; then
+        sh "$_tmpsh"
+    fi
+    rm -f "$_tmpsh"
 }
 
 _ollama_ensure_server() {
@@ -83,7 +103,8 @@ try:
         size = m.get('size', 0)
         gb = size / (1024**3)
         print(f'{name}|{gb:.1f} GB')
-except: pass
+except Exception:
+    pass
 " 2>/dev/null
 }
 
@@ -103,10 +124,10 @@ do_install() {
             if command -v brew &>/dev/null; then
                 brew install ollama
             else
-                curl -fsSL https://ollama.com/install.sh | sh
+                _ollama_download_and_install || return 1
             fi
         else
-            curl -fsSL https://ollama.com/install.sh | sh
+            _ollama_download_and_install || return 1
         fi
 
         if command -v ollama &>/dev/null; then
@@ -162,6 +183,7 @@ do_install() {
         1)
             echo ""
             ui_info "Pulling ${recommended}... (this may take a few minutes)"
+            _validate_model_name "$recommended" || return 1
             ollama pull "$recommended"
             echo ""
             ui_success "Ready! Try: ollama run ${recommended}"
@@ -206,6 +228,7 @@ do_pull_menu() {
             echo ""
             read -r -p "  Model name (e.g. mistral:latest): " custom_model
             if [[ -n "$custom_model" ]]; then
+                _validate_model_name "$custom_model" || return 1
                 ui_info "Pulling $custom_model..."
                 ollama pull "$custom_model"
                 ui_success "Done!"
@@ -217,6 +240,7 @@ do_pull_menu() {
                 _parse_model "${MODELS[$i]}"
                 echo ""
                 ui_info "Pulling $M_NAME ($M_SIZE)..."
+                _validate_model_name "$M_NAME" || return 1
                 ollama pull "$M_NAME"
                 echo ""
                 ui_success "Ready! Try: ollama run $M_NAME"
@@ -282,6 +306,7 @@ do_models() {
                 echo ""
                 read -r -p "  Model to remove: " rm_model
                 if [[ -n "$rm_model" ]]; then
+                    _validate_model_name "$rm_model" || { pause; continue; }
                     ollama rm "$rm_model" 2>/dev/null && ui_success "Removed $rm_model" || ui_fail "Failed to remove $rm_model"
                 fi
                 pause
@@ -290,6 +315,7 @@ do_models() {
                 echo ""
                 read -r -p "  Model to chat with (e.g. llama3.2:3b): " chat_model
                 if [[ -n "$chat_model" ]]; then
+                    _validate_model_name "$chat_model" || { pause; continue; }
                     echo -e "  ${DIM}Starting chat... (type /bye to exit)${NC}"
                     echo ""
                     ollama run "$chat_model"
@@ -400,6 +426,7 @@ do_chat() {
         fi
     fi
 
+    _validate_model_name "$model" || return 1
     echo -e "  ${DIM}Starting chat with ${model}... (type /bye to exit)${NC}"
     echo ""
     ollama run "$model"

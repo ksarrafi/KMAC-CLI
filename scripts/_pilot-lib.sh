@@ -94,6 +94,10 @@ pilot_resolve_project() {
     local name="$1"
     local dir
 
+    if [[ "$name" == *['*?[']* ]]; then
+        return 1
+    fi
+
     # Fast path: direct child of a scan dir
     while IFS= read -r dir; do
         [[ -d "$dir/$name" ]] && echo "$dir/$name" && return 0

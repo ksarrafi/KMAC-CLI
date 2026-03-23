@@ -13,8 +13,8 @@ def _git(project_dir: str, *args, timeout: int = 10) -> tuple[int, str]:
         return result.returncode, (result.stdout + result.stderr).strip()
     except subprocess.TimeoutExpired:
         return -1, "Command timed out"
-    except Exception as e:
-        return -1, str(e)
+    except Exception:
+        return -1, "git command failed"
 
 
 def diff_stat(project_dir: str) -> dict:
@@ -48,7 +48,7 @@ def approve(project_dir: str, message: str = "") -> dict:
     rc, output = _git(project_dir, "commit", "-m", msg)
 
     if rc != 0:
-        return {"error": f"Commit failed: {output}"}
+        return {"error": "Commit failed"}
 
     _, short_hash = _git(project_dir, "log", "-1", "--format=%h")
     return {"ok": True, "hash": short_hash, "message": msg}

@@ -62,7 +62,7 @@ struct SessionsView: View {
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        Task { await appState.refreshStatus() }
+                        Task { @MainActor in await appState.refreshStatus() }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -86,7 +86,7 @@ struct SessionsView: View {
     private func deleteSessions(at offsets: IndexSet) {
         for offset in offsets {
             let session = completedSessions[offset]
-            Task {
+            Task { @MainActor in
                 guard let api = appState.api else { return }
                 _ = try? await api.deleteSession(id: session.id)
                 await appState.refreshStatus()
@@ -96,7 +96,7 @@ struct SessionsView: View {
 
     private func startPolling() {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
-            Task { await appState.refreshStatus() }
+            Task { @MainActor in await appState.refreshStatus() }
         }
     }
 

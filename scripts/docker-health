@@ -5,13 +5,16 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh"
 
+_KMAC_TMP="${HOME}/.cache/kmac"
+[[ -d "$_KMAC_TMP" ]] || { mkdir -p "$_KMAC_TMP" && chmod 700 "$_KMAC_TMP"; }
+
 # Docker socket discovery
 _SOCK=""
 for s in "$HOME/.docker/run/docker.sock" /var/run/docker.sock; do
     [[ -S "$s" ]] && { _SOCK="$s"; break; }
 done
 
-HISTORY_FILE="/tmp/kmac-docker-history.json"
+HISTORY_FILE="$_KMAC_TMP/docker-history.json"
 OUTPUT_JSON=false
 SHOW_HISTORY=false
 
@@ -176,8 +179,8 @@ print(f'{cpu:.1f}|{mem_pct:.1f}|{mem_h}')
 
     # ─── JSON output ──────────────────────────────────────────────────
     if $OUTPUT_JSON; then
-        local tmp_containers="/tmp/kmac-dh-containers.$$"
-        local tmp_alerts="/tmp/kmac-dh-alerts.$$"
+        local tmp_containers="$_KMAC_TMP/dh-containers.$$"
+        local tmp_alerts="$_KMAC_TMP/dh-alerts.$$"
         printf '%s' "$container_data" > "$tmp_containers"
         printf '%s\n' "${alerts[@]}" > "$tmp_alerts"
 
@@ -425,7 +428,7 @@ else
     if [[ -t 1 ]]; then
         _frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
         _fi=0
-        _tmpout="/tmp/kmac-dh-output.$$"
+        _tmpout="$_KMAC_TMP/dh-output.$$"
         collect_health > "$_tmpout" 2>&1 &
         _pid=$!
         tput civis 2>/dev/null

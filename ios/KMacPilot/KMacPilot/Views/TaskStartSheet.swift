@@ -81,7 +81,7 @@ struct TaskStartSheet: View {
     private func startSession() {
         isStarting = true
         error = nil
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             do {
                 let result = try await api.createSession(

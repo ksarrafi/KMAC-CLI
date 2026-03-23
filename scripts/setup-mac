@@ -52,11 +52,28 @@ step 1 "Homebrew"
 if command -v brew &>/dev/null; then
     ok "Homebrew already installed"
 else
-    info "Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    info "Homebrew not found — downloading installer for review..."
+    _tmpsh=$(mktemp "${TMPDIR:-/tmp}/brew-install.XXXXXX")
+    curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$_tmpsh" || { rm -f "$_tmpsh"; fail "Download failed"; exit 1; }
+    info "Review installer: $_tmpsh"
+    printf "  Install Homebrew? [y/N] "
+    read -r yn
+    if [[ "$yn" =~ ^[yY] ]]; then
+        /bin/bash "$_tmpsh"
+    fi
+    rm -f "$_tmpsh"
+    if ! command -v brew &>/dev/null; then
+        fail "Homebrew not installed. Visit https://brew.sh"
+        exit 1
+    fi
     # Add brew to current session
     if [[ -f /opt/homebrew/bin/brew ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
+        export HOMEBREW_PREFIX="/opt/homebrew"
+        export HOMEBREW_CELLAR="/opt/homebrew/Cellar"
+        export HOMEBREW_REPOSITORY="/opt/homebrew"
+        export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+        export MANPATH="/opt/homebrew/share/man:${MANPATH:-}"
+        export INFOPATH="/opt/homebrew/share/info:${INFOPATH:-}"
     fi
     ok "Homebrew installed"
 fi
@@ -66,8 +83,20 @@ step 2 "Oh My Zsh & Plugins"
 if [[ -d "$HOME/.oh-my-zsh" ]]; then
     ok "Oh My Zsh already installed"
 else
-    info "Installing Oh My Zsh..."
-    RUNZSH=no sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+    info "Downloading Oh My Zsh installer..."
+    _omzsh=$(mktemp "${TMPDIR:-/tmp}/ohmyzsh-install.XXXXXX")
+    curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh -o "$_omzsh" || { rm -f "$_omzsh"; fail "Download failed"; exit 1; }
+    info "Review installer: $_omzsh"
+    printf "  Install Oh My Zsh? [y/N] "
+    read -r yn
+    if [[ "$yn" =~ ^[yY] ]]; then
+        RUNZSH=no sh "$_omzsh" "" --unattended
+    fi
+    rm -f "$_omzsh"
+    if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
+        fail "Oh My Zsh not installed."
+        exit 1
+    fi
     ok "Oh My Zsh installed"
 fi
 

@@ -193,7 +193,7 @@ struct FileBrowserView: View {
     private func loadRoots() {
         guard roots.isEmpty else { return }
         isLoading = true
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             do {
                 roots = try await api.browseRoots()
@@ -224,7 +224,7 @@ struct FileBrowserView: View {
 
     private func loadDirectory(_ path: String) {
         isLoading = true
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             do {
                 let result = try await api.browse(path: path)
@@ -253,7 +253,7 @@ struct FileBrowserView: View {
     }
 
     private func loadFile(_ path: String) {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             do {
                 let content = try await api.readFileAbs(path: path)

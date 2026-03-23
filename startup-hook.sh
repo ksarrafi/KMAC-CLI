@@ -26,7 +26,9 @@ if ! type platform_file_age &>/dev/null; then
 fi
 
 _toolkit_update_check() {
-    local cache="/tmp/toolkit-update-cache/last-check.json"
+    local kmac_cache="${HOME}/.cache/kmac"
+    [[ -d "$kmac_cache" ]] || mkdir -p "$kmac_cache" && chmod 700 "$kmac_cache"
+    local cache="$kmac_cache/last-check.json"
     local cache_age_limit=14400  # 4 hours
 
     if [[ -f "$cache" && -s "$cache" ]]; then
@@ -49,9 +51,11 @@ _toolkit_update_check() {
         [[ -f "$_hook_src" ]] && toolkit_dir="$(cd "$(dirname "$_hook_src")" && pwd)"
     fi
     if [[ -z "$toolkit_dir" || ! -f "$toolkit_dir/scripts/update-check" ]]; then
-        local _icloud
-        _icloud="$(echo ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit 2>/dev/null)"
-        if [[ -d "$_icloud" ]]; then
+        local _icloud="" _d
+        for _d in ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit; do
+            [[ -d "$_d" ]] && _icloud="$_d" && break
+        done
+        if [[ -n "$_icloud" && -d "$_icloud" ]]; then
             toolkit_dir="$_icloud"
         fi
     fi

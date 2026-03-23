@@ -15,13 +15,22 @@ class WebSocketClient {
             .replacingOccurrences(of: "http://", with: "ws://")
             .replacingOccurrences(of: "https://", with: "wss://")
 
-        var components = URLComponents(string: "\(wsURL)/ws")
-        components?.queryItems = [URLQueryItem(name: "token", value: token)]
-        guard let url = components?.url else { return }
+        guard let url = URL(string: "\(wsURL)/ws") else { return }
 
         let session = URLSession(configuration: .default)
         task = session.webSocketTask(with: url)
         task?.resume()
+
+        let authMsg: [String: Any] = ["type": "auth", "token": token]
+        if let data = try? JSONSerialization.data(withJSONObject: authMsg),
+           let str = String(data: data, encoding: .utf8) {
+            task?.send(.string(str)) { error in
+                if let error = error {
+                    print("[WebSocket] Auth send failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
         listen()
     }
 

@@ -16,6 +16,7 @@ async def _run(cmd: str, timeout: int = 10) -> str:
         return stdout.decode("utf-8", errors="replace").strip()
     except asyncio.TimeoutError:
         proc.kill()
+        await proc.wait()
         return ""
 
 

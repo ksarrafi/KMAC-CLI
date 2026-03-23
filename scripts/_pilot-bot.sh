@@ -712,8 +712,14 @@ $(pilot_run_allowed_list_msg)"
     tg_send "$cid" "Running on *${project_name}*:
 \`$shell_cmd\`"
 
+    if [[ "$shell_cmd" =~ [';|&$`(){}!<>\\'] ]]; then
+        tg_send "$cid" "Shell metacharacters not allowed in commands."
+        return
+    fi
+    local -a _run_argv
+    read -ra _run_argv <<< "$shell_cmd"
     local output
-    output=$(cd "$project_dir" && timeout 30 bash -c "$shell_cmd" 2>&1)
+    output=$(cd "$project_dir" && timeout 30 "${_run_argv[@]}" 2>&1)
     local rc=$?
 
     if [[ -z "$output" ]]; then

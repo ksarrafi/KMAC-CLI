@@ -51,7 +51,7 @@ struct ConnectView: View {
                 }
 
                 Button {
-                    Task { await appState.connect() }
+                    Task { @MainActor in await appState.connect() }
                 } label: {
                     HStack {
                         if appState.isLoading {

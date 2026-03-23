@@ -14,7 +14,10 @@ private enum KeychainHelper {
         var addQuery = query
         addQuery[kSecValueData as String] = data
         addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        SecItemAdd(addQuery as CFDictionary, nil)
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        if status != errSecSuccess {
+            print("[KeychainHelper] save failed: OSStatus \(status)")
+        }
     }
 
     static func load(key: String) -> String? {
@@ -77,7 +80,7 @@ class AppState: ObservableObject {
         }
 
         if !serverURL.isEmpty && !token.isEmpty {
-            Task { await connect() }
+            Task { @MainActor in await connect() }
         }
     }
 

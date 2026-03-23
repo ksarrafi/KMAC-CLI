@@ -54,6 +54,10 @@ hooks_clear_plugin_handlers() {
 hooks_register_plugin() {
     local hook="$1" script="$2"
     [[ -n "$hook" && -n "$script" ]] || return 0
+    if [[ "$hook" == *'|'* ]] || [[ "$script" == *'|'* ]]; then
+        _hooks_warn "handler/plugin path contains '|' — skipping"
+        return 1
+    fi
     if ! _hooks_valid_hook "$hook"; then
         _hooks_warn "unknown hook '$hook' — skipping plugin registration for $(basename "$script")"
         return 0
@@ -68,8 +72,13 @@ hooks_register() {
         _hooks_warn "hooks_register: missing hook or handler"
         return 1
     fi
+    if [[ "$handler" == *'|'* ]]; then
+        _hooks_warn "handler/plugin path contains '|' — skipping"
+        return 1
+    fi
     if ! _hooks_valid_hook "$hook"; then
-        _hooks_warn "unknown hook '$hook' — registering anyway"
+        _hooks_warn "unknown hook '$hook' — rejected"
+        return 1
     fi
     if declare -f "$handler" &>/dev/null; then
         _KMAC_HOOK_REGISTRY+=( "${hook}|fn|${handler}" )

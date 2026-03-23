@@ -19,7 +19,7 @@ REGISTRY=(
     "python3|dev|python3|brew install python|Python interpreter|https://python.org"
     "node|dev|node|brew install node|Node.js runtime|https://nodejs.org"
     "go|dev|go|brew install go|Go programming language|https://go.dev"
-    "rust|dev|rustc|curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh -s -- -y|Rust toolchain via rustup|https://rustup.rs"
+    "rust|dev|rustc|__rustup_install__|Rust toolchain via rustup|https://rustup.rs"
     "jq|dev|jq|brew install jq|JSON processor|https://jqlang.github.io/jq"
     "ripgrep|dev|rg|brew install ripgrep|Fast recursive search (rg)|https://github.com/BurntSushi/ripgrep"
     "fd|dev|fd|brew install fd|Fast file finder|https://github.com/sharkdp/fd"
@@ -32,7 +32,7 @@ REGISTRY=(
     # ── AI CLIs ──
     "claude|ai|claude|npm install -g @anthropic-ai/claude-code|Claude Code — AI coding agent|https://docs.anthropic.com/en/docs/claude-code"
     "chatgpt|ai|chatgpt|brew install --cask chatgpt|ChatGPT desktop app|https://openai.com/chatgpt/desktop"
-    "gemini|ai|gemini|npm install -g @anthropic-ai/gemini-cli 2>/dev/null \|\| pip3 install google-generativeai|Google Gemini CLI|https://ai.google.dev"
+    "gemini|ai|pip3 show google-generativeai|pip3 install google-generativeai|Google Generative AI Python SDK (Gemini)|https://ai.google.dev"
     "ollama|ai|ollama|brew install ollama|Run LLMs locally (setup: kmac ollama)|https://ollama.com"
     "aider|ai|aider|pip3 install aider-chat|AI pair programming in terminal|https://aider.chat"
     "copilot|ai|gh copilot|gh extension install github/gh-copilot|GitHub Copilot CLI|https://github.com/github/gh-copilot"
@@ -52,7 +52,7 @@ REGISTRY=(
     "ttyd|infra|ttyd|brew install ttyd|Share terminal over web|https://tsl0922.github.io/ttyd"
 
     # ── Shell Tools ──
-    "oh-my-zsh|shell|test -d ~/.oh-my-zsh|sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" \"\" --unattended|Zsh framework|https://ohmyz.sh"
+    "oh-my-zsh|shell|test -d ~/.oh-my-zsh|__oh_my_zsh_install__|Zsh framework|https://ohmyz.sh"
     "starship|shell|starship|brew install starship|Cross-shell prompt|https://starship.rs"
     "zoxide|shell|zoxide|brew install zoxide|Smarter cd command|https://github.com/ajeetdsouza/zoxide"
     "atuin|shell|atuin|brew install atuin|Better shell history|https://atuin.sh"
@@ -66,8 +66,14 @@ _parse_entry() {
 
 _is_installed() {
     local check="$1"
-    if [[ "$check" == test* ]]; then
-        eval "$check" &>/dev/null 2>&1
+    if [[ "$check" == "test -d "* ]]; then
+        local dir="${check#test -d }"
+        [[ -d "$dir" ]]
+    elif [[ "$check" == "test -f "* ]]; then
+        local f="${check#test -f }"
+        [[ -f "$f" ]]
+    elif [[ "$check" == "pip3 show "* ]]; then
+        pip3 show "${check#pip3 show }" &>/dev/null 2>&1
     else
         command -v "$check" &>/dev/null 2>&1
     fi
@@ -79,6 +85,13 @@ _get_version() {
         echo "installed"
         return
     fi
+    if [[ "$cmd" == "pip3 show "* ]]; then
+        local pkg ver
+        pkg="${cmd#pip3 show }"
+        ver=$(pip3 show "$pkg" 2>/dev/null | awk -F': ' '/^Version:/{print $2;exit}')
+        [[ -n "$ver" ]] && echo "$ver" || echo "installed"
+        return
+    fi
     local ver
     ver=$("$cmd" --version 2>/dev/null | head -1 | sed 's/^[^0-9]*//' | cut -d' ' -f1 | head -c 30)
     [[ -n "$ver" ]] && echo "$ver" || echo "installed"
@@ -87,11 +100,18 @@ _get_version() {
 _ensure_brew() {
     if [[ "${KMAC_OS:-}" == macos ]]; then
         if ! command -v brew &>/dev/null; then
-            echo ""
-            ui_warn "Homebrew not found — installing..."
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            ui_warn "Homebrew not installed."
+            local _tmpsh
+            _tmpsh=$(mktemp "${TMPDIR:-/tmp}/brew-install.XXXXXX")
+            curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$_tmpsh" || { rm -f "$_tmpsh"; ui_fail "Download failed"; return 1; }
+            ui_info "Review installer: $_tmpsh"
+            read -r -p "Install Homebrew? [y/N] " _ans
+            if [[ "$_ans" =~ ^[Yy] ]]; then
+                /bin/bash "$_tmpsh"
+            fi
+            rm -f "$_tmpsh"
             if ! command -v brew &>/dev/null; then
-                ui_fail "Homebrew installation failed. Visit https://brew.sh"
+                ui_fail "Homebrew installation failed or declined. Visit https://brew.sh"
                 return 1
             fi
             ui_success "Homebrew installed"
@@ -125,6 +145,58 @@ _ensure_npm() {
         esac
     fi
     return 0
+}
+
+_install_rustup() {
+    local tmp
+    tmp=$(mktemp "${TMPDIR:-/tmp}/kmac-rustup.XXXXXX")
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$tmp" || { rm -f "$tmp"; return 1; }
+    sh "$tmp" -s -- -y
+    rm -f "$tmp"
+}
+
+_install_oh_my_zsh() {
+    local tmp
+    tmp=$(mktemp "${TMPDIR:-/tmp}/kmac-ohmyzsh.XXXXXX")
+    curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -o "$tmp" || { rm -f "$tmp"; return 1; }
+    sh "$tmp" "" --unattended
+    rm -f "$tmp"
+}
+
+_dispatch_install() {
+    local run_cmd="$1"
+    case "$run_cmd" in
+        __rustup_install__)
+            _install_rustup
+            ;;
+        __oh_my_zsh_install__)
+            _install_oh_my_zsh
+            ;;
+        "brew install "*)
+            read -ra _brewargs <<< "${run_cmd#brew install }"
+            brew install "${_brewargs[@]}"
+            ;;
+        "npm install -g "*)
+            read -ra _npmargs <<< "${run_cmd#npm install -g }"
+            npm install -g "${_npmargs[@]}"
+            ;;
+        "pip3 install "*)
+            read -ra _pipargs <<< "${run_cmd#pip3 install }"
+            pip3 install "${_pipargs[@]}"
+            ;;
+        "gh extension install "*)
+            read -ra _ghex <<< "${run_cmd#gh extension install }"
+            gh extension install "${_ghex[@]}"
+            ;;
+        "platform_install "*)
+            read -ra _plat <<< "$run_cmd"
+            platform_install "${_plat[@]:1}"
+            ;;
+        *)
+            ui_fail "Unknown install method: $run_cmd"
+            return 1
+            ;;
+    esac
 }
 
 # Map a brew install line to native package names for platform_install (stdout).
@@ -270,7 +342,7 @@ _do_install() {
     ui_info "Installing $name..."
     echo ""
 
-    if eval "$run_cmd"; then
+    if _dispatch_install "$run_cmd"; then
         echo ""
         if _is_installed "$check_cmd"; then
             local ver=$(_get_version "$check_cmd")

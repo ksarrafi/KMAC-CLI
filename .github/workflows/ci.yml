@@ -1,5 +1,9 @@
 name: CI
 
+# pull_request runs with secrets from the base repo when forks open PRs; workflow code from the
+# PR branch would still execute on our runners. We gate the test job to same-repo PRs only so
+# fork PRs do not run arbitrary code with our CI token (see job-level if below).
+
 on:
   push:
     branches: [main]
@@ -11,6 +15,7 @@ permissions:
 
 jobs:
   test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
       matrix:

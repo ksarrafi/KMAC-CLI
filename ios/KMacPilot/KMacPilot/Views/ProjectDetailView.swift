@@ -115,21 +115,21 @@ struct ProjectDetailView: View {
     }
 
     private func stopSession() {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             _ = try? await api.stopSession(id: session.id)
         }
     }
 
     private func approveChanges() {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             _ = try? await api.approve()
         }
     }
 
     private func rejectChanges() {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             _ = try? await api.reject()
         }
@@ -148,7 +148,7 @@ struct ProjectDetailView: View {
     }
 
     private func refreshSession() {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             currentSession = try? await api.sessionDetail(id: session.id)
         }
@@ -221,7 +221,7 @@ struct SessionTerminalTab: View {
     }
 
     private func loadOutput() {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             let output = try? await api.sessionOutput(id: sessionId, tail: 500)
             outputLines = output?.lines ?? []
@@ -233,7 +233,7 @@ struct SessionTerminalTab: View {
         guard !q.isEmpty else { return }
         askText = ""
         isAsking = true
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             if let result = try? await api.askSession(id: sessionId, question: q) {
                 if let output = result.output {
@@ -248,7 +248,7 @@ struct SessionTerminalTab: View {
 
     private func startPolling() {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
-            Task {
+            Task { @MainActor in
                 guard let api = appState.api else { return }
                 if let output = try? await api.sessionOutput(id: sessionId, tail: 500) {
                     if output.total > outputLines.count {
@@ -352,7 +352,7 @@ struct ProjectFilesTab: View {
     private func loadDir(_ path: String) {
         isLoading = true
         currentPath = path
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             if let result = try? await api.browse(path: path) {
                 items = result.items ?? []
@@ -373,7 +373,7 @@ struct ProjectFilesTab: View {
     }
 
     private func loadFile(_ path: String) {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             selectedFile = try? await api.readFileAbs(path: path)
         }
@@ -452,7 +452,7 @@ struct ProjectGitTab: View {
 
     private func loadGit() {
         isLoading = true
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             async let d = api.diff()
             async let c = api.gitLog(project: projectName)
@@ -539,7 +539,7 @@ struct ProjectShellTab: View {
         guard !cmd.isEmpty else { return }
         command = ""
         isRunning = true
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             do {
                 let result = try await api.run(command: cmd, project: projectName)

@@ -176,6 +176,7 @@ _vault_encrypt() {
     mkdir -p "$VAULT_DIR"
     echo "$json" | openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
         -out "$VAULT_FILE" -pass "pass:${_vault_master_password}" 2>/dev/null
+    chmod 600 "$VAULT_FILE" 2>/dev/null || true
 }
 
 _file_get() {
@@ -462,8 +463,9 @@ _REG_LOADED=false
 _vault_init_registry() {
     mkdir -p "$VAULT_DIR"
     [[ -f "$VAULT_REGISTRY" ]] && return
-    python3 -c "
-import json
+    KMAC_REG="$VAULT_REGISTRY" python3 <<'PYEOF' 2>/dev/null
+import json, os
+path = os.environ["KMAC_REG"]
 registry = [
     {'service': 'anthropic',       'category': 'ai',      'env': 'ANTHROPIC_API_KEY',   'desc': 'Anthropic (Claude) API key'},
     {'service': 'openai',          'category': 'ai',      'env': 'OPENAI_API_KEY',      'desc': 'OpenAI API key'},
@@ -485,13 +487,13 @@ registry = [
     {'service': 'sentry-dsn',      'category': 'services','env': 'SENTRY_DSN',          'desc': 'Sentry error tracking DSN'},
     {'service': 'sendgrid',        'category': 'services','env': 'SENDGRID_API_KEY',    'desc': 'SendGrid email API key'},
 ]
-with open('$VAULT_REGISTRY', 'w') as f:
+with open(path, 'w') as f:
     json.dump(registry, f, indent=2)
-" 2>/dev/null
+PYEOF
 }
 
 _vault_load_registry() {
-    $_REG_LOADED && return
+    [[ "$_REG_LOADED" == true ]] && return
     _vault_init_registry
     _REG_SERVICES=()
     _REG_CATEGORIES=()
@@ -502,40 +504,50 @@ _vault_load_registry() {
         _REG_CATEGORIES+=("$cat")
         _REG_ENVVARS+=("$env")
         _REG_DESCS+=("$desc")
-    done < <(python3 -c "
-import json
-with open('$VAULT_REGISTRY') as f:
+    done < <(KMAC_REG="$VAULT_REGISTRY" python3 <<'PYEOF' 2>/dev/null
+import json, os
+with open(os.environ["KMAC_REG"]) as f:
     for r in json.load(f):
-        print(f\"{r['service']}|{r['category']}|{r['env']}|{r['desc']}\")
-" 2>/dev/null)
+        print(f"{r['service']}|{r['category']}|{r['env']}|{r['desc']}")
+PYEOF
+)
     _REG_LOADED=true
 }
 
 vault_add_integration() {
     local svc="$1" cat="$2" env="$3" desc="$4"
     _vault_init_registry
-    python3 -c "
-import json
-with open('$VAULT_REGISTRY') as f:
+    KMAC_REG="$VAULT_REGISTRY" KMAC_SVC="$svc" KMAC_CAT="$cat" KMAC_ENV="$env" KMAC_DESC="$desc" \
+    python3 <<'PYEOF' 2>/dev/null
+import json, os
+path = os.environ["KMAC_REG"]
+svc = os.environ["KMAC_SVC"]
+cat = os.environ["KMAC_CAT"]
+env = os.environ["KMAC_ENV"]
+desc = os.environ["KMAC_DESC"]
+with open(path) as f:
     reg = json.load(f)
-reg = [r for r in reg if r['service'] != '$svc']
-reg.append({'service': '$svc', 'category': '$cat', 'env': '$env', 'desc': '$desc'})
-with open('$VAULT_REGISTRY', 'w') as f:
+reg = [r for r in reg if r["service"] != svc]
+reg.append({"service": svc, "category": cat, "env": env, "desc": desc})
+with open(path, "w") as f:
     json.dump(reg, f, indent=2)
-" 2>/dev/null
+PYEOF
     _REG_LOADED=false
 }
 
 vault_remove_integration() {
     local svc="$1"
-    python3 -c "
-import json
-with open('$VAULT_REGISTRY') as f:
+    KMAC_REG="$VAULT_REGISTRY" KMAC_SVC="$svc" \
+    python3 <<'PYEOF' 2>/dev/null
+import json, os
+path = os.environ["KMAC_REG"]
+svc = os.environ["KMAC_SVC"]
+with open(path) as f:
     reg = json.load(f)
-reg = [r for r in reg if r['service'] != '$svc']
-with open('$VAULT_REGISTRY', 'w') as f:
+reg = [r for r in reg if r["service"] != svc]
+with open(path, "w") as f:
     json.dump(reg, f, indent=2)
-" 2>/dev/null
+PYEOF
     _REG_LOADED=false
     vault_del "$svc"
 }

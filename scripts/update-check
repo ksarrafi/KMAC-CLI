@@ -7,7 +7,9 @@
 TOOLKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$TOOLKIT_DIR/scripts/_ui.sh" 2>/dev/null
 source "$TOOLKIT_DIR/scripts/_ai-fix.sh" 2>/dev/null
-CACHE_DIR="/tmp/toolkit-update-cache"
+KMAC_CACHE_DIR="${HOME}/.cache/kmac"
+[[ -d "$KMAC_CACHE_DIR" ]] || mkdir -p "$KMAC_CACHE_DIR" && chmod 700 "$KMAC_CACHE_DIR"
+CACHE_DIR="$KMAC_CACHE_DIR"
 CACHE_FILE="$CACHE_DIR/last-check.json"
 CACHE_MAX_AGE=14400  # 4 hours in seconds
 
@@ -18,8 +20,6 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
-
-mkdir -p "$CACHE_DIR"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ run_checks() {
     # 1. Claude CLI
     local claude_current claude_latest
     claude_current=$(claude --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-    claude_latest=$($NPM_BIN view @anthropic-ai/claude-code version 2>/dev/null)
+    claude_latest=$("$NPM_BIN" view @anthropic-ai/claude-code version 2>/dev/null)
     if [[ -n "$claude_latest" && -n "$claude_current" && "$claude_current" != "$claude_latest" ]]; then
         updates+=("claude:$claude_current:$claude_latest:$NPM_BIN install -g @anthropic-ai/claude-code@latest")
     fi
@@ -191,7 +191,7 @@ show_full_report() {
             echo ""
             run_update "Updating brew packages" brew upgrade
             echo ""
-            run_update "Updating Claude CLI" $NPM_BIN install -g @anthropic-ai/claude-code@latest
+            run_update "Updating Claude CLI" "$NPM_BIN" install -g @anthropic-ai/claude-code@latest
             echo ""
             echo -e "${CYAN}Running dotfile backup...${NC}"
             bash "$TOOLKIT_DIR/scripts/dotbackup" 2>&1
@@ -217,7 +217,7 @@ show_full_report() {
             ;;
         c|C)
             echo ""
-            run_update "Updating Claude CLI" $NPM_BIN install -g @anthropic-ai/claude-code@latest
+            run_update "Updating Claude CLI" "$NPM_BIN" install -g @anthropic-ai/claude-code@latest
             echo ""
             echo -e "${DIM}Refreshing update status...${NC}"
             run_checks &>/dev/null

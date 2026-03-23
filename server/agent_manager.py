@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import time
@@ -10,6 +11,7 @@ from typing import Optional
 
 from config import PILOT_DIR, active_agent, load_config
 
+log = logging.getLogger(__name__)
 
 TASK_FILE = PILOT_DIR / "task.json"
 AGENT_LOG = PILOT_DIR / "agent.log"
@@ -39,6 +41,7 @@ class AgentManager:
             try:
                 return json.loads(TASK_FILE.read_text())
             except Exception:
+                log.debug("Failed to read task file", exc_info=True)
                 return {}
         return {}
 
@@ -127,7 +130,7 @@ class AgentManager:
 
                 await self._broadcast({"type": "output", "line": line})
         except Exception:
-            pass
+            log.debug("Agent output read failed", exc_info=True)
 
         rc = await self._proc.wait() if self._proc else -1
         status = "completed" if rc == 0 else "failed"

@@ -108,14 +108,22 @@ def list_projects(filter_term: str = "") -> list[dict]:
 
 
 def resolve_project(name: str) -> Optional[str]:
+    if not name or '/' in name or '\\' in name or name == '..' or name.startswith('.'):
+        return None
+
     # Fast path: direct child of a scan dir
     for scan_dir in project_scan_dirs():
         candidate = os.path.join(scan_dir, name)
-        if os.path.isdir(candidate):
-            return candidate
+        candidate_resolved = os.path.realpath(candidate)
+        scan_resolved = os.path.realpath(scan_dir)
+        if not candidate_resolved.startswith(scan_resolved + os.sep):
+            continue
+        if os.path.isdir(candidate_resolved):
+            return candidate_resolved
 
     # Deep search: walk up to 3 levels for a matching directory
     for scan_dir in project_scan_dirs():
+        scan_resolved = os.path.realpath(scan_dir)
         for root, dirs, _files in os.walk(scan_dir):
             depth = root.replace(scan_dir, "").count(os.sep)
             if depth >= MAX_SCAN_DEPTH:
@@ -126,7 +134,11 @@ def resolve_project(name: str) -> Optional[str]:
                 if d not in DEEP_SKIP_DIRS and not d.startswith(".")
             ]
             if name in dirs:
-                return os.path.join(root, name)
+                candidate = os.path.join(root, name)
+                candidate_resolved = os.path.realpath(candidate)
+                if not candidate_resolved.startswith(scan_resolved + os.sep):
+                    continue
+                return candidate_resolved
     return None
 
 
@@ -167,13 +179,13 @@ def _walk(current: Path, root: Path, depth: int, max_depth: int) -> list[dict]:
 
 def browse_directory(dir_path: str) -> dict:
     """List contents of a single directory. Returns folders and files, one level."""
-    p = Path(dir_path)
+    p = Path(dir_path).resolve()
     if not p.is_dir():
         return {"error": "Not a directory", "path": dir_path}
 
     # Security: must be under home directory
     try:
-        p.resolve().relative_to(Path.home().resolve())
+        p.relative_to(Path.home().resolve())
     except ValueError:
         return {"error": "Access denied"}
 
@@ -203,10 +215,11 @@ def browse_directory(dir_path: str) -> dict:
                 size = 0
             items.append({"name": name, "path": str(entry), "type": "file", "size": size})
 
-    parent = str(p.parent)
+    parent_path = p.parent
+    parent = str(parent_path)
     # Don't allow navigating above home
     try:
-        Path(parent).resolve().relative_to(Path.home().resolve())
+        parent_path.relative_to(Path.home().resolve())
         can_go_up = True
     except ValueError:
         can_go_up = False
@@ -253,8 +266,8 @@ def read_file(base_dir: str, file_path: str) -> dict:
 
     try:
         content = full.read_text(errors="replace")
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception:
+        return {"error": "Failed to read file"}
 
     return {
         "path": file_path,

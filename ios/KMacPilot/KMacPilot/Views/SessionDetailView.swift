@@ -143,7 +143,7 @@ struct SessionDetailView: View {
         inputText = ""
         isSending = true
 
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             _ = try? await api.sendMessage(id: sessionId, message: msg)
             isSending = false
@@ -153,7 +153,7 @@ struct SessionDetailView: View {
     }
 
     private func stopSession() {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             _ = try? await api.stopSession(id: sessionId)
             await refreshOutput()
@@ -161,7 +161,7 @@ struct SessionDetailView: View {
     }
 
     private func loadSession() {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             session = try? await api.sessionDetail(id: sessionId)
             let output = try? await api.sessionOutput(id: sessionId, tail: 500)
@@ -181,7 +181,7 @@ struct SessionDetailView: View {
 
     private func startPolling() {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
-            Task { await refreshOutput() }
+            Task { @MainActor in await refreshOutput() }
         }
     }
 

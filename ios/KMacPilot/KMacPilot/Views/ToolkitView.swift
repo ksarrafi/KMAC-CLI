@@ -112,7 +112,7 @@ struct DockerTab: View {
     }
 
     private func performAction(_ id: String, _ action: String) {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             _ = try? await api.dockerAction(container: id, action: action)
             try? await Task.sleep(for: .seconds(1))
@@ -121,7 +121,7 @@ struct DockerTab: View {
     }
 
     private func loadLogs(_ id: String, _ name: String) {
-        Task {
+        Task { @MainActor in
             guard let api = appState.api else { return }
             let logs = (try? await api.dockerLogs(container: id)) ?? ""
             showLogs = (name, logs)

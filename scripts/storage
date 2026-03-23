@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh"
 source "$SCRIPT_DIR/_auth-helper.sh" 2>/dev/null
 
+_KMAC_TMP="${HOME}/.cache/kmac"
+[[ -d "$_KMAC_TMP" ]] || { mkdir -p "$_KMAC_TMP" && chmod 700 "$_KMAC_TMP"; }
+
 ICLOUD_ROOT="$(echo ~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs 2>/dev/null)"
 ICLOUD_AVAIL=false
 [[ -d "$ICLOUD_ROOT" ]] && ICLOUD_AVAIL=true
@@ -108,7 +111,7 @@ do_overview() {
 do_scan() {
     title_box "Top Space Consumers" "📊"
 
-    local tmpdir="/tmp/toolkit-storage-$$"
+    local tmpdir="$_KMAC_TMP/storage-$$"
     mkdir -p "$tmpdir"
 
     local -a dirs=(
@@ -214,7 +217,7 @@ do_big_files() {
     title_box "Largest Files" "🔍"
 
     local min_mb=${1:-100}
-    local tmpfile="/tmp/toolkit-bigfiles-$$"
+    local tmpfile="$_KMAC_TMP/bigfiles-$$"
     : > "$tmpfile"
 
     # Scan each directory individually so we can show which one we're in
@@ -273,7 +276,7 @@ do_big_files() {
     fi
 
     # Gather sizes — show progress per file
-    local sizefile="/tmp/toolkit-bigsizes-$$"
+    local sizefile="$_KMAC_TMP/bigsizes-$$"
     : > "$sizefile"
     (
         while IFS= read -r f; do
@@ -446,7 +449,7 @@ Be concise. For SAFETY: SAFE means deletable without consequences, CAUTION means
     done
 
     # Write display data to temp file (line N = file #N)
-    local datafile="/tmp/toolkit-bigdata-$$"
+    local datafile="$_KMAC_TMP/bigdata-$$"
     : > "$datafile"
     for (( di=0; di<${#display_paths[@]}; di++ )); do
         echo "${display_sizes[$di]}|${display_paths[$di]}" >> "$datafile"
@@ -615,7 +618,7 @@ do_clean() {
     )
 
     # Scan all targets in parallel with progress counter
-    local tmpdir="/tmp/toolkit-clean-$$"
+    local tmpdir="$_KMAC_TMP/clean-$$"
     mkdir -p "$tmpdir"
     local -a pids=() active_indices=()
     local n_targets=${#t_labels[@]}
@@ -764,7 +767,7 @@ do_icloud() {
         "" "" "" "" ""
     )
 
-    local tmpdir_ic="/tmp/toolkit-icloud-$$"
+    local tmpdir_ic="$_KMAC_TMP/icloud-$$"
     mkdir -p "$tmpdir_ic"
     local -a ic_pids=()
     for (( di=0; di<${#ic_dirs[@]}; di++ )); do
@@ -959,7 +962,7 @@ do_node_modules() {
     title_box "node_modules Cleanup" "📦"
 
     # Find node_modules with live count
-    local tmpfile="/tmp/toolkit-nm-$$"
+    local tmpfile="$_KMAC_TMP/nm-$$"
     : > "$tmpfile"
     find "$HOME/Projects" "$HOME/Developer" "$HOME/Desktop" "$HOME/Documents" \
         -maxdepth 5 -name "node_modules" -type d -prune 2>/dev/null >> "$tmpfile" &
@@ -986,7 +989,7 @@ do_node_modules() {
     fi
 
     # Measure sizes with progress counter
-    local sizefile="/tmp/toolkit-nm-sizes-$$"
+    local sizefile="$_KMAC_TMP/nm-sizes-$$"
     : > "$sizefile"
     local total_kb=0
     (

@@ -149,7 +149,11 @@ platform_notify() {
     local title="${1:-KMac}"
     local message="${2:-}"
     if [[ "$KMAC_OS" == macos ]]; then
-        osascript -e "display notification \"${message//\"/\\\"}\" with title \"${title//\"/\\\"}\""
+        osascript - "$title" "$message" <<'APPLESCRIPT' 2>/dev/null || true
+on run argv
+    display notification (item 2 of argv) with title (item 1 of argv)
+end run
+APPLESCRIPT
     else
         if command -v notify-send &>/dev/null; then
             notify-send "$title" "$message"
