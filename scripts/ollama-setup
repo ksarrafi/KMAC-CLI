@@ -1,0 +1,438 @@
+#!/bin/bash
+# ollama-setup — Install, configure, and manage Ollama for local LLMs
+# Usage: ollama-setup              (interactive menu)
+#        ollama-setup install       (install Ollama + pull starter models)
+#        ollama-setup models        (manage models)
+#        ollama-setup serve         (start Ollama server)
+#        ollama-setup status        (check if running + list models)
+#        ollama-setup chat <model>  (quick chat session)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+
+OLLAMA_API="http://localhost:11434"
+
+# ─── Popular Models ─────────────────────────────────────────────────────
+# name|size|description
+MODELS=(
+    "llama3.2:3b|2.0 GB|Meta Llama 3.2 — fast, great for code and chat"
+    "llama3.2:1b|1.3 GB|Meta Llama 3.2 — ultra-light, runs on any Mac"
+    "llama3.1:8b|4.7 GB|Meta Llama 3.1 — strong general purpose"
+    "codellama:7b|3.8 GB|Code Llama — optimized for coding tasks"
+    "mistral:7b|4.1 GB|Mistral 7B — fast and capable"
+    "mixtral:8x7b|26 GB|Mixtral MoE — powerful, needs 32GB+ RAM"
+    "phi3:mini|2.3 GB|Microsoft Phi-3 Mini — small but smart"
+    "gemma2:2b|1.6 GB|Google Gemma 2 — lightweight and efficient"
+    "gemma2:9b|5.5 GB|Google Gemma 2 — strong mid-size model"
+    "qwen2.5:7b|4.7 GB|Alibaba Qwen 2.5 — multilingual, good at code"
+    "deepseek-coder-v2:16b|8.9 GB|DeepSeek Coder v2 — top-tier coding model"
+    "starcoder2:7b|4.0 GB|StarCoder 2 — code completion specialist"
+    "nomic-embed-text|274 MB|Nomic — text embeddings for RAG"
+)
+
+_parse_model() {
+    IFS='|' read -r M_NAME M_SIZE M_DESC <<< "$1"
+}
+
+_ollama_running() {
+    curl -sf --max-time 2 "$OLLAMA_API/api/tags" &>/dev/null
+}
+
+_installed_models() {
+    curl -sf "$OLLAMA_API/api/tags" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    for m in data.get('models', []):
+        name = m.get('name', '')
+        size = m.get('size', 0)
+        gb = size / (1024**3)
+        print(f'{name}|{gb:.1f} GB')
+except: pass
+" 2>/dev/null
+}
+
+# ─── Install ─────────────────────────────────────────────────────────────
+
+do_install() {
+    title_box "Ollama Setup" "🦙"
+
+    if command -v ollama &>/dev/null; then
+        local ver
+        ver=$(ollama --version 2>/dev/null | head -1)
+        ui_success "Ollama is already installed ($ver)"
+    else
+        ui_info "Installing Ollama..."
+        echo ""
+        if [[ "$(uname)" == "Darwin" ]]; then
+            if command -v brew &>/dev/null; then
+                brew install ollama
+            else
+                curl -fsSL https://ollama.com/install.sh | sh
+            fi
+        else
+            curl -fsSL https://ollama.com/install.sh | sh
+        fi
+
+        if command -v ollama &>/dev/null; then
+            ui_success "Ollama installed!"
+        else
+            ui_fail "Installation failed. Visit https://ollama.com/download"
+            return 1
+        fi
+    fi
+
+    echo ""
+
+    if ! _ollama_running; then
+        ui_info "Starting Ollama server..."
+        ollama serve &>/dev/null &
+        disown 2>/dev/null
+        sleep 2
+        if _ollama_running; then
+            ui_success "Ollama server is running"
+        else
+            ui_warn "Server didn't start — try 'ollama serve' manually"
+        fi
+    else
+        ui_success "Ollama server is already running"
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}Pull a starter model?${NC}"
+    echo ""
+
+    local ram_gb
+    if [[ "$(uname)" == "Darwin" ]]; then
+        ram_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
+    else
+        ram_gb=$(( $(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}') / 1048576 ))
+    fi
+
+    local recommended="llama3.2:3b"
+    if (( ram_gb >= 32 )); then
+        recommended="llama3.1:8b"
+    elif (( ram_gb >= 16 )); then
+        recommended="llama3.2:3b"
+    else
+        recommended="llama3.2:1b"
+    fi
+
+    echo -e "  ${DIM}Your Mac has ${ram_gb}GB RAM — recommended: ${NC}${GREEN}${recommended}${NC}"
+    echo ""
+    echo -e "   ${GREEN}1${NC}) ${recommended} ${DIM}(recommended for your system)${NC}"
+    echo -e "   ${GREEN}2${NC}) Pick from full model list"
+    echo -e "   ${GREEN}3${NC}) Skip for now"
+    echo ""
+    read -r -n1 -p "  > " pick; echo ""
+
+    case "$pick" in
+        1)
+            echo ""
+            ui_info "Pulling ${recommended}... (this may take a few minutes)"
+            ollama pull "$recommended"
+            echo ""
+            ui_success "Ready! Try: ollama run ${recommended}"
+            ;;
+        2) do_pull_menu ;;
+        3) echo -e "  ${DIM}You can pull models later with: kmac ollama models${NC}" ;;
+    esac
+}
+
+# ─── Model Management ───────────────────────────────────────────────────
+
+do_pull_menu() {
+    echo ""
+    echo -e "  ${BOLD}Available Models:${NC}"
+    echo ""
+
+    local idx=1
+    for entry in "${MODELS[@]}"; do
+        _parse_model "$entry"
+        local status=""
+        if _ollama_running; then
+            local installed
+            installed=$(_installed_models)
+            local base_name="${M_NAME%%:*}"
+            if echo "$installed" | grep -q "$M_NAME\|$base_name"; then
+                status="${GREEN}● installed${NC}"
+            fi
+        fi
+        printf "   ${GREEN}%2d${NC}) %-28s ${DIM}%-10s${NC} %s %b\n" "$idx" "$M_NAME" "$M_SIZE" "$M_DESC" "$status"
+        ((idx++))
+    done
+
+    echo ""
+    echo -e "   ${GREEN}c${NC}) Enter custom model name"
+    echo -e "   ${GREEN}m${NC}) Back"
+    echo ""
+    read -r -p "  Pick a number (or c/m): " pick
+
+    case "$pick" in
+        m|M|"") return ;;
+        c|C)
+            echo ""
+            read -r -p "  Model name (e.g. mistral:latest): " custom_model
+            if [[ -n "$custom_model" ]]; then
+                ui_info "Pulling $custom_model..."
+                ollama pull "$custom_model"
+                ui_success "Done!"
+            fi
+            ;;
+        *)
+            if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#MODELS[@]} )); then
+                local i=$((pick - 1))
+                _parse_model "${MODELS[$i]}"
+                echo ""
+                ui_info "Pulling $M_NAME ($M_SIZE)..."
+                ollama pull "$M_NAME"
+                echo ""
+                ui_success "Ready! Try: ollama run $M_NAME"
+            else
+                ui_fail "Invalid choice"
+            fi
+            ;;
+    esac
+}
+
+do_models() {
+    while true; do
+        clear
+        title_box "Ollama Models" "🦙"
+
+        if ! _ollama_running; then
+            ui_warn "Ollama server is not running"
+            echo ""
+            echo -e "   ${GREEN}s${NC}) Start server    ${GREEN}m${NC}) Back"
+            echo ""
+            read -r -n1 -p "  > " ch; echo ""
+            case "$ch" in
+                s|S)
+                    ollama serve &>/dev/null &
+                    disown 2>/dev/null
+                    sleep 2
+                    _ollama_running && ui_success "Server started" || ui_fail "Failed to start"
+                    sleep 1
+                    ;;
+                *) return ;;
+            esac
+            continue
+        fi
+
+        echo -e "  ${BOLD}Installed Models:${NC}"
+        echo ""
+
+        local installed
+        installed=$(_installed_models)
+        local count=0
+
+        if [[ -n "$installed" ]]; then
+            while IFS='|' read -r name size; do
+                printf "   ${GREEN}●${NC}  %-30s ${DIM}%s${NC}\n" "$name" "$size"
+                ((count++))
+            done <<< "$installed"
+        fi
+
+        if (( count == 0 )); then
+            echo -e "   ${DIM}No models installed yet${NC}"
+        fi
+
+        echo ""
+        echo -e "  ${BOLD}${count}${NC} model(s) installed"
+        echo ""
+        echo -e "   ${GREEN}p${NC}) Pull a new model"
+        echo -e "   ${GREEN}r${NC}) Remove a model"
+        echo -e "   ${GREEN}c${NC}) Chat with a model"
+        echo -e "   ${GREEN}m${NC}) Back"
+        echo ""
+        read -r -n1 -p "  > " ch; echo ""
+
+        case "$ch" in
+            p|P) do_pull_menu; pause ;;
+            r|R)
+                echo ""
+                read -r -p "  Model to remove: " rm_model
+                if [[ -n "$rm_model" ]]; then
+                    ollama rm "$rm_model" 2>/dev/null && ui_success "Removed $rm_model" || ui_fail "Failed to remove $rm_model"
+                fi
+                pause
+                ;;
+            c|C)
+                echo ""
+                read -r -p "  Model to chat with (e.g. llama3.2:3b): " chat_model
+                if [[ -n "$chat_model" ]]; then
+                    echo -e "  ${DIM}Starting chat... (type /bye to exit)${NC}"
+                    echo ""
+                    ollama run "$chat_model"
+                fi
+                ;;
+            m|M|"") return ;;
+        esac
+    done
+}
+
+# ─── Status ──────────────────────────────────────────────────────────────
+
+do_status() {
+    title_box "Ollama Status" "🦙"
+
+    if ! command -v ollama &>/dev/null; then
+        ui_fail "Ollama is not installed"
+        echo -e "  ${DIM}Run: kmac ollama install${NC}"
+        return 1
+    fi
+
+    local ver
+    ver=$(ollama --version 2>/dev/null | head -1)
+    ui_success "Ollama installed ($ver)"
+
+    if _ollama_running; then
+        ui_success "Server is running at $OLLAMA_API"
+    else
+        ui_warn "Server is not running"
+        echo -e "  ${DIM}Start with: ollama serve${NC}"
+    fi
+
+    echo ""
+    if _ollama_running; then
+        echo -e "  ${BOLD}Models:${NC}"
+        local installed
+        installed=$(_installed_models)
+        local count=0
+        if [[ -n "$installed" ]]; then
+            while IFS='|' read -r name size; do
+                printf "   ${GREEN}●${NC}  %-30s ${DIM}%s${NC}\n" "$name" "$size"
+                ((count++))
+            done <<< "$installed"
+        fi
+        (( count == 0 )) && echo -e "   ${DIM}No models pulled yet${NC}"
+        echo ""
+        echo -e "  ${BOLD}${count}${NC} model(s) available"
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}Quick Start:${NC}"
+    echo -e "   ${DIM}ollama run llama3.2:3b${NC}          Chat with a model"
+    echo -e "   ${DIM}kmac ollama models${NC}              Manage models"
+    echo -e "   ${DIM}ollama list${NC}                     List installed models"
+    echo -e "   ${DIM}curl $OLLAMA_API/api/generate${NC}   Use the API"
+}
+
+# ─── Serve ───────────────────────────────────────────────────────────────
+
+do_serve() {
+    if _ollama_running; then
+        ui_success "Ollama server is already running at $OLLAMA_API"
+        return
+    fi
+
+    ui_info "Starting Ollama server..."
+    ollama serve &>/dev/null &
+    disown 2>/dev/null
+    sleep 2
+
+    if _ollama_running; then
+        ui_success "Ollama server started at $OLLAMA_API"
+    else
+        ui_fail "Failed to start. Try running 'ollama serve' directly."
+    fi
+}
+
+# ─── Chat ────────────────────────────────────────────────────────────────
+
+do_chat() {
+    local model="${1:-}"
+
+    if ! _ollama_running; then
+        ui_warn "Starting Ollama server first..."
+        ollama serve &>/dev/null &
+        disown 2>/dev/null
+        sleep 2
+    fi
+
+    if [[ -z "$model" ]]; then
+        local installed
+        installed=$(_installed_models)
+        if [[ -z "$installed" ]]; then
+            ui_fail "No models installed. Run: kmac ollama install"
+            return 1
+        fi
+
+        echo -e "  ${BOLD}Available models:${NC}"
+        echo ""
+        local -a model_names=()
+        local idx=1
+        while IFS='|' read -r name size; do
+            printf "   ${GREEN}%d${NC}) %-30s ${DIM}%s${NC}\n" "$idx" "$name" "$size"
+            model_names+=("$name")
+            ((idx++))
+        done <<< "$installed"
+
+        echo ""
+        read -r -p "  Pick a model: " pick
+        if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#model_names[@]} )); then
+            model="${model_names[$((pick - 1))]}"
+        else
+            return
+        fi
+    fi
+
+    echo -e "  ${DIM}Starting chat with ${model}... (type /bye to exit)${NC}"
+    echo ""
+    ollama run "$model"
+}
+
+# ─── Interactive Menu ────────────────────────────────────────────────────
+
+do_menu() {
+    while true; do
+        clear
+        title_box "Ollama — Local AI" "🦙"
+
+        if command -v ollama &>/dev/null; then
+            local ver
+            ver=$(ollama --version 2>/dev/null | head -1)
+            if _ollama_running; then
+                echo -e "  ${GREEN}●${NC} Ollama running ${DIM}($ver)${NC}"
+                local count
+                count=$(curl -sf "$OLLAMA_API/api/tags" 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('models',[])))" 2>/dev/null || echo "0")
+                echo -e "  ${DIM}${count} model(s) available${NC}"
+            else
+                echo -e "  ${YELLOW}●${NC} Ollama installed but server stopped ${DIM}($ver)${NC}"
+            fi
+        else
+            echo -e "  ${DIM}○${NC} Ollama not installed"
+        fi
+
+        echo ""
+        echo -e "   ${GREEN}i${NC}) Install / Setup"
+        echo -e "   ${GREEN}m${NC}) Manage Models"
+        echo -e "   ${GREEN}c${NC}) Chat"
+        echo -e "   ${GREEN}s${NC}) Start Server"
+        echo -e "   ${GREEN}t${NC}) Status"
+        echo -e "   ${GREEN}q${NC}) Back"
+        echo ""
+        read -r -n1 -p "  > " ch; echo ""
+
+        case "$ch" in
+            i|I) clear; do_install; pause ;;
+            m|M) do_models ;;
+            c|C) clear; do_chat; pause ;;
+            s|S) clear; do_serve; pause ;;
+            t|T) clear; do_status; pause ;;
+            q|Q|0|"") return ;;
+            *) ui_fail "Unknown: '$ch'"; sleep 0.5 ;;
+        esac
+    done
+}
+
+# ─── CLI Router ──────────────────────────────────────────────────────────
+
+case "${1:-}" in
+    install|setup)  do_install; [[ -t 0 ]] && pause ;;
+    models)         shift; do_models ;;
+    serve|start)    do_serve ;;
+    status)         do_status; [[ -t 0 ]] && pause ;;
+    chat|run)       shift; do_chat "$@" ;;
+    *)              do_menu ;;
+esac

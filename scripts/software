@@ -33,7 +33,7 @@ REGISTRY=(
     "claude|ai|claude|npm install -g @anthropic-ai/claude-code|Claude Code — AI coding agent|https://docs.anthropic.com/en/docs/claude-code"
     "chatgpt|ai|chatgpt|brew install --cask chatgpt|ChatGPT desktop app|https://openai.com/chatgpt/desktop"
     "gemini|ai|gemini|npm install -g @anthropic-ai/gemini-cli 2>/dev/null \|\| pip3 install google-generativeai|Google Gemini CLI|https://ai.google.dev"
-    "ollama|ai|ollama|brew install ollama|Run LLMs locally|https://ollama.com"
+    "ollama|ai|ollama|brew install ollama|Run LLMs locally (setup: kmac ollama)|https://ollama.com"
     "aider|ai|aider|pip3 install aider-chat|AI pair programming in terminal|https://aider.chat"
     "copilot|ai|gh copilot|gh extension install github/gh-copilot|GitHub Copilot CLI|https://github.com/github/gh-copilot"
 

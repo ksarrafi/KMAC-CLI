@@ -98,7 +98,7 @@ check_ngrok() {
 
 declare -a PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
 
-_BUILTIN_KEYS="a v c s p e x k r d n q . b u ? / i I B P + 0 S"
+_BUILTIN_KEYS="a v c s p e x k r d n q . b u ? / i I o B P + 0 S"
 
 discover_plugins() {
     PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
@@ -248,7 +248,7 @@ print_menu() {
     echo -e "   ${DIM}──${NC}                        ${DIM}───${NC}                       ${DIM}─────${NC}"
     echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}p${NC}  Project Launcher       ${GREEN}r${NC}  Remote Terminal"
     echo -e "   ${GREEN}+${NC}  Build a Tool           ${GREEN}e${NC}  Claude Code            ${GREEN}d${NC}  Docker Manager"
-    echo -e "                              ${GREEN}x${NC}  Cursor Agent           ${GREEN}n${NC}  Network Info"
+    echo -e "   ${GREEN}o${NC}  Ollama (Local AI)      ${GREEN}x${NC}  Cursor Agent           ${GREEN}n${NC}  Network Info"
     echo -e "                              ${GREEN}v${NC}  Code Review            ${GREEN}k${NC}  Kill Port"
     echo -e "                              ${GREEN}c${NC}  Smart Commit"
     echo -e "                              ${GREEN}P${NC}  Pilot ${DIM}(remote agent)${NC}"
@@ -687,6 +687,7 @@ main() {
             # AI
             a) clear; do_ask ;;
             +) clear; bash "$SCRIPTS_DIR/toolmaker"; pause ;;
+            o) clear; bash "$SCRIPTS_DIR/ollama-setup" ;;
             # Dev
             p) clear; safe_run "Project Launcher" bash "$SCRIPTS_DIR/project" ;;
             e) clear; bash "$SCRIPTS_DIR/claudeme" ;;
@@ -747,6 +748,7 @@ if [[ $# -gt 0 ]]; then
         docker-health) exec bash "$SCRIPTS_DIR/docker-health" "$@" ;;
         make|build|toolmaker) exec bash "$SCRIPTS_DIR/toolmaker" "$@" ;;
         software|sw) exec bash "$SCRIPTS_DIR/software" "$@" ;;
+        ollama) exec bash "$SCRIPTS_DIR/ollama-setup" "$@" ;;
         version|-v|--version)
             print_logo
             echo ""
@@ -771,6 +773,7 @@ if [[ $# -gt 0 ]]; then
             echo -e "  ${BOLD}AI${NC}"
             echo "    ask \"question\"        Ask Claude (or -i for interactive, -m opus)"
             echo "    make \"description\"    Build a new tool with AI"
+            echo "    ollama [cmd]          Local AI setup (install|models|serve|status|chat)"
             echo ""
             echo -e "  ${BOLD}Dev${NC}"
             echo "    project               Project launcher with fzf"
