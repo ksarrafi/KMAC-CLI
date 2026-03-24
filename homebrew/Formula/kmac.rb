@@ -8,7 +8,7 @@ class Kmac < Formula
 
   # Stable tarball — sha256 is updated automatically by the release workflow.
   url "https://github.com/ksarrafi/KMAC-CLI/archive/refs/tags/v2.9.0.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "459a2d43aaf3f614a357a7f462689606019438f93b72a401d6fa64d1abe8ff3c"
 
   head "https://github.com/ksarrafi/KMAC-CLI.git", branch: "main"
 
