@@ -141,7 +141,7 @@ _refresh_status_cache() {
 
 declare -a PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
 
-_BUILTIN_KEYS="a v c s p e x k r d n q . b u ? / i I o B P R + 0 S"
+_BUILTIN_KEYS="a v c s p e x k r d n . b u ? / i I o P R + 0 S"
 
 discover_plugins() {
     PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
@@ -290,21 +290,19 @@ print_menu() {
 
     # ─── Commands — 3-column layout ───
     echo ""
-    echo -e "   ${C_CYAN}${BOLD}AI${NC}                        ${C_TEAL}${BOLD}Dev${NC}                       ${C_GREEN}${BOLD}Infra${NC}"
-    echo -e "   ${DIM}──${NC}                        ${DIM}───${NC}                       ${DIM}─────${NC}"
-    echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}p${NC}  Project Launcher       ${GREEN}r${NC}  Remote Terminal"
-    echo -e "   ${GREEN}+${NC}  Build a Tool           ${GREEN}e${NC}  Claude Code            ${GREEN}d${NC}  Docker Manager"
-    echo -e "   ${GREEN}o${NC}  Ollama (Local AI)      ${GREEN}x${NC}  Cursor Agent           ${GREEN}n${NC}  Network Info"
-    echo -e "   ${GREEN}R${NC}  Research ${DIM}(autorun)${NC}    ${GREEN}v${NC}  Code Review            ${GREEN}k${NC}  Kill Port"
-    echo -e "                              ${GREEN}c${NC}  Smart Commit"
-    echo -e "                              ${GREEN}P${NC}  Pilot ${DIM}(remote agent)${NC}"
+    echo -e "   ${C_CYAN}${BOLD}AI & Research${NC}              ${C_TEAL}${BOLD}Dev${NC}                       ${C_GREEN}${BOLD}Infra${NC}"
+    echo -e "   ${DIM}─────────────${NC}              ${DIM}───${NC}                       ${DIM}─────${NC}"
+    echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}p${NC}  Project Launcher       ${GREEN}d${NC}  Docker Manager"
+    echo -e "   ${GREEN}o${NC}  Ollama (Local AI)      ${GREEN}e${NC}  Claude Code            ${GREEN}r${NC}  Remote Terminal"
+    echo -e "   ${GREEN}+${NC}  AI Toolmaker           ${GREEN}x${NC}  Cursor Agent           ${GREEN}P${NC}  Pilot ${DIM}(remote)${NC}"
+    echo -e "   ${GREEN}R${NC}  Research ${DIM}(autorun)${NC}    ${GREEN}v${NC}  Code Review            ${GREEN}n${NC}  Network Info"
+    echo -e "                              ${GREEN}c${NC}  Smart Commit           ${GREEN}k${NC}  Kill Port"
     echo ""
     echo -e "   ${YELLOW}${BOLD}System${NC}"
     echo -e "   ${DIM}──────${NC}"
     echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}b${NC}  Backup Dotfiles        ${GREEN}u${NC}  Check Updates"
-    echo -e "   ${GREEN}.${NC}  Secrets & Keys         ${GREEN}/${NC}  Show Aliases           ${GREEN}i${NC}  Install/Update"
-    echo -e "   ${GREEN}?${NC}  Health Check           ${GREEN}q${NC}  Connection QR          ${GREEN}B${NC}  Bootstrap Mac"
-    echo -e "   ${GREEN}I${NC}  Software Manager"
+    echo -e "   ${GREEN}.${NC}  Secrets & Keys         ${GREEN}i${NC}  Install / Bootstrap    ${GREEN}I${NC}  Software Manager"
+    echo -e "   ${GREEN}?${NC}  Health Check           ${GREEN}/${NC}  Aliases"
 
     # ─── Plugins ───
     if (( ${#PLUGIN_NAMES[@]} > 0 )); then
@@ -538,17 +536,23 @@ do_secrets() {
     bash "$SCRIPTS_DIR/secrets"
 }
 
-do_bootstrap() {
-    echo -e "${BOLD}${CYAN}Bootstrap New Mac${NC}\n"
-    echo -e "  ${GREEN}1${NC}) Export Brewfile (save current)    ${GREEN}3${NC}) Apply macOS prefs"
-    echo -e "  ${GREEN}2${NC}) Install from Brewfile             ${GREEN}4${NC}) Full bootstrap (all)"
-    echo -e "  ${GREEN}m${NC}) Back\n"
+do_install_bootstrap() {
+    title_box "Install / Bootstrap" "⚙"
+    echo -e "  ${GREEN}i${NC}) Install/Update Toolkit"
+    echo -e "  ${GREEN}b${NC}) Export Brewfile ${DIM}(save current)${NC}"
+    echo -e "  ${GREEN}B${NC}) Install from Brewfile"
+    echo -e "  ${GREEN}p${NC}) Apply macOS Preferences"
+    echo -e "  ${GREEN}f${NC}) Full Bootstrap ${DIM}(Brewfile + prefs + install)${NC}"
+    echo ""
+    echo -e "  ${DIM}m) Back${NC}"
+    echo ""
     read -r -n1 -p "  > " bc; echo ""
     case "$bc" in
-        1)  brew bundle dump --file="$TOOLKIT_DIR/Brewfile" --force 2>/dev/null
+        i)  safe_run "Install/Update Toolkit" bash "$TOOLKIT_DIR/install.sh" ;;
+        b)  brew bundle dump --file="$TOOLKIT_DIR/Brewfile" --force 2>/dev/null
             echo -e "${GREEN}✓ Brewfile saved${NC}" ;;
-        2)  [[ -f "$TOOLKIT_DIR/Brewfile" ]] && brew bundle --file="$TOOLKIT_DIR/Brewfile" || echo "No Brewfile found" ;;
-        3)  defaults write com.apple.dock autohide -bool true
+        B)  [[ -f "$TOOLKIT_DIR/Brewfile" ]] && brew bundle --file="$TOOLKIT_DIR/Brewfile" || echo "No Brewfile found" ;;
+        p)  defaults write com.apple.dock autohide -bool true
             defaults write com.apple.dock tilesize -int 48
             defaults write NSGlobalDomain AppleShowAllExtensions -bool true
             defaults write com.apple.finder ShowPathbar -bool true
@@ -559,13 +563,14 @@ do_bootstrap() {
             defaults write com.apple.screencapture location ~/Screenshots
             killall Dock Finder 2>/dev/null || true
             echo -e "${GREEN}✓ Preferences applied${NC}" ;;
-        4)  [[ -f "$TOOLKIT_DIR/Brewfile" ]] && brew bundle --file="$TOOLKIT_DIR/Brewfile"
+        f)  [[ -f "$TOOLKIT_DIR/Brewfile" ]] && brew bundle --file="$TOOLKIT_DIR/Brewfile"
             defaults write com.apple.dock autohide -bool true; defaults write com.apple.dock tilesize -int 48
             defaults write NSGlobalDomain AppleShowAllExtensions -bool true; defaults write NSGlobalDomain KeyRepeat -int 2
             mkdir -p ~/Screenshots; defaults write com.apple.screencapture location ~/Screenshots
             killall Dock Finder 2>/dev/null || true
             bash "$TOOLKIT_DIR/install.sh"
             echo -e "${GREEN}✓ Full bootstrap complete${NC}" ;;
+        m|M) return ;;
     esac
     pause
 }
@@ -784,23 +789,21 @@ main() {
             x) clear; echo -e "${BOLD}Cursor Agent Task:${NC}"; read -r -p "Task: " t; safe_run "Cursor Agent" bash "$SCRIPTS_DIR/cursoragent" "$t" ;;
             v) clear; safe_run "Code Review" bash "$SCRIPTS_DIR/review"; pause ;;
             c) clear; safe_run "Smart Commit" bash "$SCRIPTS_DIR/aicommit"; pause ;;
-            P) clear; bash "$SCRIPTS_DIR/pilot" status; pause ;;
             # Infra
-            r) clear; do_remote_terminal ;;
             d) clear; do_docker ;;
+            r) clear; do_remote_terminal ;;
+            P) clear; bash "$SCRIPTS_DIR/pilot" status; pause ;;
             n) clear; do_network ;;
             k) clear; echo -e "${BOLD}Kill Port:${NC}"; read -r -p "Port (blank=list): " pt; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" "$pt"; pause ;;
-            q) clear; do_show_qr ;;
             # System
             .) clear; do_secrets ;;
             S) clear; bash "$SCRIPTS_DIR/storage"; pause ;;
             b) clear; safe_run "Dotfile Backup" bash "$SCRIPTS_DIR/dotbackup"; pause ;;
             u) clear; safe_run "Update Check" bash "$SCRIPTS_DIR/update-check"; pause ;;
+            i) clear; do_install_bootstrap ;;
+            I) clear; bash "$SCRIPTS_DIR/software" ;;
             /) clear; do_aliases ;;
             \?) clear; do_health ;;
-            i) clear; safe_run "Install/Update Toolkit" bash "$TOOLKIT_DIR/install.sh"; pause ;;
-            I) clear; bash "$SCRIPTS_DIR/software" ;;
-            B) clear; do_bootstrap ;;
             0) hooks_emit on-exit || true; echo -e "\n  ${C_TEAL}See you! ✌${NC}\n"; exit 0 ;;
             *)
                 # Check plugins
@@ -869,7 +872,7 @@ if [[ $# -gt 0 ]]; then
             echo ""
             echo "Usage: toolkit [command] [args...]"
             echo ""
-            echo -e "  ${BOLD}AI${NC}"
+            echo -e "  ${BOLD}AI & Research${NC}"
             echo "    ask \"question\"        Ask Claude (or -i for interactive, -m opus)"
             echo "    make \"description\"    Build a new tool with AI"
             echo "    research [cmd]        Autonomous experiment runner (init|run|status|review|stop)"
@@ -881,13 +884,13 @@ if [[ $# -gt 0 ]]; then
             echo "    aicommit [--amend]    Smart commit message with scope detection"
             echo "    cursoragent \"task\"     Cursor Agent task (alias: cask)"
             echo "    sessions              Resume a Claude Code session"
-            echo "    pilot <cmd>           Remote AI agent via Telegram (start/stop/status)"
-            echo "    server <cmd>          Pilot server lifecycle (start|stop|restart|status|logs|token|install|docker-up|down)"
-            echo "    remote-access <cmd>   Pilot remote access (setup|start|stop|restart|status|url|qr)"
             echo ""
             echo -e "  ${BOLD}Infra${NC}"
             echo "    docker [cmd]          Docker Manager (dashboard|health|disk|compose|mcp)"
             echo "    docker-health         Docker health report (--json, --history)"
+            echo "    pilot <cmd>           Remote AI agent via Telegram (start/stop/status)"
+            echo "    server <cmd>          Pilot server lifecycle (start|stop|restart|status|logs|token|install|docker-up|down)"
+            echo "    remote-access <cmd>   Pilot remote access (setup|start|stop|restart|status|url|qr)"
             echo "    killport [port]       Kill process on port (blank = list all)"
             echo ""
             echo -e "  ${BOLD}System${NC}"
