@@ -794,6 +794,7 @@ if [[ $# -gt 0 ]]; then
         cask|cursoragent) exec bash "$SCRIPTS_DIR/cursoragent" "$@" ;;
         killport)   exec bash "$SCRIPTS_DIR/killport" "$@" ;;
         pilot)      exec bash "$SCRIPTS_DIR/pilot" "$@" ;;
+        server)     source "$SCRIPTS_DIR/server" ;;
         dotbackup)  exec bash "$SCRIPTS_DIR/dotbackup" "$@" ;;
         update)     exec bash "$SCRIPTS_DIR/update-check" "$@" ;;
         doctor)     do_health ;;
@@ -837,6 +838,7 @@ if [[ $# -gt 0 ]]; then
             echo "    cursoragent \"task\"     Cursor Agent task (alias: cask)"
             echo "    sessions              Resume a Claude Code session"
             echo "    pilot <cmd>           Remote AI agent via Telegram (start/stop/status)"
+            echo "    server <cmd>          Pilot server lifecycle (start|stop|restart|status|logs|token|install|docker-up|down)"
             echo ""
             echo -e "  ${BOLD}Infra${NC}"
             echo "    docker [cmd]          Docker Manager (dashboard|health|disk|compose|mcp)"

@@ -1,0 +1,44 @@
+[Unit]
+Description=KMac Pilot Server
+Documentation=https://github.com/ksarrafi/KMAC-CLI
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+Group=%i
+WorkingDirectory=%h/projects/KMAC-CLI/server
+
+# Environment
+Environment=KMAC_HOST=127.0.0.1
+Environment=KMAC_PORT=7890
+EnvironmentFile=-%h/.config/kmac-pilot/env
+
+# Python venv
+ExecStartPre=/bin/bash -c 'test -d %h/projects/KMAC-CLI/server/.venv || python3 -m venv %h/projects/KMAC-CLI/server/.venv'
+ExecStartPre=%h/projects/KMAC-CLI/server/.venv/bin/pip install -q -r %h/projects/KMAC-CLI/server/requirements.txt
+ExecStart=%h/projects/KMAC-CLI/server/.venv/bin/python3 %h/projects/KMAC-CLI/server/app.py
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/kmac-pilot
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kmac-pilot
+
+[Install]
+WantedBy=multi-user.target

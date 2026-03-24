@@ -24,7 +24,7 @@ Type `kmac` and you get this:
     ██╔═██╗  ██║╚██╔╝██║ ██╔══██║ ██║
     ██║  ██╗ ██║ ╚═╝ ██║ ██║  ██║ ╚██████╗
     ╚═╝  ╚═╝ ╚═╝     ╚═╝ ╚═╝  ╚═╝  ╚═════╝
-        portable macOS toolkit                       v2.7.0
+        portable macOS toolkit                       v2.8.0
 
   ┌ services ──────────────────────────────────────────┐
   │  ● Remote Terminal   ● Docker (8)   ○ ngrok        │
@@ -396,6 +396,48 @@ bash tests/run-tests.sh
 
 ---
 
+## Server Deployment
+
+The KMac Pilot server can be deployed three ways:
+
+### Quick Start (local)
+
+```bash
+kmac server start              # Auto-creates venv, installs deps, starts server
+kmac server status             # Health check + connection info
+kmac server token              # Show/copy the Bearer auth token
+kmac server logs -f            # Follow server logs
+```
+
+### Auto-Start Service
+
+```bash
+kmac server install            # launchd on macOS, systemd on Linux
+```
+
+- **macOS**: Installs a launchd agent that starts on login
+- **Linux**: Installs a systemd user service with security hardening (ProtectSystem, NoNewPrivileges, PrivateTmp)
+
+### Docker Compose (production)
+
+Full stack with TLS reverse proxy:
+
+```bash
+kmac server docker-up          # Starts pilot + vault + Caddy
+kmac server docker-down        # Stops everything
+```
+
+Services:
+| Service | Port | Description |
+|---------|------|-------------|
+| **pilot** | 7890 (internal) | aiohttp API + WebSocket server |
+| **vault** | 9999 (internal) | Encrypted secrets store (Fernet/AES) |
+| **caddy** | 443, 80 | TLS termination + reverse proxy |
+
+Configure your domain in `deploy/Caddyfile` for automatic Let's Encrypt TLS.
+
+---
+
 ## Architecture
 
 ```
@@ -484,8 +526,17 @@ KMac-CLI/
 │   ├── release             Version bump, git tag, and GitHub Release creator
 │   ├── aicoder             AICoder Enterprise Framework launcher (subagent support)
 │   ├── install-aicoder     AICoder global installer
+│   ├── server             Server lifecycle manager (start/stop/status/install)
 │   └── create-aicoder.sh   Create global 'aicoder' command
+├── deploy/
+│   ├── Caddyfile            Reverse proxy config (TLS termination)
+│   ├── com.kmac.pilot.plist macOS launchd service definition
+│   ├── kmac-pilot.service   Linux systemd service (security-hardened)
+│   └── kmac-vault.service   Docker vault systemd service
+├── docker-compose.yml       Full stack: pilot + vault + Caddy
 ├── server/
+│   ├── Dockerfile           Pilot API server container image
+│   ├── .dockerignore        Container build exclusions
 │   ├── app.py              aiohttp REST + WebSocket — auth, routing, WS
 │   ├── config.py           Token management, project dirs, host/port
 │   ├── session_manager.py  Multi-agent PTY streaming with ANSI stripping

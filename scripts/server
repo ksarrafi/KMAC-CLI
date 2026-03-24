@@ -1,0 +1,290 @@
+#!/bin/bash
+# server — Manage the KMac Pilot server lifecycle
+# Usage: server start|stop|restart|status|logs|install|token|docker-up|docker-down
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+[[ -z "${KMAC_PLATFORM_LOADED:-}" ]] && source "$SCRIPT_DIR/_platform.sh"
+
+SERVER_DIR="$SCRIPT_DIR/../server"
+VENV="$SERVER_DIR/.venv"
+CONFIG_DIR="$HOME/.config/kmac-pilot"
+RUN_DIR="$CONFIG_DIR/run"
+PID_FILE="$RUN_DIR/server.pid"
+LOG_FILE="$RUN_DIR/server.log"
+TOKEN_FILE="$CONFIG_DIR/server_token"
+DEPLOY_DIR="$SCRIPT_DIR/../deploy"
+
+_ensure_dirs() {
+    mkdir -p "$CONFIG_DIR" "$RUN_DIR"
+    chmod 700 "$CONFIG_DIR" "$RUN_DIR"
+}
+
+_ensure_venv() {
+    if [[ ! -d "$VENV" ]]; then
+        ui_info "Creating Python virtual environment..."
+        python3 -m venv "$VENV" || { ui_fail "Failed to create venv"; return 1; }
+    fi
+    "$VENV/bin/pip" install -q -r "$SERVER_DIR/requirements.txt" || { ui_fail "Failed to install deps"; return 1; }
+}
+
+_server_pid() {
+    local pid=""
+    [[ -f "$PID_FILE" ]] && read -r pid < "$PID_FILE" 2>/dev/null
+    [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+
+do_start() {
+    _ensure_dirs
+    local pid; pid=$(_server_pid)
+    if [[ -n "$pid" ]]; then
+        ui_warn "Server already running (PID $pid)"
+        return 0
+    fi
+
+    _ensure_venv || return 1
+
+    ui_info "Starting KMac Pilot server..."
+    nohup "$VENV/bin/python3" "$SERVER_DIR/app.py" >> "$LOG_FILE" 2>&1 &
+    local new_pid=$!
+    printf '%s\n' "$new_pid" > "$PID_FILE"
+    
+    sleep 1
+    if kill -0 "$new_pid" 2>/dev/null; then
+        local token; token=$(cat "$TOKEN_FILE" 2>/dev/null)
+        local host; host="${KMAC_HOST:-127.0.0.1}"
+        local port; port="${KMAC_PORT:-7890}"
+        ui_success "Server started (PID $new_pid)"
+        echo ""
+        echo "  URL:   http://${host}:${port}"
+        echo "  Token: ${token:0:8}..."
+        echo "  Logs:  $LOG_FILE"
+        echo ""
+    else
+        ui_fail "Server failed to start — check $LOG_FILE"
+        rm -f "$PID_FILE"
+        return 1
+    fi
+}
+
+do_stop() {
+    local pid; pid=$(_server_pid)
+    if [[ -z "$pid" ]]; then
+        ui_warn "Server not running"
+        rm -f "$PID_FILE"
+        return 0
+    fi
+    ui_info "Stopping server (PID $pid)..."
+    kill "$pid" 2>/dev/null
+    local i=0
+    while (( i < 10 )) && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.5
+        (( i++ ))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null
+    fi
+    rm -f "$PID_FILE"
+    ui_success "Server stopped"
+}
+
+do_restart() {
+    do_stop
+    sleep 1
+    do_start
+}
+
+do_status() {
+    local pid; pid=$(_server_pid)
+    if [[ -n "$pid" ]]; then
+        local host; host="${KMAC_HOST:-127.0.0.1}"
+        local port; port="${KMAC_PORT:-7890}"
+        ui_success "Server running (PID $pid)"
+        echo ""
+        echo "  URL:    http://${host}:${port}"
+        echo "  PID:    $pid"
+        echo "  Log:    $LOG_FILE"
+        echo "  Config: $CONFIG_DIR"
+        echo ""
+        # Check health
+        if command -v curl &>/dev/null; then
+            local resp; resp=$(curl -sf --max-time 3 "http://${host}:${port}/api/ping" 2>/dev/null)
+            if [[ -n "$resp" ]]; then
+                echo "  Health: OK"
+            else
+                echo "  Health: NOT RESPONDING"
+            fi
+        fi
+    else
+        ui_warn "Server not running"
+        rm -f "$PID_FILE"
+    fi
+}
+
+do_logs() {
+    local lines="${1:-50}"
+    if [[ ! -f "$LOG_FILE" ]]; then
+        ui_warn "No log file found at $LOG_FILE"
+        return 1
+    fi
+    if [[ "${1:-}" == "-f" || "${1:-}" == "follow" ]]; then
+        tail -f "$LOG_FILE"
+    else
+        tail -n "$lines" "$LOG_FILE"
+    fi
+}
+
+do_token() {
+    _ensure_dirs
+    if [[ -f "$TOKEN_FILE" ]]; then
+        local token; token=$(cat "$TOKEN_FILE")
+        echo "$token"
+        if command -v pbcopy &>/dev/null; then
+            echo -n "$token" | pbcopy
+            ui_info "Token copied to clipboard"
+        elif command -v xclip &>/dev/null; then
+            echo -n "$token" | xclip -selection clipboard
+            ui_info "Token copied to clipboard"
+        fi
+    else
+        ui_warn "No token found — start the server first"
+    fi
+}
+
+do_install_service() {
+    _ensure_dirs
+    if [[ "$KMAC_OS" == "macos" ]]; then
+        _install_launchd
+    else
+        _install_systemd
+    fi
+}
+
+_install_launchd() {
+    local plist_src="$DEPLOY_DIR/com.kmac.pilot.plist"
+    local plist_dest="$HOME/Library/LaunchAgents/com.kmac.pilot.plist"
+    
+    if [[ ! -f "$plist_src" ]]; then
+        ui_fail "Plist not found: $plist_src"
+        return 1
+    fi
+    
+    # Stop existing service if loaded
+    launchctl bootout "gui/$(id -u)/com.kmac.pilot" 2>/dev/null || true
+    
+    # Update paths in plist to match current install
+    local kmac_dir; kmac_dir="$(cd "$SCRIPT_DIR/.." && pwd)"
+    sed "s|\$HOME/projects/KMAC-CLI|$kmac_dir|g" "$plist_src" > "$plist_dest"
+    
+    launchctl bootstrap "gui/$(id -u)" "$plist_dest"
+    ui_success "Installed launchd service"
+    echo ""
+    echo "  The server will start automatically on login."
+    echo "  Control with:"
+    echo "    kmac server start    — start now"
+    echo "    kmac server stop     — stop"
+    echo "    kmac server status   — check status"
+    echo ""
+}
+
+_install_systemd() {
+    local service_src="$DEPLOY_DIR/kmac-pilot.service"
+    local service_dest="$HOME/.config/systemd/user/kmac-pilot.service"
+    
+    if [[ ! -f "$service_src" ]]; then
+        ui_fail "Service file not found: $service_src"
+        return 1
+    fi
+    
+    mkdir -p "$HOME/.config/systemd/user"
+    
+    # Update paths in service file
+    local kmac_dir; kmac_dir="$(cd "$SCRIPT_DIR/.." && pwd)"
+    sed "s|%h/projects/KMAC-CLI|$kmac_dir|g" "$service_src" > "$service_dest"
+    
+    systemctl --user daemon-reload
+    systemctl --user enable kmac-pilot.service
+    ui_success "Installed systemd user service"
+    echo ""
+    echo "  Start:   systemctl --user start kmac-pilot"
+    echo "  Stop:    systemctl --user stop kmac-pilot"
+    echo "  Status:  systemctl --user status kmac-pilot"
+    echo "  Logs:    journalctl --user -u kmac-pilot -f"
+    echo ""
+    echo "  Enable linger for auto-start without login:"
+    echo "    sudo loginctl enable-linger $(whoami)"
+    echo ""
+}
+
+do_docker_up() {
+    local compose_file="$SCRIPT_DIR/../docker-compose.yml"
+    if [[ ! -f "$compose_file" ]]; then
+        ui_fail "docker-compose.yml not found"
+        return 1
+    fi
+    
+    ui_info "Starting KMac stack with Docker Compose..."
+    docker compose -f "$compose_file" up -d
+    local rc=$?
+    if (( rc == 0 )); then
+        ui_success "KMac stack started"
+        echo ""
+        docker compose -f "$compose_file" ps
+        echo ""
+    else
+        ui_fail "Failed to start stack"
+        return 1
+    fi
+}
+
+do_docker_down() {
+    local compose_file="$SCRIPT_DIR/../docker-compose.yml"
+    if [[ ! -f "$compose_file" ]]; then
+        ui_fail "docker-compose.yml not found"
+        return 1
+    fi
+    
+    ui_info "Stopping KMac stack..."
+    docker compose -f "$compose_file" down
+    ui_success "Stack stopped"
+}
+
+do_help() {
+    cat <<'HELP'
+KMac Pilot Server Management
+
+Usage: kmac server <command>
+
+Commands:
+  start         Start the server (foreground venv mode)
+  stop          Stop the server
+  restart       Restart the server
+  status        Show server status + health check
+  logs [N|-f]   Show last N log lines (default 50), or follow with -f
+  token         Show/copy the auth token
+
+  install       Install as a system service (launchd on macOS, systemd on Linux)
+
+  docker-up     Start full stack via Docker Compose (server + vault + Caddy)
+  docker-down   Stop Docker Compose stack
+
+Environment:
+  KMAC_HOST     Bind address (default: 127.0.0.1)
+  KMAC_PORT     Port number (default: 7890)
+HELP
+}
+
+# ─── CLI Router ─────────────────────────────────────────────────────────────
+case "${1:-}" in
+    start)       do_start ;;
+    stop)        do_stop ;;
+    restart)     do_restart ;;
+    status)      do_status ;;
+    logs)        shift; do_logs "$@" ;;
+    token)       do_token ;;
+    install)     do_install_service ;;
+    docker-up)   do_docker_up ;;
+    docker-down) do_docker_down ;;
+    help|--help|-h|"") do_help ;;
+    *)           ui_fail "Unknown command: $1"; do_help; exit 1 ;;
+esac

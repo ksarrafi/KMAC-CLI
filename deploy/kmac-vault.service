@@ -1,0 +1,22 @@
+[Unit]
+Description=KMac Docker Vault
+Documentation=https://github.com/ksarrafi/KMAC-CLI
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/docker stop kmac-vault
+ExecStartPre=-/usr/bin/docker rm kmac-vault
+ExecStart=/usr/bin/docker run --name kmac-vault \
+    --restart=unless-stopped \
+    -v kmac-vault-data:/vault/data \
+    --network=host \
+    kmac-vault:latest
+ExecStop=/usr/bin/docker stop kmac-vault
+
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -150,7 +150,25 @@ kmac pilot config               # Telegram bot + project directories
 brew install bat fzf tmux ttyd ngrok caddy qrencode
 ```
 
-API server:
+## Server Deployment
+
+```bash
+# Quick start (local, no Docker)
+kmac server start              # Start the Pilot API server
+kmac server status             # Check health + PID
+kmac server logs -f            # Follow server logs
+kmac server token              # Show/copy auth token
+kmac server stop               # Stop the server
+
+# Install as auto-start service
+kmac server install            # launchd on macOS, systemd on Linux
+
+# Docker Compose (full stack: server + vault + Caddy TLS proxy)
+kmac server docker-up          # Start all containers
+kmac server docker-down        # Stop all containers
+```
+
+API server (manual):
 ```bash
 cd server && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```

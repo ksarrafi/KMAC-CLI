@@ -1,0 +1,60 @@
+services:
+  pilot:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: kmac-pilot
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7890:7890"
+    environment:
+      - KMAC_HOST=0.0.0.0
+      - KMAC_PORT=7890
+    volumes:
+      - pilot-config:/app/.config/kmac-pilot
+      - ${KMAC_PROJECTS_DIR:-~/Projects}:/projects:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:7890/api/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - kmac-net
+
+  vault:
+    build:
+      context: ./server/vault
+      dockerfile: Dockerfile
+    container_name: kmac-vault
+    restart: unless-stopped
+    volumes:
+      - vault-data:/vault/data
+    networks:
+      - kmac-net
+    # Internal only — not exposed to host
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: kmac-caddy
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - pilot
+    networks:
+      - kmac-net
+
+volumes:
+  pilot-config:
+  vault-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  kmac-net:
+    driver: bridge

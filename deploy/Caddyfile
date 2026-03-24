@@ -1,0 +1,28 @@
+# KMac Pilot reverse proxy
+# Replace :443 with your domain for auto-TLS (e.g. pilot.example.com)
+# For local use, :443 with self-signed cert is fine
+:443 {
+    reverse_proxy pilot:7890
+
+    # WebSocket support
+    @ws {
+        path /ws
+    }
+    reverse_proxy @ws pilot:7890
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+
+    # Rate limiting (optional, uncomment if needed)
+    # rate_limit {remote.host} 100r/m
+
+    log {
+        output file /data/access.log
+        format json
+    }
+}

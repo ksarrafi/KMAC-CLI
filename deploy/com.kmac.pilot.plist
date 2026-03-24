@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.kmac.pilot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>
+            KMAC_DIR="$HOME/projects/KMAC-CLI"
+            VENV="$KMAC_DIR/server/.venv"
+            if [ ! -d "$VENV" ]; then
+                python3 -m venv "$VENV"
+                "$VENV/bin/pip" install -q -r "$KMAC_DIR/server/requirements.txt"
+            fi
+            exec "$VENV/bin/python3" "$KMAC_DIR/server/app.py"
+        </string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>KMAC_HOST</key>
+        <string>127.0.0.1</string>
+        <key>KMAC_PORT</key>
+        <string>7890</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- launchd captures stdout/stderr here only; application log: ~/.config/kmac-pilot/run/server.log -->
+    <key>StandardOutPath</key>
+    <string>/tmp/kmac-pilot.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/kmac-pilot.stderr.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>

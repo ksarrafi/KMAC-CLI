@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.8.0 — 2026-03-22
+
+### Server Deployment Infrastructure
+
+- **Docker Compose** — Full production stack (`docker-compose.yml`): Pilot API server, encrypted vault, Caddy reverse proxy with auto-TLS
+- **Server Dockerfile** — Python 3.12 Alpine image for the Pilot API with non-root user, health checks
+- **`kmac server` command** — Unified lifecycle management: start, stop, restart, status, logs, token, install, docker-up, docker-down
+- **macOS launchd service** — `com.kmac.pilot.plist` for auto-start on login via `kmac server install`
+- **Linux systemd service** — `kmac-pilot.service` with security hardening (ProtectSystem, NoNewPrivileges, PrivateTmp)
+- **Caddy reverse proxy** — TLS termination, WebSocket support, security headers, JSON logging
+- **Docker vault service** — Systemd unit for managing the vault container on Linux
+- **Documentation** — Deployment guide in README + QUICKSTART with all three deployment modes
+
 ## 2.7.0 — 2026-03-22
 
 ### Deep Security Hardening (5-round audit, zero remaining issues)
