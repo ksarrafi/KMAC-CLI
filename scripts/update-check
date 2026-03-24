@@ -97,7 +97,7 @@ run_checks() {
     printf "%s\n" "${updates[@]}" > "$CACHE_FILE"
     # If no updates, make sure cache is empty (not a file with one blank line)
     if (( ${#updates[@]} == 0 )); then
-        > "$CACHE_FILE"
+        : > "$CACHE_FILE"
     fi
     echo "${#updates[@]}"
 }
@@ -126,7 +126,7 @@ spin() {
         ((i++))
         sleep 0.1
     done
-    printf "\r  ${GREEN}✓${NC} Checking for updates... done\n"
+    printf '\r  %s✓%s Checking for updates... done\n' "$GREEN" "$NC"
 }
 
 # ─── Update Runner ────────────────────────────────────────────────────────

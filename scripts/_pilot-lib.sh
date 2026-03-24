@@ -5,12 +5,13 @@
 PILOT_DIR="${XDG_RUNTIME_DIR:-$HOME/.config/kmac-pilot/run}"
 PILOT_PID_FILE="$PILOT_DIR/bot.pid"
 PILOT_AGENT_PID="$PILOT_DIR/agent.pid"
-PILOT_AGENT_LOG="$PILOT_DIR/agent.log"
+export PILOT_AGENT_LOG="$PILOT_DIR/agent.log"
 PILOT_TASK_FILE="$PILOT_DIR/task.json"
-PILOT_OFFSET_FILE="$PILOT_DIR/update_offset"
+export PILOT_OFFSET_FILE="$PILOT_DIR/update_offset"
 PILOT_CONFIG="$HOME/.config/kmac-pilot/config.json"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_ui.sh
 source "$SCRIPT_DIR/_ui.sh" 2>/dev/null
 
 TELEGRAM_API="https://api.telegram.org/bot"

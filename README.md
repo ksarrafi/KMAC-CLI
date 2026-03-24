@@ -13,7 +13,7 @@
 
 ---
 
-KMac-CLI is a portable macOS & Linux toolkit that puts AI coding assistants, Docker infrastructure, storage management, and remote agent control behind a single interactive terminal menu — or as direct CLI commands. It's built entirely in Bash (3.2-compatible) with a Python API server and a native iOS companion app. Install via Homebrew with `brew install ksarrafi/tap/kmac` (after tapping `ksarrafi/tap`), or clone from GitHub as below.
+KMac-CLI is a portable macOS & Linux toolkit that puts AI coding assistants, Docker infrastructure, storage management, and remote agent control behind a single interactive terminal menu — or as direct CLI commands. It's built entirely in Bash (3.2-compatible) with a Python API server and a native iOS companion app. Install via Homebrew with `brew tap ksarrafi/kmac && brew install kmac`, or clone from GitHub as below.
 
 Type `kmac` and you get this:
 
@@ -24,7 +24,7 @@ Type `kmac` and you get this:
     ██╔═██╗  ██║╚██╔╝██║ ██╔══██║ ██║
     ██║  ██╗ ██║ ╚═╝ ██║ ██║  ██║ ╚██████╗
     ╚═╝  ╚═╝ ╚═╝     ╚═╝ ╚═╝  ╚═╝  ╚═════╝
-        portable macOS toolkit                       v2.8.0
+        portable macOS toolkit                       v2.9.0
 
   ┌ services ──────────────────────────────────────────┐
   │  ● Remote Terminal   ● Docker (8)   ○ ngrok        │
@@ -53,8 +53,8 @@ Every key is one keypress — no Enter needed. Or skip the menu entirely and use
 
 ```bash
 # Via Homebrew
-brew tap ksarrafi/tap https://github.com/ksarrafi/KMAC-CLI
-brew install ksarrafi/tap/kmac
+brew tap ksarrafi/kmac
+brew install kmac
 
 # From GitHub
 git clone https://github.com/ksarrafi/KMAC-CLI.git ~/Projects/KMac-CLI
@@ -355,9 +355,11 @@ Plugins can also declare lifecycle hooks via a header comment (comma-separated):
 # TOOLKIT_HOOKS: post-commit,on-startup
 ```
 
-**Plugin API v2 — lifecycle hooks.** Eleven hooks are available: `pre-commit`, `post-commit`, `pre-review`, `post-review`, `pre-deploy`, `post-deploy`, `on-error`, `on-startup`, `on-exit`, `session-start`, and `session-end`. They are wired into `aicommit`, `review`, and the toolkit main loop. Failed hooks log warnings and never block the main flow. See **`plugins/git-stats.sh`** for an example plugin that registers `post-commit` and `on-startup`.
+**Plugin API v2 — lifecycle hooks.** Eleven hooks are available: `pre-commit`, `post-commit`, `pre-review`, `post-review`, `pre-deploy`, `post-deploy`, `on-error`, `on-startup`, `on-exit`, `session-start`, and `session-end`. They are wired into `aicommit`, `review`, and the toolkit main loop. Failed hooks log warnings and never block the main flow. See **`plugins/REGISTRY.md`** for the full plugin catalog, hook reference, and authoring guide.
 
-Plugins also work as CLI subcommands: `kmac ssl-monitor` will find and execute `plugins/ssl-monitor` or `plugins/ssl-monitor.sh`.
+**Built-in plugins:** `git-stats` (repo insights), `git-guardian` (pre-commit secret scanning), `docker-notify` (container health alerts), `project-stats` (repo metrics), `tmux-session` (session manager), `cleanup` (system cleanup), `wifi-password`.
+
+Plugins also work as CLI subcommands: `kmac git-guardian` will find and execute `plugins/git-guardian.sh`.
 
 The AI Tool Builder (`kmac make`) generates plugins in this format automatically — describe what you want, iterate with AI, and it installs the result as a plugin with a menu key or as a script with a CLI subcommand.
 
@@ -393,6 +395,26 @@ The repo ships **60 smoke tests** across **eight test files**, driven by a **lig
 ```bash
 bash tests/run-tests.sh
 ```
+
+---
+
+## Remote Access
+
+Access your KMac Pilot server from anywhere — on the road, from your phone, or another machine:
+
+```bash
+kmac remote-access setup       # Choose: Tailscale, Cloudflare, or ngrok
+kmac remote-access start       # Start the tunnel
+kmac remote-access url         # Print + copy the URL
+kmac remote-access qr          # QR code for iOS app connection
+kmac remote-access status      # Check tunnel health
+```
+
+| Method | Best For | Setup |
+|--------|----------|-------|
+| **Tailscale** | Always-on personal access | Mesh VPN, no port forwarding |
+| **Cloudflare** | Sharing with custom domain | Free tunnel, auto-TLS |
+| **ngrok** | Quick testing | One command, instant URL |
 
 ---
 
@@ -527,6 +549,7 @@ KMac-CLI/
 │   ├── aicoder             AICoder Enterprise Framework launcher (subagent support)
 │   ├── install-aicoder     AICoder global installer
 │   ├── server             Server lifecycle manager (start/stop/status/install)
+│   ├── remote-access      Secure remote access (Tailscale/Cloudflare/ngrok)
 │   └── create-aicoder.sh   Create global 'aicoder' command
 ├── deploy/
 │   ├── Caddyfile            Reverse proxy config (TLS termination)

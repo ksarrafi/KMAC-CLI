@@ -24,18 +24,22 @@ if [[ ! -d "$KMAC_CACHE_DIR" ]]; then mkdir -p "$KMAC_CACHE_DIR"; fi
 chmod 700 "$KMAC_CACHE_DIR" 2>/dev/null
 
 # ─── Shared UI (colors, title_box, pause) ─────────────────────────────────
+# shellcheck source=scripts/_ui.sh
 source "$SCRIPTS_DIR/_ui.sh"
 
 # ─── Vault (secret management) ───────────────────────────────────────────
+# shellcheck source=scripts/_vault.sh
 source "$SCRIPTS_DIR/_vault.sh" 2>/dev/null
 
 # Registry-backed secrets are exported lazily in main() so sourcing this file
 # for one-shot subcommands (e.g. kmac review) does not unlock/export everything at startup.
 
 # ─── AI Self-Healing ──────────────────────────────────────────────────────
+# shellcheck source=scripts/_ai-fix.sh
 source "$SCRIPTS_DIR/_ai-fix.sh" 2>/dev/null
 
 # ─── Plugin hooks (API v2) ────────────────────────────────────────────────
+# shellcheck source=scripts/_hooks.sh
 source "$SCRIPTS_DIR/_hooks.sh"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
@@ -179,8 +183,9 @@ animate_intro() {
     (( _INTRO_PLAYED )) && return
     _INTRO_PLAYED=1
 
-    local term_cols=$(tput cols 2>/dev/null || echo 80)
-    local term_rows=$(tput lines 2>/dev/null || echo 24)
+    local term_cols term_rows
+    term_cols=$(tput cols 2>/dev/null || echo 80)
+    term_rows=$(tput lines 2>/dev/null || echo 24)
     (( term_cols < 50 || term_rows < 14 )) && return
     tput civis 2>/dev/null || return
     clear
@@ -235,7 +240,7 @@ animate_intro() {
     printf "    \033[38;5;33m╚═╝  ╚═╝\033[0m \033[38;5;39m╚═╝     ╚═╝\033[0m \033[38;5;45m╚═╝  ╚═╝\033[0m  \033[38;5;49m╚═════╝\033[0m\n"
     echo ""
     sleep 0.2
-    printf "        \033[2mportable macOS toolkit\033[0m                       \033[2mv${VERSION}\033[0m\n"
+    printf '        \033[2mportable macOS toolkit\033[0m                       \033[2mv%s\033[0m\n' "$VERSION"
 
     sleep 0.8
     tput cnorm 2>/dev/null
@@ -328,8 +333,10 @@ do_docker() {
 }
 
 do_remote_terminal() {
+    # shellcheck source=scripts/remote-terminal.sh
     source "$SCRIPTS_DIR/remote-terminal.sh" 2>/dev/null
-    local status=$(check_rt)
+    local status
+    status=$(check_rt)
     title_box "Remote Terminal" "🖥"
     if [[ "$status" == "up" ]]; then
         local url
@@ -415,10 +422,11 @@ do_ask() {
 
 do_network() {
     title_box "Network Info" "🌐"
-    local lip=$(ipconfig getifaddr en0 2>/dev/null || echo "Not connected")
-    local pip=$(curl -sf --max-time 3 https://ifconfig.me 2>/dev/null || echo "Unavailable")
-    local wifi=$(/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I 2>/dev/null | awk '/ SSID/ {print $NF}')
-    local gw=$(netstat -rn 2>/dev/null | awk '/default.*en0/ {print $2; exit}')
+    local lip pip wifi gw
+    lip=$(ipconfig getifaddr en0 2>/dev/null || echo "Not connected")
+    pip=$(curl -sf --max-time 3 https://ifconfig.me 2>/dev/null || echo "Unavailable")
+    wifi=$(/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I 2>/dev/null | awk '/ SSID/ {print $NF}')
+    gw=$(netstat -rn 2>/dev/null | awk '/default.*en0/ {print $2; exit}')
     echo -e "  Local IP:   $lip"
     echo -e "  Public IP:  $pip"
     echo -e "  Wi-Fi:      ${wifi:-Unknown}"
@@ -437,7 +445,8 @@ do_health() {
     echo -e "  ${BOLD}Dependencies:${NC}"
     for dep in ttyd ngrok caddy qrencode tmux bat fzf git docker brew claude cursor; do
         if command -v "$dep" &>/dev/null; then
-            local ver=$("$dep" --version 2>/dev/null | head -1 | tr -d '\n')
+            local ver
+            ver=$("$dep" --version 2>/dev/null | head -1 | tr -d '\n')
             echo -e "    ${GREEN}✓${NC} $dep  ${DIM}${ver:0:40}${NC}"
         else
             echo -e "    ${RED}✗${NC} $dep"; ((issues++))
@@ -473,11 +482,32 @@ do_health() {
         || echo -e "    ${DIM}○${NC} Remote Terminal password not set"
     echo ""
     echo -e "  ${BOLD}Paths:${NC}"
-    [[ -d "$TOOLKIT_DIR" ]] && echo -e "    ${GREEN}✓${NC} Toolkit dir" || { echo -e "    ${RED}✗${NC} Toolkit dir missing"; ((issues++)); }
-    [[ -d "$SCRIPTS_DIR" ]] && echo -e "    ${GREEN}✓${NC} Scripts ($(ls "$SCRIPTS_DIR" | wc -l | tr -d ' '))" || { echo -e "    ${RED}✗${NC} Scripts missing"; ((issues++)); }
-    [[ -d "$PLUGINS_DIR" ]] && echo -e "    ${GREEN}✓${NC} Plugins ($(ls "$PLUGINS_DIR" 2>/dev/null | wc -l | tr -d ' '))" || echo -e "    ${DIM}○${NC} No plugins dir"
-    grep -q "alias toolkit=" ~/.zshrc 2>/dev/null \
-        && echo -e "    ${GREEN}✓${NC} .zshrc integrated" || { echo -e "    ${RED}✗${NC} .zshrc missing toolkit"; ((issues++)); }
+    local _n_scripts _n_plugins
+    if [[ -d "$TOOLKIT_DIR" ]]; then
+        echo -e "    ${GREEN}✓${NC} Toolkit dir"
+    else
+        echo -e "    ${RED}✗${NC} Toolkit dir missing"
+        ((issues++))
+    fi
+    if [[ -d "$SCRIPTS_DIR" ]]; then
+        _n_scripts=$(find "$SCRIPTS_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "    ${GREEN}✓${NC} Scripts (${_n_scripts})"
+    else
+        echo -e "    ${RED}✗${NC} Scripts missing"
+        ((issues++))
+    fi
+    if [[ -d "$PLUGINS_DIR" ]]; then
+        _n_plugins=$(find "$PLUGINS_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "    ${GREEN}✓${NC} Plugins (${_n_plugins})"
+    else
+        echo -e "    ${DIM}○${NC} No plugins dir"
+    fi
+    if grep -q "alias toolkit=" ~/.zshrc 2>/dev/null; then
+        echo -e "    ${GREEN}✓${NC} .zshrc integrated"
+    else
+        echo -e "    ${RED}✗${NC} .zshrc missing toolkit"
+        ((issues++))
+    fi
     echo ""
     (( issues == 0 )) && echo -e "  ${GREEN}${BOLD}All clear!${NC}" || echo -e "  ${YELLOW}${BOLD}$issues issue(s) found.${NC}"
     pause
@@ -489,7 +519,10 @@ do_aliases() {
     if [[ -f "$TOOLKIT_DIR/aliases.sh" ]]; then
         grep "^alias\|^[a-z_]*() " "$TOOLKIT_DIR/aliases.sh" | while IFS= read -r line; do
             if [[ "$line" == alias* ]]; then
-                local name="${line#alias }" key="${name%%=*}" val="${name#*=}"
+                local name key val
+                name="${line#alias }"
+                key="${name%%=*}"
+                val="${name#*=}"
                 val="${val//\"/}"; val="${val//\'/}"
                 echo -e "  ${GREEN}${key}${NC}  →  ${val}"
             else
@@ -592,6 +625,7 @@ welcome_wizard() {
     read -r -n1 -p "  Choose [1/2/3]: " _vault_choice; echo ""
 
     # Source the guided setup functions from secrets
+    # shellcheck source=scripts/secrets
     source "$SCRIPTS_DIR/secrets" _source_only 2>/dev/null
 
     case "$_vault_choice" in
@@ -794,7 +828,12 @@ if [[ $# -gt 0 ]]; then
         cask|cursoragent) exec bash "$SCRIPTS_DIR/cursoragent" "$@" ;;
         killport)   exec bash "$SCRIPTS_DIR/killport" "$@" ;;
         pilot)      exec bash "$SCRIPTS_DIR/pilot" "$@" ;;
-        server)     source "$SCRIPTS_DIR/server" ;;
+        server)     # shellcheck source=scripts/server
+                    source "$SCRIPTS_DIR/server" ;;
+        remote-access)
+            # Optional add-on; not present in all trees — shellcheck cannot resolve path
+            # shellcheck disable=SC1091
+            source "$SCRIPTS_DIR/remote-access" ;;
         dotbackup)  exec bash "$SCRIPTS_DIR/dotbackup" "$@" ;;
         update)     exec bash "$SCRIPTS_DIR/update-check" "$@" ;;
         doctor)     do_health ;;
@@ -809,7 +848,9 @@ if [[ $# -gt 0 ]]; then
             print_logo
             echo ""
             echo -e "  ${DIM}Installed: ${TOOLKIT_DIR}${NC}"
-            echo -e "  ${DIM}Scripts: $(ls "$SCRIPTS_DIR" 2>/dev/null | wc -l | tr -d ' ')  Plugins: $(ls "$PLUGINS_DIR" 2>/dev/null | wc -l | tr -d ' ')${NC}"
+            _v_scripts=$(find "$SCRIPTS_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+            _v_plugins=$(find "$PLUGINS_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+            echo -e "  ${DIM}Scripts: ${_v_scripts}  Plugins: ${_v_plugins}${NC}"
             ;;
         whatsnew|--whatsnew|changelog)
             echo -e "${BOLD}${CYAN}What's New — v${VERSION}${NC}"
@@ -839,6 +880,7 @@ if [[ $# -gt 0 ]]; then
             echo "    sessions              Resume a Claude Code session"
             echo "    pilot <cmd>           Remote AI agent via Telegram (start/stop/status)"
             echo "    server <cmd>          Pilot server lifecycle (start|stop|restart|status|logs|token|install|docker-up|down)"
+            echo "    remote-access <cmd>   Pilot remote access (setup|start|stop|restart|status|url|qr)"
             echo ""
             echo -e "  ${BOLD}Infra${NC}"
             echo "    docker [cmd]          Docker Manager (dashboard|health|disk|compose|mcp)"

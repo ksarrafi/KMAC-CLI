@@ -6,21 +6,21 @@
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
+export BLUE='\033[0;34m'
+export MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
-WHITE='\033[1;37m'
+export WHITE='\033[1;37m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-# 256-color palette for gradients
-C_BLUE='\033[38;5;33m'
-C_CYAN='\033[38;5;39m'
-C_TEAL='\033[38;5;45m'
-C_GREEN='\033[38;5;49m'
-C_MINT='\033[38;5;84m'
-C_ORANGE='\033[38;5;208m'
+# 256-color palette for gradients (exported for toolkit scripts that only read these)
+export C_BLUE='\033[38;5;33m'
+export C_CYAN='\033[38;5;39m'
+export C_TEAL='\033[38;5;45m'
+export C_GREEN='\033[38;5;49m'
+export C_MINT='\033[38;5;84m'
+export C_ORANGE='\033[38;5;208m'
 
 # ─── title_box — styled header for sub-features ─────────────────────────
 # Usage: title_box "Title" [emoji]

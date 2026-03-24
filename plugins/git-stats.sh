@@ -5,6 +5,7 @@
 # TOOLKIT_HOOKS: post-commit,on-startup
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
+# shellcheck source=../scripts/_ui.sh
 source "$SCRIPT_DIR/_ui.sh" 2>/dev/null
 
 _git_commits_today() {
@@ -13,7 +14,7 @@ _git_commits_today() {
 
 _git_commits_on_day_offset() {
     local i="$1" d
-    d=$(date -v-${i}d +%Y-%m-%d 2>/dev/null) || { echo 0; return; }
+    d=$(date -v-"${i}"d +%Y-%m-%d 2>/dev/null) || { echo 0; return; }
     git log --after="$d 00:00:00" --before="$d 23:59:59" --oneline 2>/dev/null | wc -l | tr -d ' '
 }
 

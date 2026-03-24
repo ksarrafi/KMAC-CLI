@@ -14,7 +14,7 @@ _KMAC_TMP="${HOME}/.cache/kmac"
 DRAFT_FILE="$_KMAC_TMP/toolmaker-draft.sh"
 
 G='\033[0;32m' Y='\033[0;33m' R='\033[0;31m' C='\033[0;36m'
-B='\033[1m' D='\033[2m' M='\033[0;35m' NC='\033[0m'
+B='\033[1m' D='\033[2m' NC='\033[0m'
 TOOL_NAME=""
 TOOL_DESC=""
 TOOL_TYPE=""  # plugin or script
@@ -49,7 +49,9 @@ gather_spec() {
                 TOOL_DESC+="$line"$'\n'
             fi
         done
-        TOOL_DESC=$(echo "$TOOL_DESC" | sed 's/[[:space:]]*$//')
+        while [[ "$TOOL_DESC" =~ [[:space:]]$ ]]; do
+            TOOL_DESC="${TOOL_DESC%?}"
+        done
     fi
 
     if [[ -z "$TOOL_DESC" ]]; then
@@ -89,7 +91,7 @@ generate_code() {
     _ensure_claude_auth || return 1
 
     local existing_tools
-    existing_tools=$(ls "$TOOLKIT_DIR/scripts" 2>/dev/null | tr '\n' ', ')
+    existing_tools=$(find "$TOOLKIT_DIR/scripts" -mindepth 1 -maxdepth 1 -type f 2>/dev/null | tr '\n' ', ')
 
     local context=""
     if [[ "$TOOL_TYPE" == "plugin" ]]; then
@@ -160,16 +162,16 @@ show_draft() {
 }
 
 syntax_check() {
-    local result
+    local result rc
     result=$(bash -n "$DRAFT_FILE" 2>&1)
-    if [[ $? -eq 0 ]]; then
+    rc=$?
+    if (( rc == 0 )); then
         echo -e "  ${G}✓${NC} Syntax check passed"
         return 0
-    else
-        echo -e "  ${R}✗${NC} Syntax error:"
-        echo "$result" | sed 's/^/    /'
-        return 1
     fi
+    echo -e "  ${R}✗${NC} Syntax error:"
+    while IFS= read -r _line; do echo "    $_line"; done <<< "$result"
+    return 1
 }
 
 iterate_loop() {

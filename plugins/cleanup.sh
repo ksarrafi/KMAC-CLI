@@ -4,6 +4,7 @@
 # TOOLKIT_KEY: 1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
+# shellcheck source=../scripts/_ui.sh
 source "$SCRIPT_DIR/_ui.sh" 2>/dev/null
 
 bytes_to_human() {
@@ -38,8 +39,6 @@ echo ""
 cache_size=$(dir_size ~/Library/Caches)
 log_size=$(du -sk /var/log/*.gz /var/log/*.bz2 /var/log/*.old 2>/dev/null | awk '{s+=$1} END {print (s ? s : 0) * 1024}')
 trash_size=$(dir_size ~/.Trash)
-brew_size=$(brew cleanup --dry-run 2>/dev/null | grep -c "Would remove" | awk '{print $1 * 5242880}')  # rough estimate
-
 # Docker — only check if running
 docker_size=0
 docker_label="not running"

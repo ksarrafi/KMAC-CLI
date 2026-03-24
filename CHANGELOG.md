@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.9.0 — 2026-03-22
+
+### Automated Release Pipeline
+- **GitHub Actions release workflow** — Tests on both macOS and Ubuntu, creates GitHub Release with auto-generated notes, computes tarball sha256, updates Homebrew formula in both the main repo and the tap repo automatically on tag push
+
+### ShellCheck Clean
+- **All 53 scripts pass ShellCheck** — Fixed quoting, unused variables, word splitting, and other warnings across the entire codebase
+- **`.shellcheckrc`** — Added for `source-path` resolution so `shellcheck -x` works from repo root
+
+### Plugin Ecosystem
+- **4 new plugins**: `docker-notify` (container health alerts), `git-guardian` (pre-commit secret scanning), `project-stats` (repo metrics), `tmux-session` (session manager)
+- **`plugins/REGISTRY.md`** — Plugin registry with documentation, hook reference, and authoring guide
+- **7 total plugins** with proper `TOOLKIT_*` headers and hook integration
+
+### Homebrew Tap
+- **`ksarrafi/homebrew-kmac`** — Dedicated Homebrew tap repository so `brew tap ksarrafi/kmac && brew install kmac` works
+- **Automated tap sync** — Release workflow pushes formula updates to the tap repo
+
+### Remote Access
+- **`kmac remote-access`** — Secure remote access to Pilot server from anywhere
+- **Three tunnel methods**: Tailscale (recommended, mesh VPN), Cloudflare Tunnel (custom domains), ngrok (quick testing)
+- **Commands**: setup, start, stop, restart, status, url, qr (QR code for iOS app)
+- Integrated into `kmac` CLI and installer
+
 ## 2.8.0 — 2026-03-22
 
 ### Server Deployment Infrastructure

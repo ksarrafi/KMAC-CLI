@@ -13,8 +13,6 @@ source "$SCRIPT_DIR/_auth-helper.sh"
 MODEL="claude-sonnet-4-6"
 PROMPT=""
 INTERACTIVE=false
-CONTEXT=""
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -m|--model) MODEL="$2"; shift 2 ;;

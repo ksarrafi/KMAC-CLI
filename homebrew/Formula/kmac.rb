@@ -4,13 +4,11 @@ class Kmac < Formula
   desc "Portable macOS & Linux dev toolkit with AI, Docker, secrets vault, and remote agent control"
   homepage "https://github.com/ksarrafi/KMAC-CLI"
   license "MIT"
-  version "2.8.0"
+  version "2.9.0"
 
-  # Stable tarball (update version, url, and sha256 when tagging a release).
-  # After pushing tag vX.Y.Z, run:
-  #   curl -sL "https://github.com/ksarrafi/KMAC-CLI/archive/refs/tags/vX.Y.Z.tar.gz" | shasum -a 256
-  url "https://github.com/ksarrafi/KMAC-CLI/archive/refs/tags/v2.8.0.tar.gz"
-  sha256 "7cc525ec2166b5a2d13a2448d9f8438d20b74db579f193d413a0b40f6c01bb23"
+  # Stable tarball — sha256 is updated automatically by the release workflow.
+  url "https://github.com/ksarrafi/KMAC-CLI/archive/refs/tags/v2.9.0.tar.gz"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
   head "https://github.com/ksarrafi/KMAC-CLI.git", branch: "main"
 

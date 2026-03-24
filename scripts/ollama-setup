@@ -264,7 +264,11 @@ do_models() {
             read -r -n1 -p "  > " ch; echo ""
             case "$ch" in
                 s|S)
-                    _ollama_ensure_server && ui_success "Server started" || ui_fail "Failed to start"
+                    if _ollama_ensure_server; then
+                        ui_success "Server started"
+                    else
+                        ui_fail "Failed to start"
+                    fi
                     sleep 1
                     ;;
                 *) return ;;
@@ -307,7 +311,11 @@ do_models() {
                 read -r -p "  Model to remove: " rm_model
                 if [[ -n "$rm_model" ]]; then
                     _validate_model_name "$rm_model" || { pause; continue; }
-                    ollama rm "$rm_model" 2>/dev/null && ui_success "Removed $rm_model" || ui_fail "Failed to remove $rm_model"
+                    if ollama rm "$rm_model" 2>/dev/null; then
+                        ui_success "Removed $rm_model"
+                    else
+                        ui_fail "Failed to remove $rm_model"
+                    fi
                 fi
                 pause
                 ;;

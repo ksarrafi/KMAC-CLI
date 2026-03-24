@@ -49,7 +49,7 @@ hooks_emit pre-review
 
 REPO=$(basename "$(git rev-parse --show-toplevel)")
 BRANCH=$(git branch --show-current)
-FILE_COUNT=$(echo "$DIFF" | grep '^diff --git' | wc -l | tr -d ' ')
+FILE_COUNT=$(printf '%s\n' "$DIFF" | grep -c '^diff --git' || true)
 
 # Choose review depth based on mode and size
 REVIEW_MODEL="claude-sonnet-4-6"

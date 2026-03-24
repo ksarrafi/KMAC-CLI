@@ -35,11 +35,11 @@ bar_graph() {
     local color="$GREEN"
     (( pct > 70 )) && color="$YELLOW"
     (( pct > 90 )) && color="$RED"
-    printf "${color}"
+    printf '%b' "$color"
     for (( i=0; i<filled; i++ )); do printf "█"; done
-    printf "${DIM}"
+    printf '%b' "$DIM"
     for (( i=0; i<empty; i++ )); do printf "░"; done
-    printf "${NC}"
+    printf '%b' "$NC"
 }
 
 dir_size_bytes() {
@@ -92,9 +92,6 @@ do_overview() {
     else
         echo -e "  ${GREEN}✓  Disk usage is healthy${NC}"
     fi
-
-    local purgeable
-    purgeable=$(df -H / 2>/dev/null | awk 'NR==2 {print $5}')
 
     # APFS purgeable space
     local apfs_purg
@@ -184,7 +181,8 @@ do_scan() {
     done
     rm -rf "$tmpdir"
 
-    IFS=$'\n' sorted=($(printf '%s\n' "${results[@]}" | sort -t'|' -k1 -rn)); unset IFS
+    local -a sorted=()
+    while IFS= read -r line; do sorted+=("$line"); done < <(printf '%s\n' "${results[@]}" | sort -t'|' -k1 -rn)
 
     if (( ${#sorted[@]} == 0 )); then
         echo -e "  ${DIM}No significant directories found.${NC}"
@@ -255,7 +253,8 @@ do_big_files() {
         local pid=$!
 
         while kill -0 "$pid" 2>/dev/null; do
-            local found=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
+            local found
+            found=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
             printf '\r\033[2K  \033[0;36m%s\033[0m \033[2m[%d/%d]\033[0m Scanning \033[1m%-20s\033[0m \033[0;33m%s found\033[0m ' \
                 "${_SPIN_CHARS[$i]}" "$dir_n" "$dir_total" "$short" "${found:-0}"
             i=$(( (i + 1) % _SPIN_N ))
@@ -264,7 +263,8 @@ do_big_files() {
         wait "$pid" 2>/dev/null
     done
 
-    local total_found=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
+    local total_found
+    total_found=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
     printf '\r\033[2K  \033[0;32m✓\033[0m Found \033[1m%s\033[0m files > %sMB\n' "${total_found:-0}" "$min_mb"
 
     local results
@@ -289,7 +289,8 @@ do_big_files() {
 
     i=0
     while kill -0 "$stat_pid" 2>/dev/null; do
-        local done_n=$(wc -l < "$sizefile" 2>/dev/null | tr -d ' ')
+        local done_n
+        done_n=$(wc -l < "$sizefile" 2>/dev/null | tr -d ' ')
         printf '\r\033[2K  \033[0;36m%s\033[0m Reading file sizes... \033[2m(%s/%s)\033[0m ' \
             "${_SPIN_CHARS[$i]}" "${done_n:-0}" "$total_found"
         i=$(( (i + 1) % _SPIN_N ))
@@ -304,7 +305,8 @@ do_big_files() {
     done < "$sizefile"
     rm -f "$sizefile"
 
-    IFS=$'\n' sorted=($(printf '%s\n' "${entries[@]}" | sort -t'|' -k1 -rn | head -30)); unset IFS
+    local -a sorted=()
+    while IFS= read -r line; do sorted+=("$line"); done < <(printf '%s\n' "${entries[@]}" | sort -t'|' -k1 -rn | head -30)
 
     # ── Phase 3: Categorize files ──
     local -a file_paths=() file_sizes=() file_cats=()
@@ -662,7 +664,8 @@ do_clean() {
     done
     rm -rf "$tmpdir"
 
-    IFS=$'\n' sorted=($(printf '%s\n' "${scan_results[@]}" | sort -t'|' -k1 -rn)); unset IFS
+    local -a sorted=()
+    while IFS= read -r line; do sorted+=("$line"); done < <(printf '%s\n' "${scan_results[@]}" | sort -t'|' -k1 -rn)
 
     echo ""
     printf "  ${BOLD}%-12s  %-30s  %s${NC}\n" "Size" "Category" "Path"
@@ -708,7 +711,7 @@ do_clean() {
             local dd="$HOME/Library/Developer/Xcode/DerivedData"
             if [[ -d "$dd" ]]; then
                 echo ""
-                rm -rf "$dd"/* 2>/dev/null &
+                rm -rf "${dd:?}/"* 2>/dev/null &
                 spinner $! "Clearing DerivedData..."
             else
                 echo -e "\n  ${DIM}No DerivedData found${NC}"
@@ -970,14 +973,16 @@ do_node_modules() {
 
     local i=0
     while kill -0 "$nm_pid" 2>/dev/null; do
-        local found=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
+        local found
+        found=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
         printf '\r\033[2K  \033[0;36m%s\033[0m Scanning for node_modules... \033[1m%s found\033[0m ' \
             "${_SPIN_CHARS[$i]}" "${found:-0}"
         i=$(( (i + 1) % _SPIN_N ))
         sleep 0.1
     done
     wait "$nm_pid" 2>/dev/null
-    local nm_total=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
+    local nm_total
+    nm_total=$(wc -l < "$tmpfile" 2>/dev/null | tr -d ' ')
     printf '\r\033[2K  \033[0;32m✓\033[0m Found \033[1m%s\033[0m node_modules directories\n' "${nm_total:-0}"
 
     local results
@@ -1003,7 +1008,8 @@ do_node_modules() {
 
     i=0
     while kill -0 "$sz_pid" 2>/dev/null; do
-        local done_n=$(wc -l < "$sizefile" 2>/dev/null | tr -d ' ')
+        local done_n
+        done_n=$(wc -l < "$sizefile" 2>/dev/null | tr -d ' ')
         printf '\r\033[2K  \033[0;36m%s\033[0m Measuring sizes... \033[2m(%s/%s)\033[0m ' \
             "${_SPIN_CHARS[$i]}" "${done_n:-0}" "$nm_total"
         i=$(( (i + 1) % _SPIN_N ))
@@ -1020,7 +1026,8 @@ do_node_modules() {
     done < "$sizefile"
     rm -f "$sizefile"
 
-    IFS=$'\n' sorted=($(printf '%s\n' "${entries[@]}" | sort -t'|' -k1 -rn)); unset IFS
+    local -a sorted=()
+    while IFS= read -r line; do sorted+=("$line"); done < <(printf '%s\n' "${entries[@]}" | sort -t'|' -k1 -rn)
 
     local idx=1
     for entry in "${sorted[@]}"; do

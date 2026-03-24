@@ -10,7 +10,6 @@ AICODER_SCRIPT="$AICODER_DIR/aicoder_package/scripts/core/one-step-install.sh"
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
 BOLD='\033[1m'
@@ -19,7 +18,6 @@ NC='\033[0m'
 ICON_SUCCESS="✅"
 ICON_WARNING="⚠️"
 ICON_INFO="ℹ️"
-ICON_ROCKET="🚀"
 
 # Available subagents
 SUBAGENTS=(

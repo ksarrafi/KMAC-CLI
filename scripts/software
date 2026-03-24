@@ -318,7 +318,8 @@ _do_install() {
     local run_cmd="$install_cmd"
 
     if _is_installed "$check_cmd"; then
-        local ver=$(_get_version "$check_cmd")
+        local ver
+        ver=$(_get_version "$check_cmd")
         ui_success "$name is already installed ($ver)"
         return 0
     fi
@@ -345,7 +346,8 @@ _do_install() {
     if _dispatch_install "$run_cmd"; then
         echo ""
         if _is_installed "$check_cmd"; then
-            local ver=$(_get_version "$check_cmd")
+            local ver
+            ver=$(_get_version "$check_cmd")
             ui_success "$name installed successfully ($ver)"
         else
             ui_success "$name installed"
@@ -402,7 +404,8 @@ do_list() {
         fi
 
         if _is_installed "$SW_CHECK"; then
-            local ver=$(_get_version "$SW_CHECK")
+            local ver
+            ver=$(_get_version "$SW_CHECK")
             printf "   ${GREEN}●${NC}  %-14s ${DIM}%-32s %s${NC}\n" "$SW_NAME" "$SW_DESC" "$ver"
             ((installed++))
         else
@@ -420,7 +423,8 @@ do_list() {
 
 do_category_menu() {
     local cat="$1"
-    local cat_label=$(_cat_label "$cat")
+    local cat_label
+    cat_label=$(_cat_label "$cat")
 
     while true; do
         clear
@@ -439,7 +443,8 @@ do_category_menu() {
             urls+=("$SW_URL")
 
             if _is_installed "$SW_CHECK"; then
-                local ver=$(_get_version "$SW_CHECK")
+                local ver
+                ver=$(_get_version "$SW_CHECK")
                 printf "   ${GREEN}%2d${NC}) ${GREEN}●${NC} %-14s %s ${DIM}(%s)${NC}\n" "$idx" "$SW_NAME" "$SW_DESC" "$ver"
             else
                 printf "   ${GREEN}%2d${NC}) ${DIM}○${NC} %-14s %s\n" "$idx" "$SW_NAME" "$SW_DESC"
@@ -567,7 +572,13 @@ do_update() {
                     echo "$outdated" | head -40
                     echo ""
                     read -r -n1 -p "  Run dnf upgrade? (y/N) " yn; echo ""
-                    [[ "$yn" =~ ^[yY]$ ]] && { [[ "$(id -u)" -eq 0 ]] && dnf upgrade -y || sudo dnf upgrade -y; }
+                    if [[ "$yn" =~ ^[yY]$ ]]; then
+                        if [[ "$(id -u)" -eq 0 ]]; then
+                            dnf upgrade -y
+                        else
+                            sudo dnf upgrade -y
+                        fi
+                    fi
                 else
                     ui_success "dnf packages are up to date"
                 fi
@@ -578,7 +589,13 @@ do_update() {
                     pacman -Qu
                     echo ""
                     read -r -n1 -p "  Run pacman -Syu? (y/N) " yn; echo ""
-                    [[ "$yn" =~ ^[yY]$ ]] && { [[ "$(id -u)" -eq 0 ]] && pacman -Syu --noconfirm || sudo pacman -Syu --noconfirm; }
+                    if [[ "$yn" =~ ^[yY]$ ]]; then
+                        if [[ "$(id -u)" -eq 0 ]]; then
+                            pacman -Syu --noconfirm
+                        else
+                            sudo pacman -Syu --noconfirm
+                        fi
+                    fi
                 else
                     ui_success "pacman packages are up to date"
                 fi

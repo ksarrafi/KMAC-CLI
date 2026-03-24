@@ -4,8 +4,8 @@
 
 ```bash
 # Via Homebrew (easiest)
-brew tap ksarrafi/tap https://github.com/ksarrafi/KMAC-CLI
-brew install ksarrafi/tap/kmac
+brew tap ksarrafi/kmac
+brew install kmac
 
 # From GitHub
 git clone https://github.com/ksarrafi/KMAC-CLI.git ~/Projects/KMac-CLI

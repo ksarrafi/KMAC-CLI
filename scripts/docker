@@ -216,7 +216,6 @@ do_crashes() {
     echo -e "  Found ${RED}${count}${NC} exited container(s):"
     echo ""
 
-    local oom_count=0 err_count=0 clean_count=0
     local all_names=""
 
     echo "$exited" | _py "
@@ -317,8 +316,6 @@ do_disk() {
     title_box "Docker Disk Monitor" "💾"
     _docker_ok || return
 
-    local i=0
-
     # Host disk context
     echo -e "  ${BOLD}Host Disk${NC}"
     local disk_line
@@ -330,7 +327,7 @@ do_disk() {
     total=$(echo "$disk_line" | awk '{print $2}')
     avail=$(echo "$disk_line" | awk '{print $4}')
 
-    local bar_w=40 filled=$(( pct * 40 / 100 )) empty=$(( 40 - pct * 40 / 100 ))
+    local filled=$(( pct * 40 / 100 )) empty=$(( 40 - pct * 40 / 100 ))
     local bar="" bar_color="$GREEN"
     (( pct > 80 )) && bar_color="$RED"
     (( pct > 60 && pct <= 80 )) && bar_color="$YELLOW"

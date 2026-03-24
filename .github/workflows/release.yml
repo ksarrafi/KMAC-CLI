@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run test suite
+        run: ./tests/run-tests.sh
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
+
+      - name: Update Homebrew formula sha256
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sleep 10
+
+          TARBALL_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          SHA256=$(curl -sL "$TARBALL_URL" | sha256sum | cut -d' ' -f1)
+
+          if [ -z "$SHA256" ] || [ "$SHA256" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
+            echo "ERROR: Got empty tarball sha256"
+            exit 1
+          fi
+
+          echo "SHA256: $SHA256"
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          FORMULA="homebrew/Formula/kmac.rb"
+          sed -i "s/sha256 \"[^\"]*\"/sha256 \"$SHA256\"/" "$FORMULA"
+          sed -i "s/version \"[^\"]*\"/version \"$VERSION\"/" "$FORMULA"
+          sed -i "s|archive/refs/tags/v[^\"]*\.tar\.gz|archive/refs/tags/${GITHUB_REF_NAME}.tar.gz|" "$FORMULA"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout main
+          git add "$FORMULA"
+          git commit -m "Update Homebrew formula for ${GITHUB_REF_NAME}"
+          git push origin main
+
+      - name: Update Homebrew tap repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/ksarrafi/homebrew-kmac.git" /tmp/homebrew-kmac
+          cp homebrew/Formula/kmac.rb /tmp/homebrew-kmac/Formula/kmac.rb
+          cd /tmp/homebrew-kmac
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/kmac.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "Update formula for ${GITHUB_REF_NAME}"
+            git push origin main
+          else
+            echo "Tap formula already up to date"
+          fi

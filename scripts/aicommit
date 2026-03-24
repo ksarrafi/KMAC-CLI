@@ -47,7 +47,7 @@ fi
 
 if [[ -z "$DIFF" ]]; then echo "Nothing to commit."; exit 0; fi
 
-FILE_COUNT=$(echo "$DIFF" | grep '^diff --git' | wc -l | tr -d ' ')
+FILE_COUNT=$(printf '%s\n' "$DIFF" | grep -c '^diff --git' || true)
 
 # Auto-detect scope from changed paths
 SCOPE=""

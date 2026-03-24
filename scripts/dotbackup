@@ -13,7 +13,7 @@ ACTION="${1:-backup}"
 source "$SCRIPT_DIR/_ui.sh"
 
 # Aliases for backward compat within this script
-G="$GREEN" Y="$YELLOW" R="$RED" D="$DIM" B="$BOLD" N="$NC"
+G="$GREEN" Y="$YELLOW" D="$DIM" N="$NC"
 
 DOTFILES=("$HOME/.zshrc" "$HOME/.gitconfig" "$HOME/.gitignore_global" "$HOME/.vimrc" "$HOME/.tmux.conf")
 CLAUDE_ITEMS=("$HOME/.claude/agents" "$HOME/.claude/commands" "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json")
@@ -52,7 +52,8 @@ show_diff() {
     title_box "Dotfile Changes" "📋"
     local changes=0
     for f in "${DOTFILES[@]}"; do
-        local name=$(basename "$f")
+        local name
+        name=$(basename "$f")
         local backed="$BACKUP_DIR/$name"
         if [[ -f "$f" && -f "$backed" ]]; then
             if ! diff -q "$f" "$backed" &>/dev/null; then
@@ -74,7 +75,8 @@ do_backup() {
     title_box "Dotfile Backup" "💾"
     for f in "${DOTFILES[@]}"; do
         [[ -f "$f" ]] || continue
-        local name=$(basename "$f")
+        local name
+        name=$(basename "$f")
         local dest="$BACKUP_DIR/$name"
         local src="$f"
         # Scrub secrets from .zshrc before backup
@@ -95,7 +97,8 @@ do_backup() {
     mkdir -p "$BACKUP_DIR/claude"
     for item in "${CLAUDE_ITEMS[@]}"; do
         [[ -e "$item" ]] || continue
-        local name=$(basename "$item")
+        local name
+        name=$(basename "$item")
         if [[ -d "$item" ]]; then
             rsync -a --delete "$item/" "$BACKUP_DIR/claude/$name/" 2>/dev/null
         else
@@ -114,12 +117,14 @@ do_backup() {
 
 do_restore() {
     [[ -d "$BACKUP_DIR" ]] || { ui_fail "No backup found at $BACKUP_DIR"; return 1; }
-    local ts=$(date +%Y%m%d-%H%M%S)
+    local ts
+    ts=$(date +%Y%m%d-%H%M%S)
     title_box "Dotfile Restore" "📥"
     ui_warn "Current files will be saved as .bak-$ts"
     echo ""
     for f in "${DOTFILES[@]}"; do
-        local name=$(basename "$f")
+        local name
+        name=$(basename "$f")
         local src="$BACKUP_DIR/$name"
         [[ -f "$src" ]] || continue
         if [[ -f "$f" ]]; then
@@ -136,7 +141,8 @@ do_restore() {
         echo ""
         mkdir -p "$HOME/.claude"
         for item in "$BACKUP_DIR/claude"/*; do
-            local name=$(basename "$item")
+            local name
+        name=$(basename "$item")
             if [[ -d "$item" ]]; then
                 rsync -a "$item/" "$HOME/.claude/$name/" 2>/dev/null
             else

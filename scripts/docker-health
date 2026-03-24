@@ -46,7 +46,7 @@ _disk_badge() {
 _disk_color() {
     local pct=$1
     if (( pct >= 90 )); then   echo "$RED"
-    elif (( pct >= 85 )); then echo "\033[38;5;208m"  # orange
+    elif (( pct >= 85 )); then printf '%b\n' '\033[38;5;208m'  # orange
     elif (( pct >= 75 )); then echo "$YELLOW"
     else                       echo "$GREEN"
     fi
@@ -64,7 +64,8 @@ _disk_icon() {
 # ─── Collect all data ────────────────────────────────────────────────────
 
 collect_health() {
-    local ts=$(date +%s)
+    local ts
+    ts=$(date +%s)
 
     # System info
     local info
@@ -79,9 +80,9 @@ print(d.get('NCPU',0))
 print(f'{d.get(\"MemTotal\",0)/(1024**3):.1f}')
 " 2>/dev/null)
 
-    local running stopped paused img_count cpus mem_total
+    local running stopped paused img_count
     { read -r running; read -r stopped; read -r paused; read -r img_count
-      read -r cpus; read -r mem_total; } <<< "$info"
+      read -r _cpus; read -r _mem_total; } <<< "$info"
     running=${running:-0}; stopped=${stopped:-0}; paused=${paused:-0}
 
     # Host disk
@@ -181,6 +182,8 @@ print(f'{cpu:.1f}|{mem_pct:.1f}|{mem_h}')
     if $OUTPUT_JSON; then
         local tmp_containers="$_KMAC_TMP/dh-containers.$$"
         local tmp_alerts="$_KMAC_TMP/dh-alerts.$$"
+        local _dh_disk_status
+        _dh_disk_status=$(_disk_badge "$disk_pct")
         printf '%s' "$container_data" > "$tmp_containers"
         printf '%s\n' "${alerts[@]}" > "$tmp_alerts"
 
@@ -210,7 +213,7 @@ print(json.dumps({
     'docker': {'running': $running, 'stopped': $stopped, 'paused': $paused, 'images': ${img_count:-0}},
     'containers': containers,
     'alerts': alerts_list,
-    'disk_status': '$(_disk_badge $disk_pct)',
+    'disk_status': '$_dh_disk_status',
 }, indent=2))
 " 2>/dev/null
         rm -f "$tmp_containers" "$tmp_alerts"
@@ -222,12 +225,12 @@ print(json.dumps({
 
     # Disk status bar
     local disk_color
-    disk_color=$(_disk_color $disk_pct)
+    disk_color=$(_disk_color "$disk_pct")
     local icon
-    icon=$(_disk_icon $disk_pct)
+    icon=$(_disk_icon "$disk_pct")
     local badge
-    badge=$(_disk_badge $disk_pct)
-    local bar_w=30 filled=$(( disk_pct * 30 / 100 )) empty=$(( 30 - disk_pct * 30 / 100 ))
+    badge=$(_disk_badge "$disk_pct")
+    local filled=$(( disk_pct * 30 / 100 )) empty=$(( 30 - disk_pct * 30 / 100 ))
     local bar=""
     for (( b=0; b<filled; b++ )); do bar+="▇"; done
     for (( b=0; b<empty; b++ )); do bar+="░"; done
@@ -331,7 +334,7 @@ print(json.dumps({
 # ─── History ─────────────────────────────────────────────────────────────
 
 _save_history() {
-    local ts="$1" disk="$2" containers="$3" alerts="$4"
+    local hist_ts="$1" hist_disk="$2" hist_containers="$3" hist_n_alerts="$4"
     python3 -c "
 import json, os, time
 f = '$HISTORY_FILE'
@@ -342,7 +345,7 @@ if os.path.exists(f):
     except: pass
 cutoff = time.time() - 86400  # keep 24h
 data = [d for d in data if d.get('ts',0) > cutoff]
-data.append({'ts': $ts, 'disk_pct': $disk, 'containers': $containers, 'alerts': $alerts})
+data.append({'ts': $hist_ts, 'disk_pct': $hist_disk, 'containers': $hist_containers, 'alerts': $hist_n_alerts})
 with open(f, 'w') as fh: json.dump(data, fh)
 " 2>/dev/null
 }
@@ -433,7 +436,7 @@ else
         _pid=$!
         tput civis 2>/dev/null
         while kill -0 "$_pid" 2>/dev/null; do
-            printf "\r  ${CYAN}${_frames[$_fi]}${NC} Collecting Docker health data... "
+            printf '\r  %s%s%s %s' "$CYAN" "${_frames[$_fi]}" "$NC" "Collecting Docker health data... "
             _fi=$(( (_fi + 1) % ${#_frames[@]} ))
             sleep 0.08
         done

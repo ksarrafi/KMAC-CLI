@@ -6,6 +6,7 @@
 # Requires _auth-helper.sh to be sourced first for _claude_ask
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_auth-helper.sh
 source "$SCRIPT_DIR/_auth-helper.sh"
 
 RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[0;33m' CYAN='\033[0;36m'
@@ -50,7 +51,14 @@ ai_diagnose() {
     # Also note nvm versions available
     local nvm_versions=""
     if [[ -d "$HOME/.nvm/versions/node" ]]; then
-        nvm_versions=$(ls "$HOME/.nvm/versions/node" 2>/dev/null | tr '\n' ', ')
+        local -a _nvm_nodes=()
+        shopt -s nullglob
+        _nvm_nodes=( "$HOME/.nvm/versions/node"/* )
+        shopt -u nullglob
+        if (( ${#_nvm_nodes[@]} )); then
+            nvm_versions=$(printf '%s,' "${_nvm_nodes[@]##*/}")
+            nvm_versions="${nvm_versions%,}"
+        fi
         system_info+=", nvm nodes: $nvm_versions"
     fi
 
@@ -90,9 +98,7 @@ NOTE: optional one-line note if the user should know something"
         echo -e "   ${DIM}${note}${NC}"
     fi
 
-    AI_FIX_CMD=""
     if [[ -n "$fix" && "$fix" != "none" && "$fix" != "N/A" ]]; then
-        AI_FIX_CMD="$fix"
         echo ""
         echo -e "${BOLD}Suggested fix command:${NC}"
         echo -e "   ${GREEN}$ ${fix}${NC}"

@@ -1,0 +1,3 @@
+# Resolve dynamic sources like source "$SCRIPT_DIR/lib.sh" per script directory.
+# Works with: shellcheck -x <file>
+source-path=SCRIPTDIR

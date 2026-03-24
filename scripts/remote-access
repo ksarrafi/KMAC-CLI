@@ -1,0 +1,457 @@
+#!/bin/bash
+# remote-access — Secure remote access to KMac Pilot server
+# Usage: remote-access setup|start|stop|status|url
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+[[ -z "${KMAC_PLATFORM_LOADED:-}" ]] && source "$SCRIPT_DIR/_platform.sh"
+
+CONFIG_DIR="$HOME/.config/kmac-pilot"
+REMOTE_DIR="$CONFIG_DIR/remote"
+REMOTE_PID="$REMOTE_DIR/tunnel.pid"
+REMOTE_URL_FILE="$REMOTE_DIR/tunnel.url"
+PILOT_PORT="${KMAC_PORT:-7890}"
+
+_ensure_dirs() {
+    mkdir -p "$REMOTE_DIR"
+    chmod 700 "$REMOTE_DIR"
+}
+
+_tunnel_method() {
+    [[ -f "$REMOTE_DIR/method" ]] && cat "$REMOTE_DIR/method"
+}
+
+_tunnel_pid() {
+    local pid=""
+    [[ -f "$REMOTE_PID" ]] && read -r pid < "$REMOTE_PID" 2>/dev/null
+    [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+
+# ─── Setup ──────────────────────────────────────────────────────────────
+
+do_setup() {
+    _ensure_dirs
+    title_box "Remote Access Setup" "🌐"
+    echo ""
+    echo "  Choose a tunnel method:"
+    echo ""
+    echo "  1) Tailscale   — Mesh VPN, always-on, best for personal use (recommended)"
+    echo "  2) Cloudflare  — Free tunnel, custom domains, great for sharing"
+    echo "  3) ngrok       — Quick tunnels, easy setup, good for testing"
+    echo ""
+    printf "  Choice [1-3]: "
+    local choice
+    read -r choice
+    
+    case "$choice" in
+        1) _setup_tailscale ;;
+        2) _setup_cloudflare ;;
+        3) _setup_ngrok ;;
+        *) ui_fail "Invalid choice"; return 1 ;;
+    esac
+}
+
+_setup_tailscale() {
+    echo "tailscale" > "$REMOTE_DIR/method"
+    
+    if ! command -v tailscale &>/dev/null; then
+        ui_info "Installing Tailscale..."
+        if [[ "$KMAC_OS" == "macos" ]]; then
+            if command -v brew &>/dev/null; then
+                brew install --cask tailscale
+            else
+                ui_fail "Install Tailscale from https://tailscale.com/download/mac"
+                return 1
+            fi
+        else
+            curl -fsSL https://tailscale.com/install.sh -o /tmp/tailscale-install.sh
+            ui_warn "Review the Tailscale install script at /tmp/tailscale-install.sh"
+            printf "  Run it? [y/N]: "
+            local ans
+            read -r ans
+            if [[ "$ans" =~ ^[Yy] ]]; then
+                bash /tmp/tailscale-install.sh
+                rm -f /tmp/tailscale-install.sh
+            else
+                rm -f /tmp/tailscale-install.sh
+                return 1
+            fi
+        fi
+    fi
+    
+    ui_success "Tailscale installed"
+    echo ""
+    echo "  Next steps:"
+    echo "    1. Open Tailscale and sign in"
+    echo "    2. Run: kmac remote-access start"
+    echo "    3. From your phone/laptop on Tailscale, connect to:"
+    echo "       http://$(hostname):${PILOT_PORT}"
+    echo ""
+    echo "  Tailscale gives your Mac a stable IP accessible from any device"
+    echo "  on your Tailscale network — even over cellular."
+    echo ""
+}
+
+_setup_cloudflare() {
+    echo "cloudflare" > "$REMOTE_DIR/method"
+    
+    if ! command -v cloudflared &>/dev/null; then
+        ui_info "Installing cloudflared..."
+        if [[ "$KMAC_OS" == "macos" ]]; then
+            brew install cloudflared
+        else
+            platform_install cloudflared
+        fi
+    fi
+    
+    if ! command -v cloudflared &>/dev/null; then
+        ui_fail "cloudflared installation failed"
+        return 1
+    fi
+    
+    ui_success "cloudflared installed"
+    echo ""
+    echo "  For a quick tunnel (no account needed):"
+    echo "    kmac remote-access start"
+    echo ""
+    echo "  For a named tunnel with custom domain:"
+    echo "    cloudflared tunnel login"
+    echo "    cloudflared tunnel create kmac-pilot"
+    echo "    Then set your domain in $REMOTE_DIR/domain"
+    echo ""
+}
+
+_setup_ngrok() {
+    echo "ngrok" > "$REMOTE_DIR/method"
+    
+    if ! command -v ngrok &>/dev/null; then
+        ui_info "Installing ngrok..."
+        if [[ "$KMAC_OS" == "macos" ]]; then
+            brew install ngrok
+        else
+            platform_install ngrok
+        fi
+    fi
+    
+    if ! command -v ngrok &>/dev/null; then
+        ui_fail "ngrok installation failed"
+        return 1
+    fi
+    
+    ui_success "ngrok installed"
+    
+    # Check if auth token is set
+    if ! ngrok config check &>/dev/null 2>&1; then
+        echo ""
+        echo "  Get your auth token from https://dashboard.ngrok.com/get-started/your-authtoken"
+        printf "  Auth token: "
+        local token
+        read -r token
+        if [[ -n "$token" ]]; then
+            ngrok config add-authtoken "$token"
+        fi
+    fi
+    
+    echo ""
+    echo "  Run: kmac remote-access start"
+    echo ""
+}
+
+# ─── Start Tunnel ───────────────────────────────────────────────────────
+
+do_start() {
+    _ensure_dirs
+    local existing_pid
+    existing_pid=$(_tunnel_pid)
+    if [[ -n "$existing_pid" ]]; then
+        ui_warn "Tunnel already running (PID $existing_pid)"
+        do_status
+        return 0
+    fi
+    
+    local method
+    method=$(_tunnel_method)
+    if [[ -z "$method" ]]; then
+        ui_warn "No tunnel method configured. Running setup..."
+        do_setup || return 1
+        method=$(_tunnel_method)
+    fi
+    
+    case "$method" in
+        tailscale)  _start_tailscale ;;
+        cloudflare) _start_cloudflare ;;
+        ngrok)      _start_ngrok ;;
+        *) ui_fail "Unknown method: $method"; return 1 ;;
+    esac
+}
+
+_start_tailscale() {
+    # Tailscale doesn't need a tunnel process — it's always-on
+    # Just verify it's connected and show the IP
+    local ts_ip
+    ts_ip=$(tailscale ip -4 2>/dev/null)
+    if [[ -z "$ts_ip" ]]; then
+        ui_fail "Tailscale not connected. Open Tailscale app and sign in."
+        return 1
+    fi
+    
+    local ts_hostname
+    ts_hostname=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null)
+    
+    local url="http://${ts_ip}:${PILOT_PORT}"
+    echo "$url" > "$REMOTE_URL_FILE"
+    
+    # Serve via Tailscale Funnel (optional, if configured)
+    if tailscale funnel status &>/dev/null 2>&1; then
+        ui_info "Starting Tailscale Funnel on port $PILOT_PORT..."
+        nohup tailscale funnel "$PILOT_PORT" > "$REMOTE_DIR/funnel.log" 2>&1 &
+        printf '%s\n' "$!" > "$REMOTE_PID"
+        sleep 2
+        url="https://${ts_hostname}:443"
+        echo "$url" > "$REMOTE_URL_FILE"
+    fi
+    
+    ui_success "Remote access ready via Tailscale"
+    echo ""
+    echo "  Tailscale IP:  $ts_ip"
+    [[ -n "$ts_hostname" ]] && echo "  DNS name:      $ts_hostname"
+    echo "  Pilot URL:     $url"
+    echo ""
+    echo "  Connect from any device on your Tailscale network."
+    echo ""
+}
+
+_start_cloudflare() {
+    local domain_file="$REMOTE_DIR/domain"
+    
+    if [[ -f "$domain_file" ]]; then
+        # Named tunnel with custom domain
+        local domain
+        domain=$(cat "$domain_file")
+        ui_info "Starting Cloudflare tunnel for $domain..."
+        nohup cloudflared tunnel run kmac-pilot > "$REMOTE_DIR/cloudflare.log" 2>&1 &
+        printf '%s\n' "$!" > "$REMOTE_PID"
+        sleep 3
+        local url="https://$domain"
+        echo "$url" > "$REMOTE_URL_FILE"
+    else
+        # Quick tunnel (no account needed)
+        ui_info "Starting Cloudflare quick tunnel..."
+        nohup cloudflared tunnel --url "http://localhost:${PILOT_PORT}" > "$REMOTE_DIR/cloudflare.log" 2>&1 &
+        printf '%s\n' "$!" > "$REMOTE_PID"
+        
+        # Wait for URL to appear in logs
+        local url="" i=0
+        while (( i < 20 )) && [[ -z "$url" ]]; do
+            sleep 1
+            url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$REMOTE_DIR/cloudflare.log" 2>/dev/null | head -1)
+            (( i++ ))
+        done
+        
+        if [[ -n "$url" ]]; then
+            echo "$url" > "$REMOTE_URL_FILE"
+        fi
+    fi
+    
+    local final_url
+    final_url=$(cat "$REMOTE_URL_FILE" 2>/dev/null)
+    if [[ -n "$final_url" ]]; then
+        ui_success "Cloudflare tunnel active"
+        echo ""
+        echo "  URL: $final_url"
+        echo ""
+        echo "  Use this URL to connect from anywhere."
+        echo "  Protected by your KMac Pilot auth token."
+        echo ""
+    else
+        ui_fail "Tunnel may still be starting. Check: kmac remote-access status"
+    fi
+}
+
+_start_ngrok() {
+    ui_info "Starting ngrok tunnel on port $PILOT_PORT..."
+    nohup ngrok http "$PILOT_PORT" --log=stdout > "$REMOTE_DIR/ngrok.log" 2>&1 &
+    printf '%s\n' "$!" > "$REMOTE_PID"
+    
+    # Wait for ngrok API
+    local url="" i=0
+    while (( i < 15 )) && [[ -z "$url" ]]; do
+        sleep 1
+        url=$(curl -sf http://127.0.0.1:4040/api/tunnels 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for t in data.get('tunnels', []):
+    if t.get('proto') == 'https':
+        print(t['public_url'])
+        break
+" 2>/dev/null)
+        (( i++ ))
+    done
+    
+    if [[ -n "$url" ]]; then
+        echo "$url" > "$REMOTE_URL_FILE"
+        ui_success "ngrok tunnel active"
+        echo ""
+        echo "  URL: $url"
+        echo ""
+        echo "  Connect from anywhere using this URL."
+        echo "  Protected by your KMac Pilot auth token."
+        echo ""
+    else
+        ui_fail "ngrok may still be starting. Check: kmac remote-access status"
+    fi
+}
+
+# ─── Stop ───────────────────────────────────────────────────────────────
+
+do_stop() {
+    local pid
+    pid=$(_tunnel_pid)
+    if [[ -z "$pid" ]]; then
+        ui_info "No tunnel running"
+        rm -f "$REMOTE_PID" "$REMOTE_URL_FILE"
+        return 0
+    fi
+    
+    ui_info "Stopping tunnel (PID $pid)..."
+    kill "$pid" 2>/dev/null
+    local i=0
+    while (( i < 10 )) && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.5
+        (( i++ ))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null
+    fi
+    
+    rm -f "$REMOTE_PID" "$REMOTE_URL_FILE"
+    ui_success "Tunnel stopped"
+}
+
+# ─── Status ─────────────────────────────────────────────────────────────
+
+do_status() {
+    local method
+    method=$(_tunnel_method)
+    local pid
+    pid=$(_tunnel_pid)
+    local url
+    url=$(cat "$REMOTE_URL_FILE" 2>/dev/null)
+    
+    title_box "Remote Access Status" "📡"
+    echo ""
+    echo "  Method:  ${method:-not configured}"
+    
+    if [[ "$method" == "tailscale" ]]; then
+        local ts_ip
+        ts_ip=$(tailscale ip -4 2>/dev/null)
+        local ts_status
+        ts_status=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('BackendState','unknown'))" 2>/dev/null)
+        echo "  Status:  ${ts_status:-unknown}"
+        echo "  IP:      ${ts_ip:-not connected}"
+        [[ -n "$ts_ip" ]] && echo "  URL:     http://${ts_ip}:${PILOT_PORT}"
+    elif [[ -n "$pid" ]]; then
+        echo "  Status:  running (PID $pid)"
+        [[ -n "$url" ]] && echo "  URL:     $url"
+    else
+        echo "  Status:  stopped"
+    fi
+    echo ""
+}
+
+# ─── URL ────────────────────────────────────────────────────────────────
+
+do_url() {
+    local url
+    url=$(cat "$REMOTE_URL_FILE" 2>/dev/null)
+    
+    if [[ "$(_tunnel_method)" == "tailscale" ]]; then
+        local ts_ip
+        ts_ip=$(tailscale ip -4 2>/dev/null)
+        if [[ -n "$ts_ip" ]]; then
+            url="http://${ts_ip}:${PILOT_PORT}"
+        fi
+    fi
+    
+    if [[ -n "$url" ]]; then
+        echo "$url"
+        if command -v pbcopy &>/dev/null; then
+            echo -n "$url" | pbcopy
+            ui_info "URL copied to clipboard"
+        elif command -v xclip &>/dev/null; then
+            echo -n "$url" | xclip -selection clipboard
+            ui_info "URL copied to clipboard"
+        fi
+    else
+        ui_warn "No active tunnel. Run: kmac remote-access start"
+        return 1
+    fi
+}
+
+# ─── QR Code ────────────────────────────────────────────────────────────
+
+do_qr() {
+    local url
+    url=$(cat "$REMOTE_URL_FILE" 2>/dev/null)
+    if [[ "$(_tunnel_method)" == "tailscale" ]]; then
+        local ts_ip
+        ts_ip=$(tailscale ip -4 2>/dev/null)
+        [[ -n "$ts_ip" ]] && url="http://${ts_ip}:${PILOT_PORT}"
+    fi
+    
+    if [[ -z "$url" ]]; then
+        ui_warn "No active tunnel"
+        return 1
+    fi
+    
+    local token
+    token=$(cat "$CONFIG_DIR/server_token" 2>/dev/null)
+    local connect_url="${url}?token=${token}"
+    
+    echo ""
+    echo "  Scan with KMac Pilot iOS app:"
+    echo ""
+    if command -v qrencode &>/dev/null; then
+        qrencode -t UTF8 "$connect_url"
+    else
+        echo "  $connect_url"
+        echo ""
+        ui_info "Install qrencode for QR display: brew install qrencode"
+    fi
+    echo ""
+}
+
+do_help() {
+    cat <<'HELP'
+KMac Remote Access — Secure tunnel to your Pilot server
+
+Usage: kmac remote-access <command>
+
+Commands:
+  setup         Configure tunnel method (Tailscale / Cloudflare / ngrok)
+  start         Start the tunnel
+  stop          Stop the tunnel
+  restart       Restart the tunnel
+  status        Show tunnel status and URL
+  url           Print and copy the tunnel URL
+  qr            Show QR code for iOS app connection
+
+Recommended: Tailscale for always-on personal access
+             Cloudflare for sharing with a custom domain
+             ngrok for quick testing
+HELP
+}
+
+# ─── CLI Router ─────────────────────────────────────────────────────────
+case "${1:-}" in
+    setup)   do_setup ;;
+    start)   do_start ;;
+    stop)    do_stop ;;
+    restart) do_stop; sleep 1; do_start ;;
+    status)  do_status ;;
+    url)     do_url ;;
+    qr)      do_qr ;;
+    help|--help|-h) do_help ;;
+    "")      do_status ;;
+    *)       ui_fail "Unknown command: $1"; do_help; exit 1 ;;
+esac

@@ -53,9 +53,9 @@ case "$(uname -s 2>/dev/null)" in
             esac
         fi
         if [[ "$KMAC_PKG_MGR" == unknown ]]; then
-            command -v apt-get &>/dev/null && { KMAC_DISTRO="ubuntu"; KMAC_PKG_MGR="apt"; }
-            command -v dnf &>/dev/null && { KMAC_DISTRO="fedora"; KMAC_PKG_MGR="dnf"; }
-            command -v pacman &>/dev/null && { KMAC_DISTRO="arch"; KMAC_PKG_MGR="pacman"; }
+            command -v apt-get &>/dev/null && { export KMAC_DISTRO="ubuntu"; KMAC_PKG_MGR="apt"; }
+            command -v dnf &>/dev/null && { export KMAC_DISTRO="fedora"; KMAC_PKG_MGR="dnf"; }
+            command -v pacman &>/dev/null && { export KMAC_DISTRO="arch"; KMAC_PKG_MGR="pacman"; }
         fi
         ;;
 esac

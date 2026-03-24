@@ -18,7 +18,6 @@ ICON_INFO=">"
 # ─── Get Toolkit Path ─────────────────────────────────────────────────────
 TOOLKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$TOOLKIT_DIR/scripts"
-ALIASES_FILE="$TOOLKIT_DIR/aliases.sh"
 ENV_TEMPLATE="$TOOLKIT_DIR/env.template"
 ZSHRC_FILE="$HOME/.zshrc"
 BASHRC_FILE="$HOME/.bashrc"
@@ -28,9 +27,8 @@ echo -e "${BOLD}${CYAN}Installing KMac Toolkit...${NC}"
 echo ""
 
 # ─── 1. Check for iCloud Drive ────────────────────────────────────────────
-# Detect install method
-ICLOUD_GLOB=~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/toolkit
-if compgen -G "$ICLOUD_GLOB" &>/dev/null; then
+# Detect install method (glob expanded by compgen, not stored in a variable — SC2125)
+if compgen -G "$HOME/Library/CloudStorage/iCloudDrive"*/com~apple~CloudDocs/Scripts/toolkit &>/dev/null; then
     INSTALL_MODE="icloud"
     echo -e "${GREEN}${ICON_SUCCESS} iCloud Drive detected — syncs across all Macs${NC}"
 else
@@ -42,7 +40,7 @@ fi
 echo -e "${CYAN}${ICON_INFO} Making scripts executable...${NC}"
 chmod +x "$TOOLKIT_DIR/toolkit.sh" 2>/dev/null || true
 chmod +x "$TOOLKIT_DIR/install.sh" 2>/dev/null || true
-for script in _ui.sh _vault.sh _auth-helper.sh _ai-fix.sh _hooks.sh _platform.sh _pilot-lib.sh _pilot-bot.sh ask review aicommit sessions project cursoragent claudeme killport pilot server dotbackup update-check toolmaker secrets setup-mac release software ollama-setup docker docker-health storage remote-terminal.sh aicoder install-aicoder create-aicoder.sh; do
+for script in _ui.sh _vault.sh _auth-helper.sh _ai-fix.sh _hooks.sh _platform.sh _pilot-lib.sh _pilot-bot.sh ask review aicommit sessions project cursoragent claudeme killport pilot server remote-access dotbackup update-check toolmaker secrets setup-mac release software ollama-setup docker docker-health storage remote-terminal.sh aicoder install-aicoder create-aicoder.sh; do
     [[ -f "$SCRIPTS_DIR/$script" ]] && chmod +x "$SCRIPTS_DIR/$script"
 done
 echo -e "${GREEN}${ICON_SUCCESS} Scripts are executable${NC}"
@@ -64,12 +62,14 @@ KMAC_ALIAS="alias kmac='toolkit'"
 if [[ -f "$ZSHRC_FILE" ]]; then
     # Check if toolkit alias already exists
     if ! grep -q "alias toolkit=" "$ZSHRC_FILE"; then
-        echo "" >> "$ZSHRC_FILE"
-        echo "# KMac Toolkit" >> "$ZSHRC_FILE"
-        echo "$TOOLKIT_ALIAS" >> "$ZSHRC_FILE"
-        echo "$KMAC_ALIAS" >> "$ZSHRC_FILE"
-        echo "$ALIAS_EXPORT" >> "$ZSHRC_FILE"
-        echo "$ENV_SOURCE" >> "$ZSHRC_FILE"
+        {
+            echo ""
+            echo "# KMac Toolkit"
+            echo "$TOOLKIT_ALIAS"
+            echo "$KMAC_ALIAS"
+            echo "$ALIAS_EXPORT"
+            echo "$ENV_SOURCE"
+        } >> "$ZSHRC_FILE"
         echo -e "${GREEN}${ICON_SUCCESS} Added toolkit + kmac aliases to .zshrc${NC}"
     else
         if ! grep -q "alias kmac=" "$ZSHRC_FILE"; then
@@ -88,12 +88,14 @@ echo -e "${CYAN}${ICON_INFO} Setting up .bashrc...${NC}"
 
 if [[ -f "$BASHRC_FILE" ]]; then
     if ! grep -q "alias toolkit=" "$BASHRC_FILE"; then
-        echo "" >> "$BASHRC_FILE"
-        echo "# KMac Toolkit" >> "$BASHRC_FILE"
-        echo "$TOOLKIT_ALIAS" >> "$BASHRC_FILE"
-        echo "$KMAC_ALIAS" >> "$BASHRC_FILE"
-        echo "$ALIAS_EXPORT" >> "$BASHRC_FILE"
-        echo "$ENV_SOURCE" >> "$BASHRC_FILE"
+        {
+            echo ""
+            echo "# KMac Toolkit"
+            echo "$TOOLKIT_ALIAS"
+            echo "$KMAC_ALIAS"
+            echo "$ALIAS_EXPORT"
+            echo "$ENV_SOURCE"
+        } >> "$BASHRC_FILE"
         echo -e "${GREEN}${ICON_SUCCESS} Added toolkit + kmac aliases to .bashrc${NC}"
     else
         if ! grep -q "alias kmac=" "$BASHRC_FILE"; then
@@ -111,7 +113,9 @@ fi
 echo -e "${CYAN}${ICON_INFO} Checking PATH for ~/bin...${NC}"
 
 if [[ -f "$ZSHRC_FILE" ]]; then
-    if ! grep -q "~/bin:.*PATH\|HOME/bin:.*PATH" "$ZSHRC_FILE"; then
+    if ! grep -qE "\$HOME/bin|~/bin" "$ZSHRC_FILE"; then
+        # Literal line for the user's rc file — must not expand here
+        # shellcheck disable=SC2016
         echo 'export PATH="$HOME/bin:$PATH"' >> "$ZSHRC_FILE"
         echo -e "${GREEN}${ICON_SUCCESS} Added ~/bin to PATH in .zshrc${NC}"
     else
@@ -124,7 +128,7 @@ echo -e "${CYAN}${ICON_INFO} Creating symlinks in ~/bin...${NC}"
 
 mkdir -p "$HOME/bin"
 
-for script in aicoder claudeme remote-terminal.sh ask review aicommit sessions project cursoragent killport pilot server dotbackup update-check toolmaker secrets setup-mac release software ollama-setup; do
+for script in aicoder claudeme remote-terminal.sh ask review aicommit sessions project cursoragent killport pilot server remote-access dotbackup update-check toolmaker secrets setup-mac release software ollama-setup; do
     if [[ -f "$SCRIPTS_DIR/$script" ]]; then
         if [[ ! -e "$HOME/bin/$script" ]]; then
             ln -s "$SCRIPTS_DIR/$script" "$HOME/bin/$script"

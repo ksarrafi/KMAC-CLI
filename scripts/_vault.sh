@@ -17,6 +17,7 @@
 #   vault_export_all                  → exports all known mappings
 
 _VAULT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_platform.sh
 [[ -z "${KMAC_PLATFORM_LOADED:-}" ]] && source "$_VAULT_SCRIPT_DIR/_platform.sh"
 
 VAULT_DIR="${KMAC_VAULT_DIR:-$HOME/.config/kmac}"
@@ -327,8 +328,7 @@ _docker_get() {
     docker_vault_start || return 1
     local resp
     resp=$(curl -sf "$(_docker_vault_url)/get/$1" \
-        -H "Authorization: Bearer $(_docker_vault_token)" 2>/dev/null)
-    [[ $? -ne 0 ]] && return 1
+        -H "Authorization: Bearer $(_docker_vault_token)" 2>/dev/null) || return 1
     echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('value',''))" 2>/dev/null
 }
 
@@ -352,8 +352,7 @@ _docker_has() {
     docker_vault_start || return 1
     local resp
     resp=$(curl -sf "$(_docker_vault_url)/has/$1" \
-        -H "Authorization: Bearer $(_docker_vault_token)" 2>/dev/null)
-    [[ $? -ne 0 ]] && return 1
+        -H "Authorization: Bearer $(_docker_vault_token)" 2>/dev/null) || return 1
     echo "$resp" | python3 -c "
 import sys,json
 d = json.load(sys.stdin)
@@ -365,8 +364,7 @@ _docker_list() {
     docker_vault_start || return 0
     local resp
     resp=$(curl -sf "$(_docker_vault_url)/list" \
-        -H "Authorization: Bearer $(_docker_vault_token)" 2>/dev/null)
-    [[ $? -ne 0 ]] && return 0
+        -H "Authorization: Bearer $(_docker_vault_token)" 2>/dev/null) || return 0
     echo "$resp" | python3 -c "
 import sys,json
 for k in json.load(sys.stdin).get('keys',[]):

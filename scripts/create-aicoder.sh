@@ -8,7 +8,6 @@ set -euo pipefail
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
 BOLD='\033[1m'
@@ -40,7 +39,9 @@ create_global_aicoder() {
 
     mkdir -p "$HOME/bin"
     if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
+        # shellcheck disable=SC2016
         echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.zshrc" 2>/dev/null || true
+        # shellcheck disable=SC2016
         echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc" 2>/dev/null || true
         echo -e "${GREEN}${ICON_SUCCESS} Added ~/bin to PATH${NC}"
     fi
@@ -59,7 +60,6 @@ AICODER_LAUNCHER="$AICODER_DIR/aicoder_package/scripts/aicoder-launcher.sh"
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
 BOLD='\033[1m'
@@ -290,7 +290,9 @@ create_local_aicoder() {
     
     # Add to PATH if not already there
     if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
+        # shellcheck disable=SC2016
         echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.zshrc" 2>/dev/null || true
+        # shellcheck disable=SC2016
         echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc" 2>/dev/null || true
         echo -e "${GREEN}${ICON_SUCCESS} Added ~/bin to PATH${NC}"
     fi
@@ -309,7 +311,6 @@ AICODER_SCRIPT="$AICODER_DIR/aicoder_package/scripts/ultra-clean-one-liner.sh"
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
 BOLD='\033[1m'

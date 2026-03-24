@@ -24,8 +24,8 @@ done
 # Pick project
 if [[ -z "$PROJECT_NAME" ]]; then
     if command -v fzf &>/dev/null; then
-        PROJECT_NAME=$(ls -d "$PROJECTS_DIR"/*/ 2>/dev/null \
-            | while read d; do
+        PROJECT_NAME=$(find "$PROJECTS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
+            | while read -r d; do
                 name=$(basename "$d")
                 branch=$(git -C "$d" branch --show-current 2>/dev/null || echo "-")
                 last=$(git -C "$d" log -1 --format="%ar" 2>/dev/null || echo "no git")
@@ -76,7 +76,7 @@ if [[ -z "$ACTION" ]]; then
         # Recent branches
         echo ""
         echo "  Recent branches:"
-        git -C "$PROJECT_PATH" branch --sort=-committerdate --list 2>/dev/null | head -5 | while read b; do
+        git -C "$PROJECT_PATH" branch --sort=-committerdate --list 2>/dev/null | head -5 | while read -r b; do
             echo "    $b"
         done
     fi

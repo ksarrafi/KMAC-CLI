@@ -6,7 +6,9 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_pilot-lib.sh
 source "$SCRIPT_DIR/_pilot-lib.sh"
+# shellcheck source=_vault.sh
 source "$SCRIPT_DIR/_vault.sh" 2>/dev/null
 
 # Load credentials from vault into environment
@@ -177,7 +179,7 @@ cmd_projects() {
     local cid="$1" filter="$2"
     local list="" count=0 cur_label=""
 
-    while IFS='|' read -r pname pdir pbranch plabel; do
+    while IFS='|' read -r pname _ pbranch plabel; do
         [[ -z "$pname" ]] && continue
         if [[ -n "$filter" ]] && [[ "$pname" != *"$filter"* ]]; then
             continue
@@ -214,8 +216,12 @@ cmd_task() {
     local cid="$1" args="$2"
     local project_name task_desc
 
-    project_name=$(echo "$args" | awk '{print $1}')
-    task_desc=$(echo "$args" | sed 's/^[^ ]* *//')
+    project_name="${args%% *}"
+    if [[ "$args" == *' '* ]]; then
+        task_desc="${args#* }"
+    else
+        task_desc=""
+    fi
 
     if [[ -z "$project_name" || -z "$task_desc" ]]; then
         tg_send "$cid" "Usage: \`/task <project> <description>\`
@@ -257,7 +263,7 @@ Task: _${task_desc}_"
 
     log "Starting task ($agent_name): $project_name — $task_desc"
 
-    > "$PILOT_AGENT_LOG"
+    : > "$PILOT_AGENT_LOG"
 
     # Start heartbeat updates to Telegram
     start_output_stream "$cid" "$project_name" "$agent_name"
@@ -364,7 +370,7 @@ cmd_log() {
 
     local output
     output=$(tail -"$lines" "$PILOT_AGENT_LOG" 2>/dev/null)
-    tg_send_plain "$cid" "$(printf '```\n%s\n```' "$output")"
+    tg_send_plain "$cid" "$(printf "\`\`\`\n%s\n\`\`\`" "$output")"
 }
 
 cmd_diff() {
@@ -398,7 +404,7 @@ ${untracked}
     local full_diff
     full_diff=$(git -C "$project_dir" diff 2>/dev/null | head -200)
 
-    tg_send_plain "$cid" "$(printf 'Changes in %s:\n```\n%s\n```\n\nFull diff:\n```\n%s\n```' \
+    tg_send_plain "$cid" "$(printf "Changes in %s:\n\`\`\`\n%s\n\`\`\`\n\nFull diff:\n\`\`\`\n%s\n\`\`\`" \
         "$(pilot_task_field "project")" "$diff_output" "$full_diff")"
 }
 
@@ -437,7 +443,7 @@ cmd_approve() {
         tg_send "$cid" "Committed \`${short_hash}\`: _${message}_"
         log "Approved and committed: $short_hash"
     else
-        tg_send_plain "$cid" "$(printf 'Commit failed:\n```\n%s\n```' "$commit_output")"
+        tg_send_plain "$cid" "$(printf "Commit failed:\n\`\`\`\n%s\n\`\`\`" "$commit_output")"
     fi
 }
 
@@ -501,7 +507,7 @@ $(tail -50 "$PILOT_AGENT_LOG")
 Follow-up question: "
     fi
 
-    > "$PILOT_AGENT_LOG"
+    : > "$PILOT_AGENT_LOG"
 
     (
         cd "$project_dir" || exit 1
@@ -523,10 +529,10 @@ Follow-up question: "
             local output
             output=$(cat "$PILOT_AGENT_LOG")
             if (( ${#output} > 3800 )); then
-                tg_send_plain "$CHAT_ID" "$(printf '```\n%s\n```' "${output:0:3800}")"
+                tg_send_plain "$CHAT_ID" "$(printf "\`\`\`\n%s\n\`\`\`" "${output:0:3800}")"
                 tg_send_document "$CHAT_ID" "$PILOT_AGENT_LOG" "Full answer — ${project_name}" &>/dev/null
             else
-                tg_send_plain "$CHAT_ID" "$(printf '```\n%s\n```' "$output")"
+                tg_send_plain "$CHAT_ID" "$(printf "\`\`\`\n%s\n\`\`\`" "$output")"
             fi
         else
             tg_send "$CHAT_ID" "*${agent_name}* failed (exit $rc). Check \`/log\`."
@@ -579,7 +585,7 @@ Example: \`/cat src/app/page.tsx\`
         local content
         content=$(cat "$full_path")
         local ext="${filepath##*.}"
-        tg_send_plain "$cid" "$(printf '📄 %s:\n```%s\n%s\n```' "$filepath" "$ext" "$content")"
+        tg_send_plain "$cid" "$(printf "📄 %s:\n\`\`\`%s\n%s\n\`\`\`" "$filepath" "$ext" "$content")"
     fi
 }
 
@@ -627,7 +633,7 @@ cmd_tree() {
 ...(truncated)"
     fi
 
-    tg_send_plain "$cid" "$(printf '📁 %s%s:\n```\n%s\n```' "$project_name" "${subdir:+/$subdir}" "$tree_output")"
+    tg_send_plain "$cid" "$(printf "📁 %s%s:\n\`\`\`\n%s\n\`\`\`" "$project_name" "${subdir:+/$subdir}" "$tree_output")"
 }
 
 # Strict allowlist for /run — first word (and git/docker/brew subcommand) must match.
@@ -712,7 +718,10 @@ $(pilot_run_allowed_list_msg)"
     tg_send "$cid" "Running on *${project_name}*:
 \`$shell_cmd\`"
 
-    if [[ "$shell_cmd" =~ [';|&$`(){}!<>\\'] ]]; then
+    if [[ "$shell_cmd" == *';'* || "$shell_cmd" == *'|'* || "$shell_cmd" == *'&'* || "$shell_cmd" == *'$'* \
+        || "$shell_cmd" == *'`'* || "$shell_cmd" == *'('* || "$shell_cmd" == *')'* || "$shell_cmd" == *'{'* \
+        || "$shell_cmd" == *'}'* || "$shell_cmd" == *'!'* || "$shell_cmd" == *'<'* || "$shell_cmd" == *'>'* \
+        || "$shell_cmd" == *\\* || "$shell_cmd" == *"'"* ]]; then
         tg_send "$cid" "Shell metacharacters not allowed in commands."
         return
     fi
@@ -732,7 +741,7 @@ $(pilot_run_allowed_list_msg)"
         tg_send "$cid" "Exit: $rc (output too long, sending as file)"
         tg_send_document "$cid" "$tmpfile" "Output of: $shell_cmd"
     else
-        tg_send_plain "$cid" "$(printf 'Exit: %d\n```\n%s\n```' "$rc" "$output")"
+        tg_send_plain "$cid" "$(printf "Exit: %d\n\`\`\`\n%s\n\`\`\`" "$rc" "$output")"
     fi
     log "Run command (exit $rc): $shell_cmd"
 }
