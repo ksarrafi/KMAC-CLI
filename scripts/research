@@ -1,0 +1,821 @@
+#!/bin/bash
+# research — autonomous experiment runner inspired by karpathy/autoresearch
+# Lets an AI agent iterate on code autonomously: modify → run → evaluate → keep/discard
+# Usage: research init          (scaffold a new research project)
+#        research run            (start the autonomous experiment loop)
+#        research status         (show experiment results)
+#        research review         (AI-summarize findings)
+#        research stop           (graceful shutdown)
+#        research log            (tail the live experiment log)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLKIT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+source "$SCRIPT_DIR/_auth-helper.sh"
+source "$SCRIPT_DIR/_hooks.sh" 2>/dev/null
+
+KMAC_CACHE_DIR="${HOME}/.cache/kmac"
+RESEARCH_DIR="${KMAC_CACHE_DIR}/research"
+RESEARCH_PID_FILE="${RESEARCH_DIR}/run.pid"
+RESEARCH_LOG="${RESEARCH_DIR}/run.log"
+
+[[ -d "$RESEARCH_DIR" ]] || { mkdir -p "$RESEARCH_DIR" && chmod 700 "$RESEARCH_DIR"; }
+
+# ─── Defaults ─────────────────────────────────────────────────────────────
+
+DEFAULT_TIME_BUDGET=300      # 5 minutes per experiment
+DEFAULT_MODEL="claude-sonnet-4-6"
+MAX_CONSECUTIVE_FAILURES=5
+
+# ─── Helpers ──────────────────────────────────────────────────────────────
+
+_research_running() {
+    [[ -f "$RESEARCH_PID_FILE" ]] || return 1
+    local pid
+    read -r pid < "$RESEARCH_PID_FILE"
+    [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
+}
+
+_find_program() {
+    local dir="${1:-.}"
+    for name in program.md PROGRAM.md research.md RESEARCH.md; do
+        [[ -f "$dir/$name" ]] && { echo "$dir/$name"; return 0; }
+    done
+    return 1
+}
+
+_find_results() {
+    local dir="${1:-.}"
+    [[ -f "$dir/results.tsv" ]] && echo "$dir/results.tsv" || return 1
+}
+
+_git_short_hash() {
+    git rev-parse --short=7 HEAD 2>/dev/null || echo "no-git"
+}
+
+_git_is_clean() {
+    [[ -z "$(git status --porcelain 2>/dev/null)" ]]
+}
+
+_notify_telegram() {
+    local msg="$1"
+    if [[ -f "$SCRIPT_DIR/_pilot-lib.sh" ]]; then
+        source "$SCRIPT_DIR/_pilot-lib.sh" 2>/dev/null
+        local token chat_id
+        token=$(pilot_token 2>/dev/null)
+        chat_id=$(pilot_chat_id 2>/dev/null)
+        if [[ -n "$token" && -n "$chat_id" ]]; then
+            curl -sf --max-time 5 \
+                "https://api.telegram.org/bot${token}/sendMessage" \
+                -d "chat_id=${chat_id}" \
+                -d "text=${msg}" \
+                -d "parse_mode=Markdown" &>/dev/null &
+        fi
+    fi
+}
+
+# ─── Init ─────────────────────────────────────────────────────────────────
+
+cmd_init() {
+    title_box "Research — Init" "🔬"
+
+    if _find_program . &>/dev/null; then
+        local existing
+        existing=$(_find_program .)
+        ui_warn "program.md already exists at ${existing}"
+        echo ""
+        echo -e "  ${GREEN}o${NC}) Overwrite with fresh template"
+        echo -e "  ${GREEN}e${NC}) Edit existing program"
+        echo -e "  ${GREEN}m${NC}) Cancel"
+        echo ""
+        read -r -n1 -p "  > " init_choice; echo ""
+        case "$init_choice" in
+            o|O) ;;
+            e|E) ${EDITOR:-vim} "$existing"; return 0 ;;
+            *) return 0 ;;
+        esac
+    fi
+
+    # Gather project details
+    echo -e "  ${BOLD}Project Setup${NC}"
+    echo ""
+
+    local tag
+    tag="$(date +%b%d | tr '[:upper:]' '[:lower:]')"
+    read -r -p "  Run tag [${tag}]: " user_tag
+    tag="${user_tag:-$tag}"
+
+    echo ""
+    echo -e "  ${BOLD}What file should the AI modify?${NC}"
+    echo -e "  ${DIM}(relative path, e.g. train.py, src/main.rs, index.js)${NC}"
+    read -r -p "  Target file: " target_file
+
+    if [[ -z "$target_file" ]]; then
+        ui_fail "Target file is required."
+        return 1
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}What command evaluates results?${NC}"
+    echo -e "  ${DIM}(e.g. 'python train.py', 'npm test', 'cargo bench', 'make test')${NC}"
+    read -r -p "  Eval command: " eval_cmd
+
+    if [[ -z "$eval_cmd" ]]; then
+        ui_fail "Eval command is required."
+        return 1
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}What metric should improve?${NC}"
+    echo -e "  ${DIM}The command's stdout will be searched for this pattern.${NC}"
+    echo -e "  ${DIM}(e.g. 'val_bpb:', 'accuracy:', 'score:', 'time:')${NC}"
+    read -r -p "  Metric grep pattern: " metric_pattern
+
+    if [[ -z "$metric_pattern" ]]; then
+        ui_fail "Metric pattern is required."
+        return 1
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}Optimization direction?${NC}"
+    echo -e "  ${GREEN}l${NC}) Lower is better (loss, error, latency)"
+    echo -e "  ${GREEN}h${NC}) Higher is better (accuracy, score, throughput)"
+    echo ""
+    read -r -n1 -p "  > " direction; echo ""
+    case "$direction" in
+        h|H) direction="higher" ;;
+        *)   direction="lower" ;;
+    esac
+
+    echo ""
+    local time_budget="$DEFAULT_TIME_BUDGET"
+    read -r -p "  Time budget per experiment in seconds [${time_budget}]: " user_budget
+    time_budget="${user_budget:-$time_budget}"
+
+    echo ""
+    echo -e "  ${BOLD}Research goal / context${NC} ${DIM}(optional, press Enter twice to skip)${NC}"
+    local goal=""
+    local empty_count=0
+    while IFS= read -r line; do
+        if [[ -z "$line" ]]; then
+            ((empty_count++))
+            (( empty_count >= 1 )) && break
+        else
+            empty_count=0
+            goal+="$line"$'\n'
+        fi
+    done
+
+    # Create program.md from template
+    local template_src="$TOOLKIT_DIR/templates/program.md"
+    if [[ -f "$template_src" ]]; then
+        cp "$template_src" program.md
+    fi
+
+    cat > program.md << PROGRAM_EOF
+# Research Program
+
+This is an autonomous experiment runner managed by KMac CLI.
+
+## Configuration
+
+- **Tag**: ${tag}
+- **Target file**: ${target_file}
+- **Eval command**: \`${eval_cmd}\`
+- **Metric pattern**: \`${metric_pattern}\`
+- **Direction**: ${direction} is better
+- **Time budget**: ${time_budget}s per experiment
+
+## Goal
+
+${goal:-Improve the target metric through iterative experimentation.}
+
+## Rules
+
+**What the AI CAN do:**
+- Modify \`${target_file}\` — this is the only file it edits
+- Change architecture, algorithms, hyperparameters, data handling — anything in the target file
+
+**What the AI CANNOT do:**
+- Modify any other files
+- Install new dependencies
+- Change the evaluation method
+
+## Experiment Loop
+
+1. Read the current state of \`${target_file}\`
+2. Propose a change with a clear hypothesis
+3. Apply the change
+4. Run: \`${eval_cmd}\`
+5. Check the metric (\`${metric_pattern}\`)
+6. If improved → keep (git commit). If not → discard (git reset)
+7. Log results to results.tsv
+8. Repeat indefinitely
+
+## Simplicity Criterion
+
+All else being equal, simpler is better. A small improvement that adds ugly complexity
+is not worth it. Removing code and getting equal or better results is a win.
+
+## Notes
+
+- The first run should always establish the baseline (run without modifications)
+- If a run crashes, attempt a fix. After ${MAX_CONSECUTIVE_FAILURES} consecutive failures, try a different approach
+- Never pause to ask the human — run autonomously until manually stopped
+PROGRAM_EOF
+
+    # Create results.tsv
+    if [[ ! -f results.tsv ]]; then
+        printf 'commit\tmetric\tstatus\tdescription\n' > results.tsv
+    fi
+
+    # Create git branch
+    if git rev-parse --is-inside-work-tree &>/dev/null; then
+        local branch="research/${tag}"
+        if git show-ref --verify --quiet "refs/heads/${branch}" 2>/dev/null; then
+            ui_warn "Branch ${branch} already exists"
+            echo -e "  ${GREEN}s${NC}) Switch to it    ${GREEN}n${NC}) Create with suffix    ${GREEN}m${NC}) Skip"
+            read -r -n1 -p "  > " bc; echo ""
+            case "$bc" in
+                s|S) git checkout "$branch" 2>/dev/null ;;
+                n|N) git checkout -b "${branch}-$(date +%H%M)" 2>/dev/null ;;
+            esac
+        else
+            git checkout -b "$branch" 2>/dev/null
+            ui_success "Created branch: ${branch}"
+        fi
+    fi
+
+    echo ""
+    ui_success "Research project initialized!"
+    echo ""
+    echo -e "  ${DIM}Files created:${NC}"
+    echo -e "    ${GREEN}program.md${NC}   — experiment instructions (edit to customize)"
+    echo -e "    ${GREEN}results.tsv${NC}  — experiment log"
+    echo ""
+    echo -e "  ${DIM}Next:${NC} ${GREEN}kmac research run${NC} to start the autonomous loop"
+}
+
+# ─── Run ──────────────────────────────────────────────────────────────────
+
+cmd_run() {
+    title_box "Research — Run" "🧪"
+
+    if _research_running; then
+        ui_warn "A research loop is already running (PID $(cat "$RESEARCH_PID_FILE"))"
+        echo -e "  Use ${GREEN}kmac research stop${NC} first, or ${GREEN}kmac research log${NC} to watch."
+        return 1
+    fi
+
+    local program_file
+    program_file=$(_find_program .) || {
+        ui_fail "No program.md found. Run ${GREEN}kmac research init${NC} first."
+        return 1
+    }
+
+    _ensure_claude_auth || return 1
+
+    # Parse config from program.md
+    local target_file eval_cmd metric_pattern direction time_budget
+    target_file=$(grep -m1 'Target file.*:' "$program_file" | sed 's/.*\*\*: *//' | sed 's/`//g' | tr -d '[:space:]')
+    eval_cmd=$(grep -m1 'Eval command.*:' "$program_file" | sed 's/.*`\(.*\)`.*/\1/')
+    metric_pattern=$(grep -m1 'Metric pattern.*:' "$program_file" | sed 's/.*`\(.*\)`.*/\1/')
+    direction=$(grep -m1 'Direction.*:' "$program_file" | sed 's/.*\*\*: *//' | awk '{print $1}')
+    time_budget=$(grep -m1 'Time budget.*:' "$program_file" | sed 's/.*\*\*: *//' | sed 's/s .*//')
+
+    # Validate
+    if [[ -z "$target_file" || -z "$eval_cmd" || -z "$metric_pattern" ]]; then
+        ui_fail "Could not parse config from program.md"
+        echo -e "  ${DIM}Ensure program.md has Target file, Eval command, and Metric pattern fields.${NC}"
+        return 1
+    fi
+
+    if [[ ! -f "$target_file" ]]; then
+        ui_fail "Target file not found: ${target_file}"
+        return 1
+    fi
+
+    time_budget="${time_budget:-$DEFAULT_TIME_BUDGET}"
+    direction="${direction:-lower}"
+
+    echo -e "  ${BOLD}Configuration:${NC}"
+    echo -e "    Target:    ${CYAN}${target_file}${NC}"
+    echo -e "    Command:   ${CYAN}${eval_cmd}${NC}"
+    echo -e "    Metric:    ${CYAN}${metric_pattern}${NC}"
+    echo -e "    Direction: ${CYAN}${direction} is better${NC}"
+    echo -e "    Timeout:   ${CYAN}${time_budget}s${NC}"
+    echo -e "    Model:     ${CYAN}${DEFAULT_MODEL}${NC}"
+    echo ""
+
+    local run_mode
+    echo -e "  ${GREEN}f${NC}) Run in foreground (watch live)"
+    echo -e "  ${GREEN}b${NC}) Run in background (detach)"
+    echo -e "  ${GREEN}m${NC}) Cancel"
+    echo ""
+    read -r -n1 -p "  > " run_mode; echo ""
+
+    case "$run_mode" in
+        f|F)
+            echo ""
+            _run_experiment_loop "$target_file" "$eval_cmd" "$metric_pattern" "$direction" "$time_budget" "$program_file"
+            ;;
+        b|B)
+            echo ""
+            ui_info "Starting background research loop..."
+            nohup bash "$0" _loop "$target_file" "$eval_cmd" "$metric_pattern" "$direction" "$time_budget" "$program_file" \
+                >> "$RESEARCH_LOG" 2>&1 &
+            local bg_pid=$!
+            echo "$bg_pid" > "$RESEARCH_PID_FILE"
+            ui_success "Research loop started (PID ${bg_pid})"
+            echo -e "  ${DIM}Watch with:${NC} ${GREEN}kmac research log${NC}"
+            echo -e "  ${DIM}Stop with:${NC}  ${GREEN}kmac research stop${NC}"
+            _notify_telegram "🔬 *Research started* in \`$(basename "$(pwd)")\`"
+            ;;
+        *) return 0 ;;
+    esac
+}
+
+_run_experiment_loop() {
+    local target_file="$1" eval_cmd="$2" metric_pattern="$3" direction="$4" time_budget="$5" program_file="$6"
+
+    echo "$$" > "$RESEARCH_PID_FILE"
+    trap '_research_cleanup' EXIT INT TERM
+
+    hooks_emit session-start "research" 2>/dev/null || true
+
+    local experiment_num=0
+    local best_metric=""
+    local consecutive_failures=0
+    local total_kept=0 total_discarded=0 total_crashed=0
+
+    # Establish baseline on first run
+    section "Experiment #0 — Baseline"
+    local baseline_result
+    baseline_result=$(_run_single_experiment "$eval_cmd" "$metric_pattern" "$time_budget")
+    local baseline_exit=$?
+
+    if (( baseline_exit == 0 )) && [[ -n "$baseline_result" ]]; then
+        best_metric="$baseline_result"
+        local commit_hash
+        commit_hash=$(_git_short_hash)
+        printf '%s\t%s\t%s\t%s\n' "$commit_hash" "$baseline_result" "keep" "baseline" >> results.tsv 2>/dev/null
+        ui_success "Baseline: ${metric_pattern} ${best_metric}"
+        echo ""
+    else
+        ui_warn "Baseline run failed or returned no metric — continuing anyway"
+        best_metric="0"
+    fi
+
+    # Main experiment loop
+    while true; do
+        ((experiment_num++))
+        section "Experiment #${experiment_num}"
+
+        # Read current state for AI context
+        local current_code results_context
+        current_code=$(cat "$target_file" 2>/dev/null)
+        results_context=$(tail -20 results.tsv 2>/dev/null)
+        local program_text
+        program_text=$(cat "$program_file" 2>/dev/null)
+
+        # Ask AI for next experiment
+        local ai_prompt
+        ai_prompt="You are an autonomous researcher running experiments.
+
+PROGRAM:
+${program_text}
+
+CURRENT CODE (${target_file}):
+\`\`\`
+${current_code}
+\`\`\`
+
+RECENT RESULTS (last 20):
+\`\`\`
+${results_context}
+\`\`\`
+
+CURRENT BEST METRIC: ${best_metric} (${direction} is better)
+EXPERIMENT NUMBER: ${experiment_num}
+CONSECUTIVE FAILURES: ${consecutive_failures}
+
+Based on the program, results history, and current code, propose your next experiment.
+Think about what has worked, what hasn't, and what to try next.
+
+Output ONLY a JSON object with exactly these fields:
+{
+  \"hypothesis\": \"one-line description of what you're trying\",
+  \"code\": \"the COMPLETE updated contents of ${target_file}\"
+}
+
+Output raw JSON only. No markdown fences, no explanation outside the JSON."
+
+        ui_info "AI proposing experiment #${experiment_num}..."
+        local ai_response
+        ai_response=$(_claude_ask "$ai_prompt" "$DEFAULT_MODEL" 16384 "Researching")
+
+        if [[ -z "$ai_response" ]]; then
+            ui_fail "AI returned empty response"
+            ((consecutive_failures++))
+            _check_failure_limit "$consecutive_failures" && break
+            continue
+        fi
+
+        # Parse AI response
+        local hypothesis new_code
+        hypothesis=$(echo "$ai_response" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get("hypothesis", "no hypothesis"))
+except:
+    print("parse error")
+' 2>/dev/null)
+
+        new_code=$(echo "$ai_response" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    code = d.get("code", "")
+    if code:
+        print(code)
+except:
+    pass
+' 2>/dev/null)
+
+        if [[ -z "$new_code" || "$hypothesis" == "parse error" ]]; then
+            ui_fail "Could not parse AI response"
+            ((consecutive_failures++))
+            _check_failure_limit "$consecutive_failures" && break
+            continue
+        fi
+
+        ui_info "Hypothesis: ${hypothesis}"
+
+        # Apply the change
+        echo "$new_code" > "$target_file"
+        git add "$target_file" 2>/dev/null
+        git commit -m "research: ${hypothesis}" --no-verify 2>/dev/null
+
+        # Run the experiment
+        local experiment_metric
+        experiment_metric=$(_run_single_experiment "$eval_cmd" "$metric_pattern" "$time_budget")
+        local run_exit=$?
+
+        local commit_hash status_label
+        commit_hash=$(_git_short_hash)
+
+        if (( run_exit != 0 )) || [[ -z "$experiment_metric" ]]; then
+            # Crash — revert
+            status_label="crash"
+            ((total_crashed++))
+            ((consecutive_failures++))
+            ui_fail "Experiment crashed or no metric found"
+            git reset --hard HEAD~1 2>/dev/null
+            printf '%s\t%s\t%s\t%s\n' "$commit_hash" "0" "crash" "$hypothesis" >> results.tsv 2>/dev/null
+
+            _check_failure_limit "$consecutive_failures" && break
+            continue
+        fi
+
+        # Compare metrics
+        local improved=false
+        if [[ "$direction" == "lower" ]]; then
+            improved=$(python3 -c "print('true' if float('${experiment_metric}') < float('${best_metric}') else 'false')" 2>/dev/null)
+        else
+            improved=$(python3 -c "print('true' if float('${experiment_metric}') > float('${best_metric}') else 'false')" 2>/dev/null)
+        fi
+
+        if [[ "$improved" == "true" ]]; then
+            # Keep — advance the branch
+            status_label="keep"
+            local old_metric="$best_metric"
+            best_metric="$experiment_metric"
+            ((total_kept++))
+            consecutive_failures=0
+            printf '%s\t%s\t%s\t%s\n' "$commit_hash" "$experiment_metric" "keep" "$hypothesis" >> results.tsv 2>/dev/null
+
+            echo ""
+            echo -e "  ${GREEN}${BOLD}IMPROVED${NC}: ${old_metric} → ${experiment_metric}"
+            _notify_telegram "🔬 *Experiment #${experiment_num}* ✅ IMPROVED
+\`${metric_pattern}\` ${old_metric} → ${experiment_metric}
+_${hypothesis}_"
+        else
+            # Discard — revert
+            status_label="discard"
+            ((total_discarded++))
+            consecutive_failures=0
+            printf '%s\t%s\t%s\t%s\n' "$commit_hash" "$experiment_metric" "discard" "$hypothesis" >> results.tsv 2>/dev/null
+
+            echo -e "  ${YELLOW}DISCARD${NC}: ${experiment_metric} (best: ${best_metric})"
+            git reset --hard HEAD~1 2>/dev/null
+        fi
+
+        hooks_emit on-experiment-complete "$experiment_num" "$status_label" 2>/dev/null || true
+
+        echo ""
+        echo -e "  ${DIM}Stats: ${total_kept} kept / ${total_discarded} discarded / ${total_crashed} crashed | Best: ${best_metric}${NC}"
+        echo ""
+    done
+
+    _research_summary "$total_kept" "$total_discarded" "$total_crashed" "$best_metric" "$experiment_num"
+}
+
+_run_single_experiment() {
+    local eval_cmd="$1" metric_pattern="$2" time_budget="$3"
+    local logfile="${RESEARCH_DIR}/experiment.log"
+
+    ui_info "Running: ${eval_cmd}"
+    timeout "${time_budget}" bash -c "$eval_cmd" > "$logfile" 2>&1
+    local exit_code=$?
+
+    if (( exit_code == 124 )); then
+        ui_warn "Experiment timed out after ${time_budget}s"
+        return 1
+    fi
+
+    if (( exit_code != 0 )); then
+        echo -e "  ${DIM}Exit code: ${exit_code}${NC}"
+        tail -5 "$logfile" 2>/dev/null | while IFS= read -r line; do
+            echo -e "  ${DIM}  ${line}${NC}"
+        done
+        return 1
+    fi
+
+    # Extract metric
+    local metric_value
+    metric_value=$(grep "$metric_pattern" "$logfile" | tail -1 | grep -oE '[0-9]+\.?[0-9]*' | tail -1)
+
+    if [[ -z "$metric_value" ]]; then
+        ui_warn "Could not find metric matching '${metric_pattern}' in output"
+        return 1
+    fi
+
+    echo "$metric_value"
+    return 0
+}
+
+_check_failure_limit() {
+    local failures="$1"
+    if (( failures >= MAX_CONSECUTIVE_FAILURES )); then
+        ui_fail "Hit ${MAX_CONSECUTIVE_FAILURES} consecutive failures — stopping"
+        _notify_telegram "🔬 *Research stopped* — ${MAX_CONSECUTIVE_FAILURES} consecutive failures"
+        return 0
+    fi
+    return 1
+}
+
+_research_cleanup() {
+    rm -f "$RESEARCH_PID_FILE"
+    hooks_emit session-end "research" 2>/dev/null || true
+}
+
+_research_summary() {
+    local kept="$1" discarded="$2" crashed="$3" best="$4" total="$5"
+    echo ""
+    section "Research Complete"
+    echo ""
+    echo -e "  ${BOLD}Total experiments:${NC} ${total}"
+    echo -e "  ${GREEN}Kept:${NC}              ${kept}"
+    echo -e "  ${YELLOW}Discarded:${NC}         ${discarded}"
+    echo -e "  ${RED}Crashed:${NC}           ${crashed}"
+    echo -e "  ${CYAN}${BOLD}Best metric:${NC}       ${best}"
+    echo ""
+
+    _notify_telegram "🔬 *Research complete*
+${total} experiments: ${kept} kept, ${discarded} discarded, ${crashed} crashed
+Best metric: \`${best}\`"
+}
+
+# ─── Status ───────────────────────────────────────────────────────────────
+
+cmd_status() {
+    title_box "Research — Status" "📊"
+
+    if _research_running; then
+        local pid
+        read -r pid < "$RESEARCH_PID_FILE"
+        echo -e "  ${GREEN}● Running${NC} (PID ${pid})"
+    else
+        echo -e "  ${DIM}○ Not running${NC}"
+    fi
+    echo ""
+
+    local results_file
+    results_file=$(_find_results .) || {
+        ui_dim "No results.tsv found in current directory."
+        return 0
+    }
+
+    local total kept discarded crashed
+    total=$(tail -n +2 "$results_file" | wc -l | tr -d ' ')
+    kept=$(tail -n +2 "$results_file" | awk -F'\t' '$3=="keep"' | wc -l | tr -d ' ')
+    discarded=$(tail -n +2 "$results_file" | awk -F'\t' '$3=="discard"' | wc -l | tr -d ' ')
+    crashed=$(tail -n +2 "$results_file" | awk -F'\t' '$3=="crash"' | wc -l | tr -d ' ')
+
+    echo -e "  ${BOLD}Experiments:${NC} ${total} total — ${GREEN}${kept} kept${NC} / ${YELLOW}${discarded} discarded${NC} / ${RED}${crashed} crashed${NC}"
+    echo ""
+
+    # Best result
+    if (( total > 0 )); then
+        local best_line
+        best_line=$(tail -n +2 "$results_file" | awk -F'\t' '$3=="keep" && $2!="0"' | sort -t$'\t' -k2 -n | head -1)
+        if [[ -n "$best_line" ]]; then
+            local best_metric best_desc
+            best_metric=$(echo "$best_line" | cut -f2)
+            best_desc=$(echo "$best_line" | cut -f4)
+            echo -e "  ${CYAN}${BOLD}Best:${NC} ${best_metric} — ${DIM}${best_desc}${NC}"
+            echo ""
+        fi
+    fi
+
+    # Show recent results
+    section "Recent Experiments"
+    echo ""
+    printf "  ${BOLD}%-9s %-14s %-10s %s${NC}\n" "Commit" "Metric" "Status" "Description"
+    echo -e "  ${DIM}$(printf '─%.0s' {1..65})${NC}"
+
+    tail -n +2 "$results_file" | tail -15 | while IFS=$'\t' read -r commit metric status desc; do
+        local color="$NC"
+        case "$status" in
+            keep)    color="$GREEN" ;;
+            discard) color="$YELLOW" ;;
+            crash)   color="$RED" ;;
+        esac
+        printf "  %-9s %-14s ${color}%-10s${NC} %s\n" "$commit" "$metric" "$status" "${desc:0:40}"
+    done
+    echo ""
+}
+
+# ─── Review ───────────────────────────────────────────────────────────────
+
+cmd_review() {
+    title_box "Research — Review" "📝"
+
+    _ensure_claude_auth || return 1
+
+    local results_file
+    results_file=$(_find_results .) || {
+        ui_fail "No results.tsv found."
+        return 1
+    }
+
+    local program_file
+    program_file=$(_find_program .) || {
+        ui_fail "No program.md found."
+        return 1
+    }
+
+    local results_data program_data
+    results_data=$(cat "$results_file")
+    program_data=$(cat "$program_file")
+
+    local prompt="You are reviewing the results of an autonomous research experiment.
+
+PROGRAM:
+${program_data}
+
+RESULTS:
+\`\`\`
+${results_data}
+\`\`\`
+
+Provide a concise research summary:
+1. **Overall Progress**: How much did the metric improve from baseline?
+2. **What Worked**: Which experiments led to improvements and why?
+3. **What Didn't Work**: Common failure patterns
+4. **Recommendations**: What to try next or how to refine the program
+5. **Key Insight**: The single most important finding
+
+Be concise and data-driven. Reference specific experiments by commit hash."
+
+    _claude_ask "$prompt" "$DEFAULT_MODEL" 4096 "Analyzing results"
+}
+
+# ─── Stop ─────────────────────────────────────────────────────────────────
+
+cmd_stop() {
+    title_box "Research — Stop" "⏹"
+
+    if ! _research_running; then
+        ui_dim "No research loop is currently running."
+        return 0
+    fi
+
+    local pid
+    read -r pid < "$RESEARCH_PID_FILE"
+    ui_info "Stopping research loop (PID ${pid})..."
+
+    kill "$pid" 2>/dev/null
+    sleep 1
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null
+    fi
+    rm -f "$RESEARCH_PID_FILE"
+
+    ui_success "Research loop stopped."
+    _notify_telegram "🔬 *Research stopped* manually"
+
+    echo ""
+    echo -e "  ${DIM}Run${NC} ${GREEN}kmac research status${NC} ${DIM}to see results.${NC}"
+    echo -e "  ${DIM}Run${NC} ${GREEN}kmac research review${NC} ${DIM}for AI analysis.${NC}"
+}
+
+# ─── Log ──────────────────────────────────────────────────────────────────
+
+cmd_log() {
+    if [[ -f "$RESEARCH_LOG" ]]; then
+        tail -f "$RESEARCH_LOG"
+    else
+        ui_dim "No research log found. Start a background run first."
+    fi
+}
+
+# ─── Interactive ──────────────────────────────────────────────────────────
+
+cmd_interactive() {
+    while true; do
+        clear
+        title_box "Research" "🔬"
+
+        if _research_running; then
+            local pid
+            read -r pid < "$RESEARCH_PID_FILE"
+            echo -e "  Status: ${GREEN}● Running${NC} (PID ${pid})"
+        else
+            echo -e "  Status: ${DIM}○ Idle${NC}"
+        fi
+
+        if _find_program . &>/dev/null; then
+            echo -e "  Program: ${GREEN}✓${NC} program.md found"
+        else
+            echo -e "  Program: ${DIM}○${NC} not initialized"
+        fi
+
+        if _find_results . &>/dev/null; then
+            local count
+            count=$(tail -n +2 results.tsv 2>/dev/null | wc -l | tr -d ' ')
+            echo -e "  Results: ${GREEN}${count}${NC} experiments logged"
+        fi
+
+        echo ""
+        echo -e "   ${GREEN}i${NC})  Init — set up a new research project"
+        echo -e "   ${GREEN}r${NC})  Run — start the experiment loop"
+        echo -e "   ${GREEN}s${NC})  Status — view experiment results"
+        echo -e "   ${GREEN}v${NC})  Review — AI analysis of findings"
+        echo -e "   ${GREEN}x${NC})  Stop — halt running experiments"
+        echo -e "   ${GREEN}l${NC})  Log — tail live experiment output"
+        echo -e "   ${GREEN}e${NC})  Edit — open program.md"
+        menu_back
+
+        read -r -n1 -p "  > " choice; echo ""
+        case "$choice" in
+            i) cmd_init ;;
+            r) cmd_run ;;
+            s) cmd_status ;;
+            v) cmd_review ;;
+            x) cmd_stop ;;
+            l) cmd_log ;;
+            e)
+                local pf
+                pf=$(_find_program .) && ${EDITOR:-vim} "$pf" || ui_warn "No program.md found. Run init first."
+                ;;
+            m|M) return 0 ;;
+        esac
+        [[ "$choice" != "l" ]] && pause
+    done
+}
+
+# ─── Main Router ──────────────────────────────────────────────────────────
+
+action="${1:-interactive}"
+shift 2>/dev/null || true
+
+case "$action" in
+    init)        cmd_init "$@" ;;
+    run)         cmd_run "$@" ;;
+    status|st)   cmd_status "$@" ;;
+    review)      cmd_review "$@" ;;
+    stop)        cmd_stop "$@" ;;
+    log)         cmd_log "$@" ;;
+    _loop)       _run_experiment_loop "$@" ;;
+    interactive) cmd_interactive ;;
+    -h|--help|help)
+        echo "Usage: research [command]"
+        echo ""
+        echo "Commands:"
+        echo "  init       Set up a new research project (program.md + results.tsv)"
+        echo "  run        Start the autonomous experiment loop"
+        echo "  status     Show experiment results and stats"
+        echo "  review     AI-powered summary of findings"
+        echo "  stop       Halt a running experiment loop"
+        echo "  log        Tail live experiment output (background runs)"
+        echo "  help       Show this help"
+        echo ""
+        echo "Run with no args for the interactive menu."
+        ;;
+    *)
+        echo "Unknown command: $action — try 'research help'"
+        exit 1
+        ;;
+esac

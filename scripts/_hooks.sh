@@ -13,12 +13,13 @@
 #   post-review   — runs after code review completes
 #   session-start — runs when a new agent session begins
 #   session-end   — runs when an agent session ends
+#   on-experiment-complete — runs after each research experiment finishes
 
 # Registry entries: "hook_name|kind|payload"
 # kind: fn (bash function), path (user script), plugin (auto-registered plugin script)
 declare -a _KMAC_HOOK_REGISTRY=()
 
-_KMAC_KNOWN_HOOKS="pre-commit post-commit pre-deploy post-deploy on-error on-startup on-exit pre-review post-review session-start session-end"
+_KMAC_KNOWN_HOOKS="pre-commit post-commit pre-deploy post-deploy on-error on-startup on-exit pre-review post-review session-start session-end on-experiment-complete"
 
 _hooks_warn() {
     if [[ -n "${YELLOW:-}" && -n "${NC:-}" ]]; then
