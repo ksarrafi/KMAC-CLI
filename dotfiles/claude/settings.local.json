@@ -3,15 +3,15 @@
     "allow": [
       "Bash(claude doctor)",
       "Bash(mkdir:*)",
-      "Bash(docker ps:*)",
-      "Bash(docker logs:*)",
-      "Bash(docker images:*)",
+      "Bash(python3 -m pip install:*)",
+      "Bash(python3:*)",
       "Bash(docker system:*)",
       "Bash(docker version:*)",
       "Bash(docker volume:*)",
       "Bash(docker context:*)",
-      "Bash(open -a:*)",
+      "Bash(open:*)",
       "Bash(docker buildx:*)",
+      "Bash(source ~/.zshrc)",
       "Bash(du:*)",
       "Bash(tmutil listlocalsnapshots:*)",
       "Bash(tmutil listbackups:*)",
@@ -20,14 +20,13 @@
       "Bash(ls:*)",
       "Bash(xattr:*)",
       "Bash(brctl log:*)",
-      "Bash(defaults read:*)"
+      "Bash(~/Library/CloudStorage/iCloudDrive*/com~apple~CloudDocs/Scripts/.sync-test)",
+      "Bash(defaults read:*)",
+      "Bash(find:*)",
+      "Bash(ln:*)",
+      "Bash(npm i:*)"
     ],
-    "deny": [
-      "Bash(rm -rf /:*)",
-      "Bash(sudo:*)",
-      "Bash(chmod 777:*)",
-      "Bash(curl*|*sh:*)"
-    ],
+    "deny": [],
     "ask": []
   }
 }

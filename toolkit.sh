@@ -12,16 +12,25 @@ while [[ -L "$_src" ]]; do
 done
 TOOLKIT_DIR="$(cd "$(dirname "$_src")" && pwd)"
 unset _src _dir
-# Version from git tag (e.g. v2.4.0 → 2.4.0), falls back to VERSION file for non-git installs
-VERSION=$(git -C "$TOOLKIT_DIR" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
-[[ -z "$VERSION" ]] && VERSION=$(cat "$TOOLKIT_DIR/VERSION" 2>/dev/null || echo "unknown")
 export TOOLKIT_RUNNING=1
 
 SCRIPTS_DIR="$TOOLKIT_DIR/scripts"
 PLUGINS_DIR="$TOOLKIT_DIR/plugins"
 KMAC_CACHE_DIR="${HOME}/.cache/kmac"
-if [[ ! -d "$KMAC_CACHE_DIR" ]]; then mkdir -p "$KMAC_CACHE_DIR"; fi
+[[ -d "$KMAC_CACHE_DIR" ]] || mkdir -p "$KMAC_CACHE_DIR"
 chmod 700 "$KMAC_CACHE_DIR" 2>/dev/null
+
+# Version: cached to avoid git-describe on every launch (re-checks hourly)
+_ver_cache="$KMAC_CACHE_DIR/.version"
+_ver_mtime=$(stat -f %m "$_ver_cache" 2>/dev/null || stat -c %Y "$_ver_cache" 2>/dev/null || echo 0)
+if [[ -f "$_ver_cache" ]] && (( $(date +%s) - _ver_mtime < 3600 )); then
+    VERSION=$(<"$_ver_cache")
+else
+    VERSION=$(git -C "$TOOLKIT_DIR" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+    [[ -z "$VERSION" ]] && VERSION=$(cat "$TOOLKIT_DIR/VERSION" 2>/dev/null || echo "unknown")
+    printf '%s' "$VERSION" > "$_ver_cache" 2>/dev/null
+fi
+unset _ver_cache _ver_mtime
 
 # ─── Shared UI (colors, title_box, pause) ─────────────────────────────────
 # shellcheck source=scripts/_ui.sh
@@ -130,9 +139,19 @@ _refresh_status_cache() {
     local now
     now=$(date +%s)
     if ((now - _MENU_CACHE_TS > 5)); then
-        _MENU_CACHE_RT=$(check_rt)
-        _MENU_CACHE_DK=$(check_docker)
-        _MENU_CACHE_NG=$(check_ngrok)
+        local _st_dir="$KMAC_CACHE_DIR/.status.$$"
+        mkdir -p "$_st_dir"
+        check_rt     > "$_st_dir/rt" &
+        local _p1=$!
+        check_docker > "$_st_dir/dk" &
+        local _p2=$!
+        check_ngrok  > "$_st_dir/ng" &
+        local _p3=$!
+        wait "$_p1" "$_p2" "$_p3" 2>/dev/null
+        _MENU_CACHE_RT=$(<"$_st_dir/rt" 2>/dev/null)
+        _MENU_CACHE_DK=$(<"$_st_dir/dk" 2>/dev/null)
+        _MENU_CACHE_NG=$(<"$_st_dir/ng" 2>/dev/null)
+        rm -rf "$_st_dir"
         _MENU_CACHE_TS=$now
     fi
 }
@@ -140,10 +159,14 @@ _refresh_status_cache() {
 # ─── Plugin Discovery ────────────────────────────────────────────────────
 
 declare -a PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
+_PLUGINS_DISCOVERED_TS=0
 
 _BUILTIN_KEYS="a v c s p e x k r d n . b u ? / i I o P R + 0 S"
 
 discover_plugins() {
+    local _now; _now=$(date +%s)
+    (( _now - _PLUGINS_DISCOVERED_TS < 5 )) && return
+    _PLUGINS_DISCOVERED_TS=$_now
     PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
     hooks_clear_plugin_handlers 2>/dev/null || true
     [[ -d "$PLUGINS_DIR" ]] || return
@@ -197,8 +220,8 @@ animate_intro() {
     local text_c=12 skipped=0
 
     local frame
-    for ((frame=0; frame<32; frame++)); do
-        read -r -t 1 -n1 _ 2>/dev/null && { skipped=1; break; }
+    for ((frame=0; frame<16; frame++)); do
+        read -r -t 0.04 -n1 _ 2>/dev/null && { skipped=1; break; }
 
         local bright=$(( frame % np ))
         local p
@@ -221,28 +244,27 @@ animate_intro() {
         printf '\033[7;%dH\033[38;5;%dm\033[1m █ █  █ ▀ █  █▀█  █▄▄\033[0m  \033[2mCLI\033[0m' "$text_c" "$pc"
         printf '\033[9;14H\033[2mportable macOS toolkit\033[0m'
 
-        sleep 0.06
+        sleep 0.04
     done
 
     if (( skipped )); then
         tput cnorm 2>/dev/null; return
     fi
 
-    sleep 0.3
+    sleep 0.1
     clear
     echo ""; echo ""
 
-    printf "    \033[38;5;33m██╗  ██╗\033[0m \033[38;5;39m███╗   ███╗\033[0m  \033[38;5;45m█████╗\033[0m   \033[38;5;49m██████╗\033[0m\n"; sleep 0.07
-    printf "    \033[38;5;33m██║ ██╔╝\033[0m \033[38;5;39m████╗ ████║\033[0m \033[38;5;45m██╔══██╗\033[0m \033[38;5;49m██╔════╝\033[0m\n"; sleep 0.07
-    printf "    \033[38;5;33m█████╔╝\033[0m  \033[38;5;39m██╔████╔██║\033[0m \033[38;5;45m███████║\033[0m \033[38;5;49m██║\033[0m\n"; sleep 0.07
-    printf "    \033[38;5;33m██╔═██╗\033[0m  \033[38;5;39m██║╚██╔╝██║\033[0m \033[38;5;45m██╔══██║\033[0m \033[38;5;49m██║\033[0m\n"; sleep 0.07
-    printf "    \033[38;5;33m██║  ██╗\033[0m \033[38;5;39m██║ ╚═╝ ██║\033[0m \033[38;5;45m██║  ██║\033[0m \033[38;5;49m╚██████╗\033[0m\n"; sleep 0.07
+    printf "    \033[38;5;33m██╗  ██╗\033[0m \033[38;5;39m███╗   ███╗\033[0m  \033[38;5;45m█████╗\033[0m   \033[38;5;49m██████╗\033[0m\n"; sleep 0.03
+    printf "    \033[38;5;33m██║ ██╔╝\033[0m \033[38;5;39m████╗ ████║\033[0m \033[38;5;45m██╔══██╗\033[0m \033[38;5;49m██╔════╝\033[0m\n"; sleep 0.03
+    printf "    \033[38;5;33m█████╔╝\033[0m  \033[38;5;39m██╔████╔██║\033[0m \033[38;5;45m███████║\033[0m \033[38;5;49m██║\033[0m\n"; sleep 0.03
+    printf "    \033[38;5;33m██╔═██╗\033[0m  \033[38;5;39m██║╚██╔╝██║\033[0m \033[38;5;45m██╔══██║\033[0m \033[38;5;49m██║\033[0m\n"; sleep 0.03
+    printf "    \033[38;5;33m██║  ██╗\033[0m \033[38;5;39m██║ ╚═╝ ██║\033[0m \033[38;5;45m██║  ██║\033[0m \033[38;5;49m╚██████╗\033[0m\n"; sleep 0.03
     printf "    \033[38;5;33m╚═╝  ╚═╝\033[0m \033[38;5;39m╚═╝     ╚═╝\033[0m \033[38;5;45m╚═╝  ╚═╝\033[0m  \033[38;5;49m╚═════╝\033[0m\n"
     echo ""
-    sleep 0.2
     printf '        \033[2mportable macOS toolkit\033[0m                       \033[2mv%s\033[0m\n' "$VERSION"
 
-    sleep 0.8
+    sleep 0.3
     tput cnorm 2>/dev/null
 }
 
@@ -759,17 +781,49 @@ welcome_wizard() {
     read -r -n1 -p "  Press any key to enter KMac..."; echo ""
 }
 
+# Background vault export — runs keychain lookups in parallel with the intro animation
+_VAULT_EXPORT_FILE=""
+_VAULT_BG_PID=""
+
+_start_vault_export_bg() {
+    _VAULT_EXPORT_FILE="$KMAC_CACHE_DIR/.vault-env.$$"
+    (
+        _vault_load_registry 2>/dev/null
+        for (( _vi=0; _vi<${#_REG_SERVICES[@]}; _vi++ )); do
+            _svc="${_REG_SERVICES[$_vi]}"
+            _envvar="${_REG_ENVVARS[$_vi]}"
+            [[ -z "$_envvar" ]] && continue
+            _val=$(vault_get "$_svc" 2>/dev/null) || true
+            [[ -n "$_val" ]] && printf 'export %s=%q\n' "$_envvar" "$_val"
+        done > "$_VAULT_EXPORT_FILE"
+    ) &
+    _VAULT_BG_PID=$!
+}
+
+_finish_vault_export() {
+    if [[ -n "${_VAULT_BG_PID:-}" ]]; then
+        wait "$_VAULT_BG_PID" 2>/dev/null
+        _VAULT_BG_PID=""
+    fi
+    if [[ -f "${_VAULT_EXPORT_FILE:-}" ]]; then
+        source "$_VAULT_EXPORT_FILE" 2>/dev/null
+        rm -f "$_VAULT_EXPORT_FILE"
+        _VAULT_EXPORT_FILE=""
+    fi
+}
+
 main() {
     mkdir -p "$PLUGINS_DIR" 2>/dev/null
 
-    # Interactive menu only: export vault-backed API tokens env vars for built-in tools.
-    vault_export_all 2>/dev/null
+    # Start vault export in background — runs during intro animation
+    _start_vault_export_bg
 
     if is_first_run; then
         welcome_wizard
-    else
-        animate_intro
     fi
+
+    # Collect vault exports (should be done by now, waits if still running)
+    _finish_vault_export
 
     discover_plugins
     hooks_emit on-startup || true
