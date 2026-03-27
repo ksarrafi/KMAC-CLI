@@ -5,6 +5,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh"
 source "$SCRIPT_DIR/_auth-helper.sh" 2>/dev/null
+source "$SCRIPT_DIR/_agent-hook.sh" 2>/dev/null
 
 # ─── Docker Socket Discovery ────────────────────────────────────────────────
 
@@ -956,8 +957,9 @@ do_menu() {
         echo -e "   ${GREEN}6${NC})  Quick Cleanup            ${DIM}prune menus${NC}"
         echo -e "   ${GREEN}7${NC})  Auto-Cleanup Scheduler   ${DIM}crontab setup${NC}"
         echo ""
+        echo -e "  ${DIM}── AI ───────────────────────────────${NC}"
+        echo -e "   ${GREEN}9${NC})  Agent Diagnose           ${DIM}AI analysis of Docker health${NC}"
         if $_HAS_MCP; then
-            echo -e "  ${DIM}── AI / MCP ─────────────────────────${NC}"
             echo -e "   ${GREEN}8${NC})  MCP Toolkit             ${DIM}catalog, profiles, clients${NC}"
         fi
         echo ""
@@ -976,6 +978,7 @@ do_menu() {
             6) do_quick_clean ;;
             7) do_scheduler ;;
             8) $_HAS_MCP && do_mcp ;;
+            9) bash "$SCRIPT_DIR/docker-health" --diagnose ;;
             q|Q|"") return ;;
             *) echo -e "  ${RED}Invalid choice${NC}" ;;
         esac
@@ -998,6 +1001,7 @@ case "${1:-}" in
     restart)                 do_restart; [[ -t 1 ]] && pause ;;
     clean|cleanup)           do_quick_clean; [[ -t 1 ]] && pause ;;
     scheduler|cron)          do_scheduler; [[ -t 1 ]] && pause ;;
+    diagnose)                bash "$SCRIPT_DIR/docker-health" --diagnose; [[ -t 1 ]] && pause ;;
     mcp)                     do_mcp; [[ -t 1 ]] && pause ;;
     web)                     _open_web_dashboard; [[ -t 1 ]] && pause ;;
     *)                       do_menu ;;

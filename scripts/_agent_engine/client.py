@@ -99,6 +99,12 @@ def _display_result(data):
         print(f"  Agents:   {data.get('agents', 0)}")
         print(f"  Sessions: {data.get('sessions', 0)}")
         print(f"  Memories: {data.get('memories', 0)}")
+        rt = data.get('running_tasks', 0)
+        ct = data.get('completed_tasks', 0)
+        task_str = f"{rt} running" if rt else "idle"
+        if ct:
+            task_str += f", {ct} completed"
+        print(f"  Tasks:    {task_str}")
         print(f"  Socket:   {D}{data.get('socket', '?')}{N}")
         return
 
@@ -133,9 +139,25 @@ def _display_result(data):
         tt = data["tasks"]
         if not tt:
             print(f"  {D}No tasks{N}"); return
-        icons = {"queued": "\u25cb", "running": "\u25cf", "completed": "\u2713", "failed": "\u2717"}
+        icons = {"queued": "\u25cb", "running": "\u25cf", "completed": "\u2713",
+                 "failed": "\u2717", "cancelled": "\u2013"}
+        colors = {"queued": D, "running": C, "completed": G, "failed": R, "cancelled": D}
         for t in tt:
-            print(f"  {icons.get(t['status'], '?')} {t['description'][:60]} {D}({t['status']}){N}")
+            clr = colors.get(t["status"], "")
+            icon = icons.get(t["status"], "?")
+            print(f"  {clr}{icon}{N} {t['description'][:55]} "
+                  f"{D}[{t['id']}] {t['status']}{N}")
+
+    elif "task" in data and "result" in data.get("task", {}):
+        t = data["task"]
+        icon = icons_map.get(t.get("status", ""), "?") if False else ""
+        print(f"\n  {B}Task {t.get('id', '?')}{N}  ({t.get('status', '?')})")
+        print(f"  {D}{t.get('description', '')}{N}")
+        result = t.get("result") or ""
+        if result:
+            print(f"\n{result[:2000]}")
+            if len(result) > 2000:
+                print(f"\n  {D}... ({len(result) - 2000} more chars){N}")
 
     elif "agent" in data:
         a = data["agent"]
@@ -325,6 +347,8 @@ def _build_request(action, args):
             single_arg_actions = {
                 "agent-create": "name", "agent-delete": "name",
                 "memory-delete": "id", "session-delete": "session_id",
+                "task-cancel": "task_id", "task-run": "task_id",
+                "task-result": "task_id",
             }
             multi_arg_actions = {
                 "ask": "message", "memory-add": "content",

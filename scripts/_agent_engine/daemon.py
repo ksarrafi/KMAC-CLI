@@ -18,6 +18,9 @@ from . import runtime
 
 log = logging.getLogger("kmac-agent")
 
+TASK_POLL_INTERVAL = 5
+MAX_CONCURRENT_TASKS = 2
+
 
 class AgentDaemon:
     """Single daemon that manages multiple named agent profiles."""
@@ -26,6 +29,9 @@ class AgentDaemon:
         self.dbs: dict[str, MemoryDB] = {}
         self._server = None
         self._start_time = time.time()
+        self._task_runner: asyncio.Task | None = None
+        self._running_tasks: dict[str, asyncio.Task] = {}
+        self._tasks_completed = 0
 
     # ── database helpers ─────────────────────────────────────────────
 
@@ -59,6 +65,10 @@ class AgentDaemon:
             self._write_err(writer, "Request timeout")
         except json.JSONDecodeError:
             self._write_err(writer, "Invalid JSON")
+        except ConnectionResetError:
+            pass
+        except BrokenPipeError:
+            pass
         except Exception as exc:
             log.exception("Connection error")
             self._write_err(writer, str(exc))
@@ -96,6 +106,9 @@ class AgentDaemon:
             "memory-list":    lambda: self._oneshot(self._memory_list(agent)),
             "memory-delete":  lambda: self._oneshot(self._memory_delete(request)),
             "task-create":    lambda: self._oneshot(self._task_create(agent, request)),
+            "task-cancel":    lambda: self._oneshot(self._task_cancel(request)),
+            "task-run":       lambda: self._oneshot(self._task_run(agent, request)),
+            "task-result":    lambda: self._oneshot(self._task_result(agent, request)),
             "tasks-list":     lambda: self._oneshot(self._tasks_list(agent)),
         }
 
@@ -159,11 +172,12 @@ class AgentDaemon:
     def _status(self):
         uptime = int(time.time() - self._start_time)
         total = {"agents": 0, "sessions": 0, "memories": 0}
+        active_tasks = 0
         for db in self.dbs.values():
             s = db.stats()
             for k in total:
                 total[k] += s.get(k, 0)
-        # Count agent dirs that haven't been loaded yet
+            active_tasks += s.get("active_tasks", 0)
         if DB_DIR.exists():
             for d in DB_DIR.iterdir():
                 if d.is_dir() and d.name not in self.dbs:
@@ -176,6 +190,8 @@ class AgentDaemon:
                 "uptime": uptime,
                 "uptime_human": f"{uptime // 3600}h {(uptime % 3600) // 60}m {uptime % 60}s",
                 "socket": str(SOCKET_PATH),
+                "running_tasks": len(self._running_tasks),
+                "completed_tasks": self._tasks_completed,
                 **total,
             },
         }
@@ -305,6 +321,105 @@ class AgentDaemon:
             "data": {"tasks": self._get_db(agent_name).list_tasks(agent_name)},
         }
 
+    def _task_cancel(self, req):
+        tid = req.get("task_id", "")
+        agent = req.get("agent", "default")
+        if not tid:
+            return {"type": "error", "message": "No task ID"}
+        if tid in self._running_tasks:
+            self._running_tasks[tid].cancel()
+        self._get_db(agent).update_task(tid, "cancelled")
+        return {"type": "result", "data": {"cancelled": tid}}
+
+    def _task_run(self, agent_name, req):
+        """Immediately trigger a queued task."""
+        tid = req.get("task_id", "")
+        if not tid:
+            return {"type": "error", "message": "No task ID"}
+        db = self._get_db(agent_name)
+        tasks = db.list_tasks(agent_name, status="queued")
+        task = next((t for t in tasks if t["id"] == tid), None)
+        if not task:
+            return {"type": "error", "message": f"Task {tid} not found or not queued"}
+        asyncio.ensure_future(self._execute_task(agent_name, task))
+        return {"type": "result", "data": {"started": tid}}
+
+    # ── task runner background loop ──────────────────────────────────
+
+    async def _task_loop(self):
+        """Background loop that picks up queued tasks and runs them."""
+        while True:
+            try:
+                await asyncio.sleep(TASK_POLL_INTERVAL)
+                if len(self._running_tasks) >= MAX_CONCURRENT_TASKS:
+                    continue
+                for agent_dir in sorted(DB_DIR.iterdir()) if DB_DIR.exists() else []:
+                    if not agent_dir.is_dir():
+                        continue
+                    db = self._get_db(agent_dir.name)
+                    queued = db.list_tasks(agent_dir.name, status="queued")
+                    for task in queued:
+                        if len(self._running_tasks) >= MAX_CONCURRENT_TASKS:
+                            break
+                        if task["id"] not in self._running_tasks:
+                            coro = self._execute_task(agent_dir.name, task)
+                            self._running_tasks[task["id"]] = (
+                                asyncio.ensure_future(coro)
+                            )
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                log.exception("Task loop error")
+
+    async def _execute_task(self, agent_name, task):
+        """Run a single task through the agent conversation loop."""
+        tid = task["id"]
+        db = self._get_db(agent_name)
+        log.info("Task %s starting: %s", tid, task["description"][:60])
+        db.update_task(tid, "running")
+
+        agent_cfg = db.get_agent(agent_name) or {
+            "model": DEFAULT_MODEL,
+            "system_prompt": DEFAULT_SYSTEM_PROMPT,
+            "context": "",
+        }
+        messages = []
+        full_output = []
+
+        try:
+            async for event in runtime.process_message(
+                task["description"], agent_cfg, messages, db, agent_name
+            ):
+                etype = event.get("type", "")
+                if etype == "text":
+                    full_output.append(event.get("content", ""))
+                elif etype == "error":
+                    full_output.append(f"ERROR: {event.get('message', '')}")
+
+            result_text = "\n".join(full_output) or "(no output)"
+            db.update_task(tid, "completed", result=result_text[:50000])
+            self._tasks_completed += 1
+            log.info("Task %s completed", tid)
+        except asyncio.CancelledError:
+            db.update_task(tid, "cancelled", result="Cancelled by user")
+            log.info("Task %s cancelled", tid)
+        except Exception as exc:
+            log.exception("Task %s failed", tid)
+            db.update_task(tid, "failed", result=str(exc)[:5000])
+        finally:
+            self._running_tasks.pop(tid, None)
+
+    def _task_result(self, agent_name, req):
+        tid = req.get("task_id", "")
+        if not tid:
+            return {"type": "error", "message": "No task ID"}
+        db = self._get_db(agent_name)
+        tasks = db.list_tasks(agent_name)
+        task = next((t for t in tasks if t["id"] == tid), None)
+        if not task:
+            return {"type": "error", "message": f"Task {tid} not found"}
+        return {"type": "result", "data": {"task": task}}
+
     # ── lifecycle ────────────────────────────────────────────────────
 
     async def start(self):
@@ -320,7 +435,8 @@ class AgentDaemon:
         os.chmod(str(SOCKET_PATH), 0o600)
         PID_FILE.write_text(str(os.getpid()))
 
-        log.info("KmacAgent daemon started (PID: %d, socket: %s)",
+        self._task_runner = asyncio.ensure_future(self._task_loop())
+        log.info("KmacAgent daemon started (PID: %d, socket: %s, task runner: on)",
                  os.getpid(), SOCKET_PATH)
 
         loop = asyncio.get_event_loop()
@@ -334,6 +450,14 @@ class AgentDaemon:
 
     async def stop(self):
         log.info("Shutting down...")
+        if self._task_runner:
+            self._task_runner.cancel()
+            try:
+                await self._task_runner
+            except asyncio.CancelledError:
+                pass
+        for atask in list(self._running_tasks.values()):
+            atask.cancel()
         if self._server:
             self._server.close()
             await self._server.wait_closed()
@@ -352,10 +476,7 @@ def run_daemon():
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler(str(LOG_FILE)),
-            logging.StreamHandler(),
-        ],
+        handlers=[logging.FileHandler(str(LOG_FILE))],
     )
     daemon = AgentDaemon()
     asyncio.run(daemon.start())

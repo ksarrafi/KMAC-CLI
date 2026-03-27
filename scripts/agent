@@ -174,12 +174,22 @@ Memory:
   forget ID              Delete a memory
 
 Tasks:
-  task "description"     Queue a background task
-  tasks                  List tasks
+  task "description"     Queue a background task (auto-executed by daemon)
+  task run ID            Immediately trigger a queued task
+  task cancel ID         Cancel a running/queued task
+  task result ID         Show task output
+  tasks                  List all tasks
 
 Meta:
   logs                   Tail the daemon log
   help                   Show this help
+
+Integration:
+  Other KMAC tools can source _agent-hook.sh to call the agent:
+    agent_ask "question"       One-shot question
+    agent_diagnose "context"   Error diagnosis
+    agent_remember "fact"      Save to memory
+    agent_task "description"   Queue background task
 
 Examples:
   kmac agent start && kmac agent ask "what's in this repo?"
@@ -187,6 +197,8 @@ Examples:
   kmac agent create reviewer -m sonnet --context "You do strict code reviews"
   kmac agent remember "We deploy to AWS us-east-1"
   kmac agent memory search "deploy"
+  kmac agent task "scan all Dockerfiles for security issues"
+  kmac agent task result abc123
 EOF
 }
 
@@ -215,7 +227,16 @@ case "$subcmd" in
         fi ;;
     remember)    _auto_start && _engine memory-add "$@" ;;
     forget)      _auto_start && _engine memory-delete --id "$@" ;;
-    task)        _auto_start && _engine task-create "$@" ;;
+    task)
+        if [[ "${1:-}" == "cancel" ]]; then
+            shift; _auto_start && _engine task-cancel "$@"
+        elif [[ "${1:-}" == "run" ]]; then
+            shift; _auto_start && _engine task-run "$@"
+        elif [[ "${1:-}" == "result" || "${1:-}" == "show" ]]; then
+            shift; _auto_start && _engine task-result "$@"
+        else
+            _auto_start && _engine task-create "$@"
+        fi ;;
     tasks)       _auto_start && _engine tasks-list "$@" ;;
     logs)        tail -f "$AGENT_LOG" ;;
     -h|--help|help) show_help ;;

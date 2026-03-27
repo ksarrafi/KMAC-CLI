@@ -9,20 +9,21 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh" 2>/dev/null
 source "$SCRIPT_DIR/_hooks.sh"
-source "$SCRIPT_DIR/_auth-helper.sh"
-_ensure_claude_auth || exit 1
+source "$SCRIPT_DIR/_agent-hook.sh" 2>/dev/null
 
 DIFF_TARGET=""
 STAGED_ONLY=false
 MODE="normal"
+USE_AGENT=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --staged|-s) STAGED_ONLY=true; shift ;;
         --strict) MODE="strict"; shift ;;
         --quick|-q) MODE="quick"; shift ;;
+        --agent) USE_AGENT=true; shift ;;
         -h|--help)
-            echo "Usage: review [--staged] [--strict|--quick] [commit-range]"
+            echo "Usage: review [--staged] [--strict|--quick] [--agent] [commit-range]"
             exit 0 ;;
         *) DIFF_TARGET="$1"; shift ;;
     esac
@@ -50,6 +51,33 @@ hooks_emit pre-review
 REPO=$(basename "$(git rev-parse --show-toplevel)")
 BRANCH=$(git branch --show-current)
 FILE_COUNT=$(printf '%s\n' "$DIFF" | grep -c '^diff --git' || true)
+
+# Agent-powered review: uses KmacAgent with tool access for deeper analysis
+if $USE_AGENT && agent_running; then
+    title_box "AI Code Review (Agent)" "🔍"
+    echo -e "  Reviewing ${BOLD}$FILE_COUNT${NC} file(s) on ${BOLD}$REPO/$BRANCH${NC} via KmacAgent..."
+    echo ""
+
+    TONE=""
+    case "$MODE" in
+        quick) TONE="Be very brief. One-liners per issue. Skip anything minor." ;;
+        strict) TONE="Be thorough. Check security, error handling, edge cases, naming, tests. Rate overall: SHIP IT / NEEDS WORK / BLOCK." ;;
+        *) TONE="Be direct. Skip praise. Flag real issues only." ;;
+    esac
+
+    agent_ask "Review this diff from '$REPO' on branch '$BRANCH'. $TONE You can use tools to look at surrounding code for better context if needed.
+
+\`\`\`diff
+$(echo "$DIFF" | head -500)
+\`\`\`"
+
+    agent_remember "Reviewed $FILE_COUNT files in $REPO ($BRANCH) — $MODE mode"
+    hooks_emit post-review
+    exit 0
+fi
+
+source "$SCRIPT_DIR/_auth-helper.sh"
+_ensure_claude_auth || exit 1
 
 # Choose review depth based on mode and size
 REVIEW_MODEL="claude-sonnet-4-6"

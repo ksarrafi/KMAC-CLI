@@ -1,6 +1,6 @@
 #!/bin/bash
 # docker-health — Docker health monitoring with color-coded alerts
-# Usage: docker-health [--json] [--history]
+# Usage: docker-health [--json] [--history] [--diagnose]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh"
@@ -17,11 +17,13 @@ done
 HISTORY_FILE="$_KMAC_TMP/docker-history.json"
 OUTPUT_JSON=false
 SHOW_HISTORY=false
+DIAGNOSE=false
 
 for arg in "$@"; do
     case "$arg" in
         --json) OUTPUT_JSON=true ;;
         --history) SHOW_HISTORY=true ;;
+        --diagnose) DIAGNOSE=true ;;
     esac
 done
 
@@ -419,6 +421,23 @@ if [[ -z "$_SOCK" ]]; then
         echo -e "  ${RED}Docker socket not found. Is Docker Desktop running?${NC}"
     fi
     exit 1
+fi
+
+if $DIAGNOSE; then
+    source "$SCRIPT_DIR/_agent-hook.sh" 2>/dev/null
+    if ! agent_running 2>/dev/null; then
+        echo -e "  ${YELLOW}Agent not running.${NC} Start with: ${GREEN}kmac agent start${NC}"
+        echo -e "  Falling back to normal health check..."
+        DIAGNOSE=false
+    else
+        echo -e "  ${BOLD}Docker Health Diagnosis${NC}"
+        echo ""
+        health_json=$(collect_health 2>/dev/null)
+        agent_ask "Analyze this Docker health report and provide actionable recommendations. Flag any critical issues. Here's the JSON data:
+
+$health_json"
+        exit 0
+    fi
 fi
 
 if $SHOW_HISTORY; then

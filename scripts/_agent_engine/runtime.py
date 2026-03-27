@@ -1,6 +1,7 @@
 """Agent runtime — conversation loop with Claude API and tool dispatch."""
 
 import json
+import logging
 import os
 import platform
 import subprocess
@@ -10,7 +11,10 @@ import urllib.error
 from . import tools
 from .config import (
     DEFAULT_SYSTEM_PROMPT, MAX_TOKENS, MAX_TOOL_ROUNDS, API_TIMEOUT,
+    MODEL_SHORTCUTS,
 )
+
+log = logging.getLogger("kmac-agent")
 
 
 def get_api_key() -> str:
@@ -188,3 +192,107 @@ async def process_message(message, agent_config, session_messages,
         break
 
     yield {"type": "done"}
+
+    if len(session_messages) >= 4 and memory_db:
+        try:
+            log.info("Auto-memory: extracting from %d messages", len(session_messages))
+            await _extract_memories(
+                session_messages, agent_name, memory_db, api_key
+            )
+        except Exception:
+            log.warning("Auto-memory extraction failed", exc_info=True)
+
+
+_MEMORY_PROMPT = """\
+Review this conversation and extract 0-3 key facts worth remembering long-term.
+Only extract genuinely useful facts: project decisions, user preferences, environment details,
+architecture choices, deployment targets, credentials locations, etc.
+Do NOT extract transient information, greetings, or things that are obvious.
+If nothing is worth remembering, return an empty array.
+
+Return ONLY a JSON array of strings, e.g.: ["fact 1", "fact 2"]
+Return [] if nothing is worth saving."""
+
+
+async def _extract_memories(messages, agent_name, memory_db, api_key):
+    """Post-conversation: ask a cheap model to identify persistent facts."""
+    import asyncio
+
+    recent = messages[-8:]
+    convo = "\n".join(
+        f"{m['role']}: {m['content'] if isinstance(m['content'], str) else '[tool interaction]'}"
+        for m in recent
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant")
+        and isinstance(m.get("content"), str)
+    )
+    if len(convo) < 50:
+        log.info("Auto-memory: conversation too short (%d chars), skipping", len(convo))
+        return
+
+    extract_model = MODEL_SHORTCUTS.get("haiku", "claude-haiku-4-5")
+    body = json.dumps({
+        "model": extract_model,
+        "max_tokens": 512,
+        "system": _MEMORY_PROMPT,
+        "messages": [{"role": "user", "content": convo}],
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
+    )
+    loop = asyncio.get_event_loop()
+    try:
+        def _call():
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read())
+        response = await loop.run_in_executor(None, _call)
+    except Exception as exc:
+        log.info("Auto-memory: API call failed: %s", exc)
+        return
+
+    text = ""
+    for block in response.get("content", []):
+        if block.get("type") == "text":
+            text += block["text"]
+
+    text = text.strip()
+    # Strip markdown code fences if present
+    if "```" in text:
+        import re
+        match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
+        if match:
+            text = match.group(1).strip()
+
+    # Find the JSON array
+    bracket_start = text.find("[")
+    bracket_end = text.rfind("]")
+    if bracket_start >= 0 and bracket_end > bracket_start:
+        text = text[bracket_start:bracket_end + 1]
+
+    try:
+        facts = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        log.info("Auto-memory: could not parse response: %s", text[:100])
+        return
+
+    if not isinstance(facts, list):
+        return
+
+    if not facts:
+        log.info("Auto-memory: nothing worth remembering")
+        return
+
+    for fact in facts[:3]:
+        if isinstance(fact, str) and len(fact) > 10:
+            existing = memory_db.search_memories(agent_name, fact, limit=3)
+            if any(fact.lower() in m["content"].lower() or
+                   m["content"].lower() in fact.lower()
+                   for m in existing):
+                continue
+            memory_db.add_memory(agent_name, fact, "auto", "conversation")
+            log.info("Auto-memory saved: %s", fact[:60])
