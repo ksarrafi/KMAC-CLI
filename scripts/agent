@@ -1,0 +1,224 @@
+#!/bin/bash
+# agent — KmacAgent: persistent AI agent service for KMac-CLI
+#
+# Service:
+#   kmac agent start                Start the daemon
+#   kmac agent stop                 Stop the daemon
+#   kmac agent restart              Restart the daemon
+#   kmac agent status               Show daemon health
+#
+# Conversation:
+#   kmac agent ask "question"       One-shot question (auto-starts daemon)
+#   kmac agent chat                 Interactive session
+#   kmac agent chat -s <session>    Resume a session
+#   kmac agent chat -a devops       Talk to a specific agent
+#
+# Agents:
+#   kmac agent agents               List all agent profiles
+#   kmac agent create <name>        Create a new agent profile
+#   kmac agent delete <name>        Delete an agent
+#   kmac agent info [name]          Show agent details
+#
+# Sessions:
+#   kmac agent sessions             List conversation sessions
+#
+# Memory:
+#   kmac agent memory               List memories
+#   kmac agent memory search "X"    Search agent memory
+#   kmac agent remember "fact"      Teach the agent a fact
+#   kmac agent forget <id>          Delete a memory
+#
+# Tasks:
+#   kmac agent task "description"   Queue a background task
+#   kmac agent tasks                List tasks
+#
+# Meta:
+#   kmac agent logs                 Tail daemon log
+#   kmac agent help                 Show this help
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+source "$SCRIPT_DIR/_auth-helper.sh"
+
+AGENT_HOME="${HOME}/.cache/kmac/agent"
+AGENT_SOCK="${AGENT_HOME}/agent.sock"
+AGENT_PID="${AGENT_HOME}/agent.pid"
+AGENT_LOG="${AGENT_HOME}/agent.log"
+
+# ─── Engine ──────────────────────────────────────────────────────────
+
+_engine() {
+    PYTHONPATH="$SCRIPT_DIR" python3 -m _agent_engine "$@"
+}
+
+_is_running() {
+    [[ -S "$AGENT_SOCK" ]] || return 1
+    _engine ping &>/dev/null 2>&1
+}
+
+_auto_start() {
+    if ! _is_running; then
+        ui_warn "Agent not running — starting daemon..."
+        cmd_start || return 1
+        sleep 1
+    fi
+}
+
+# ─── Service Commands ────────────────────────────────────────────────
+
+cmd_start() {
+    if _is_running; then
+        ui_info "Agent already running"
+        return 0
+    fi
+    mkdir -p "$AGENT_HOME"
+    _ensure_claude_auth || exit 1
+
+    nohup env \
+        PYTHONPATH="$SCRIPT_DIR" \
+        ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+        python3 -m _agent_engine daemon \
+        >> "$AGENT_LOG" 2>&1 &
+    local pid=$!
+    disown "$pid" 2>/dev/null
+
+    local tries=0
+    while (( tries < 20 )); do
+        if [[ -S "$AGENT_SOCK" ]]; then
+            ui_success "KmacAgent started (PID: $pid)"
+            ui_dim "Socket: $AGENT_SOCK"
+            return 0
+        fi
+        sleep 0.25
+        ((tries++))
+    done
+
+    if kill -0 "$pid" 2>/dev/null; then
+        ui_success "KmacAgent started (PID: $pid)"
+    else
+        ui_fail "Failed to start. Check: $AGENT_LOG"
+        return 1
+    fi
+}
+
+cmd_stop() {
+    if [[ -f "$AGENT_PID" ]]; then
+        local pid
+        read -r pid < "$AGENT_PID"
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+            local tries=0
+            while (( tries < 20 )) && kill -0 "$pid" 2>/dev/null; do
+                sleep 0.25; ((tries++))
+            done
+            ui_success "Agent stopped (PID: $pid)"
+        else
+            ui_warn "Agent not running (stale PID)"
+            rm -f "$AGENT_PID" "$AGENT_SOCK"
+        fi
+    elif [[ -S "$AGENT_SOCK" ]]; then
+        rm -f "$AGENT_SOCK"
+        ui_warn "Removed stale socket"
+    else
+        ui_warn "Agent not running"
+    fi
+}
+
+cmd_status() {
+    title_box "KmacAgent" "🤖"
+    if _is_running; then
+        _engine status
+    else
+        echo -e "  Status:   ${DIM}○ Stopped${NC}"
+        echo ""
+        echo -e "  ${DIM}Start with:${NC} ${GREEN}kmac agent start${NC}"
+    fi
+    echo ""
+}
+
+# ─── Help ────────────────────────────────────────────────────────────
+
+show_help() {
+    cat <<'EOF'
+Usage: kmac agent <command> [options]
+
+Service:
+  start                  Start the agent daemon
+  stop                   Stop the daemon
+  restart                Restart the daemon
+  status                 Show daemon health + stats
+
+Conversation:
+  ask "question"         One-shot question with tool use
+  chat                   Interactive session
+    -a, --agent NAME     Agent profile to talk to (default: default)
+    -s, --session ID     Resume a session
+    -m, --model MODEL    Model override (opus, sonnet, haiku)
+
+Agents:
+  agents                 List all agent profiles
+  create NAME            Create a new agent profile
+    -m, --model MODEL    Model (default: sonnet)
+    --system-prompt "X"  Custom system prompt
+    --context "X"        Persistent context/rules
+  delete NAME            Delete an agent
+  info [NAME]            Show agent details
+
+Sessions:
+  sessions               List conversation sessions
+
+Memory:
+  memory                 List all memories
+  memory search "query"  Search agent memory
+  remember "fact"        Teach the agent something
+  forget ID              Delete a memory
+
+Tasks:
+  task "description"     Queue a background task
+  tasks                  List tasks
+
+Meta:
+  logs                   Tail the daemon log
+  help                   Show this help
+
+Examples:
+  kmac agent start && kmac agent ask "what's in this repo?"
+  kmac agent chat -a devops -m opus
+  kmac agent create reviewer -m sonnet --context "You do strict code reviews"
+  kmac agent remember "We deploy to AWS us-east-1"
+  kmac agent memory search "deploy"
+EOF
+}
+
+# ─── Router ──────────────────────────────────────────────────────────
+
+subcmd="${1:-chat}"
+shift 2>/dev/null || true
+
+case "$subcmd" in
+    start)       cmd_start ;;
+    stop)        cmd_stop ;;
+    restart)     cmd_stop; sleep 1; cmd_start ;;
+    status)      cmd_status ;;
+    ask)         _auto_start && _engine ask "$@" ;;
+    chat)        _auto_start && _engine chat "$@" ;;
+    agents)      _auto_start && _engine agents-list "$@" ;;
+    create)      _auto_start && _engine agent-create "$@" ;;
+    delete)      _auto_start && _engine agent-delete "$@" ;;
+    info)        _auto_start && _engine agent-info "$@" ;;
+    sessions)    _auto_start && _engine sessions-list "$@" ;;
+    memory)
+        if [[ "${1:-}" == "search" ]]; then
+            shift; _auto_start && _engine memory-search "$@"
+        else
+            _auto_start && _engine memory-list "$@"
+        fi ;;
+    remember)    _auto_start && _engine memory-add "$@" ;;
+    forget)      _auto_start && _engine memory-delete --id "$@" ;;
+    task)        _auto_start && _engine task-create "$@" ;;
+    tasks)       _auto_start && _engine tasks-list "$@" ;;
+    logs)        tail -f "$AGENT_LOG" ;;
+    -h|--help|help) show_help ;;
+    *)
+        _auto_start && _engine ask "$subcmd $*" ;;
+esac

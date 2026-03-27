@@ -194,6 +194,7 @@ random_tip() {
         "The ${GREEN}+${NC} key lets you build new tools with natural language"
         "Use ${GREEN}kmac pilot start${NC} to control your Mac from Telegram"
         "Press ${GREEN}R${NC} to run autonomous AI experiments on your code"
+        "Press ${GREEN}A${NC} for KmacAgent — AI that can run commands and edit files"
     )
     local idx=$(( RANDOM % ${#tips[@]} ))
     echo -e "  ${DIM}Tip:${NC} ${tips[$idx]}"

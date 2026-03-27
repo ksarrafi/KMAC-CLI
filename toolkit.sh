@@ -161,7 +161,7 @@ _refresh_status_cache() {
 declare -a PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
 _PLUGINS_DISCOVERED_TS=0
 
-_BUILTIN_KEYS="a v c s p e x k r d n . b u ? / i I o P R + 0 S A O G"
+_BUILTIN_KEYS="a A v c s p e x k r d n . b u ? / i I o P R + 0 S"
 
 discover_plugins() {
     local _now; _now=$(date +%s)
@@ -345,11 +345,10 @@ print_menu() {
     echo -e "   ${C_CYAN}${BOLD}AI & Research${NC}              ${C_TEAL}${BOLD}Dev${NC}                       ${C_GREEN}${BOLD}Infra${NC}"
     echo -e "   ${DIM}─────────────${NC}              ${DIM}───${NC}                       ${DIM}─────${NC}"
     echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}p${NC}  Project Launcher       ${GREEN}d${NC}  Docker Manager"
-    echo -e "   ${GREEN}o${NC}  Ollama (Local AI)      ${GREEN}e${NC}  Claude Code            ${GREEN}r${NC}  Remote Terminal"
-    echo -e "   ${GREEN}+${NC}  AI Toolmaker           ${GREEN}x${NC}  Cursor Agent           ${GREEN}P${NC}  Pilot ${DIM}(remote)${NC}"
-    echo -e "   ${GREEN}R${NC}  Research ${DIM}(autorun)${NC}     ${GREEN}v${NC}  Code Review            ${GREEN}n${NC}  Network Info"
-    echo -e "   ${GREEN}A${NC}  KMac Assistant          ${GREEN}c${NC}  Smart Commit           ${GREEN}k${NC}  Kill Port"
-    echo -e "   ${GREEN}O${NC}  KMac Orchestrator      ${GREEN}G${NC}  Skill Optimizer"
+    echo -e "   ${GREEN}A${NC}  KmacAgent ${DIM}(tools)${NC}     ${GREEN}e${NC}  Claude Code            ${GREEN}r${NC}  Remote Terminal"
+    echo -e "   ${GREEN}o${NC}  Ollama (Local AI)      ${GREEN}x${NC}  Cursor Agent           ${GREEN}P${NC}  Pilot ${DIM}(remote)${NC}"
+    echo -e "   ${GREEN}+${NC}  AI Toolmaker           ${GREEN}v${NC}  Code Review            ${GREEN}n${NC}  Network Info"
+    echo -e "   ${GREEN}R${NC}  Research ${DIM}(autorun)${NC}    ${GREEN}c${NC}  Smart Commit           ${GREEN}k${NC}  Kill Port"
     echo ""
     echo -e "   ${YELLOW}${BOLD}System${NC}"
     echo -e "   ${DIM}──────${NC}"
@@ -874,6 +873,7 @@ main() {
         case "$choice" in
             # AI
             a) clear; do_ask ;;
+            A) clear; bash "$SCRIPTS_DIR/agent" ;;
             +) clear; bash "$SCRIPTS_DIR/toolmaker"; pause ;;
             o) clear; bash "$SCRIPTS_DIR/ollama-setup" ;;
             R) clear; bash "$SCRIPTS_DIR/research" ;;
@@ -886,9 +886,6 @@ main() {
             # Infra
             d) clear; do_docker ;;
             r) clear; do_remote_terminal ;;
-            A) clear; bash "$SCRIPTS_DIR/assistant" ;;
-            O) clear; bash "$SCRIPTS_DIR/orchestrator" ;;
-            G) clear; bash "$SCRIPTS_DIR/skillopt" ;;
             P) clear; bash "$SCRIPTS_DIR/pilot" status; pause ;;
             n) clear; do_network ;;
             k) clear; echo -e "${BOLD}Kill Port:${NC}"; read -r -p "Port (blank=list): " pt; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" "$pt"; pause ;;
@@ -922,6 +919,7 @@ if [[ $# -gt 0 ]]; then
     subcmd="$1"; shift
     case "$subcmd" in
         ask)        exec bash "$SCRIPTS_DIR/ask" "$@" ;;
+        agent)      exec bash "$SCRIPTS_DIR/agent" "$@" ;;
         review)     exec bash "$SCRIPTS_DIR/review" "$@" ;;
         aicommit)   exec bash "$SCRIPTS_DIR/aicommit" "$@" ;;
         sessions)   exec bash "$SCRIPTS_DIR/sessions" "$@" ;;
@@ -946,9 +944,7 @@ if [[ $# -gt 0 ]]; then
         research) exec bash "$SCRIPTS_DIR/research" "$@" ;;
         software|sw) exec bash "$SCRIPTS_DIR/software" "$@" ;;
         ollama) exec bash "$SCRIPTS_DIR/ollama-setup" "$@" ;;
-        assistant|ai) exec bash "$SCRIPTS_DIR/assistant" "$@" ;;
-        orchestrator|orch) exec bash "$SCRIPTS_DIR/orchestrator" "$@" ;;
-        skillopt) exec bash "$SCRIPTS_DIR/skillopt" "$@" ;;
+        assistant|ai|orchestrator|orch|skillopt) exec bash "$SCRIPTS_DIR/agent" "$@" ;;
         version|-v|--version)
             print_logo
             echo ""
@@ -974,6 +970,7 @@ if [[ $# -gt 0 ]]; then
             echo ""
             echo -e "  ${BOLD}AI & Research${NC}"
             echo "    ask \"question\"        Ask Claude (or -i for interactive, -m opus)"
+            echo "    agent                 AI agent with tool use (files, commands, search)"
             echo "    make \"description\"    Build a new tool with AI"
             echo "    research [cmd]        Autonomous experiment runner (init|run|status|review|stop)"
             echo "    ollama [cmd]          Local AI setup (install|models|serve|stop|status|chat)"
@@ -1002,11 +999,7 @@ if [[ $# -gt 0 ]]; then
             echo "    doctor                Health check"
             echo ""
             echo -e "  ${BOLD}AI Services${NC}"
-            echo "    assistant [cmd]       KMac AI Assistant gateway (start|stop|chat|sessions|status)"
-            echo "    ai [cmd]              Alias for assistant"
-            echo "    orchestrator [cmd]    KMac Orchestrator (start|stop|status|task|agents|costs|approve)"
-            echo "    orch [cmd]            Alias for orchestrator"
-            echo "    skillopt [cmd]        Skill Optimizer (init|run|status) — Karpathy-style eval loops"
+            echo "    agent [cmd]           KmacAgent daemon (start|stop|ask|chat|agents|tasks|memory|workflows)"
             echo ""
             echo -e "  ${BOLD}Meta${NC}"
             echo "    help, -h              Show this help"
