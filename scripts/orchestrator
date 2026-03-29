@@ -463,11 +463,62 @@ do_logs() {
 do_menu() {
     while true; do
         clear
-        do_dashboard
+        title_box "KMac Orchestrator" "🎯"
+        echo ""
+        echo -e "  ${BOLD}What is this?${NC}"
+        echo -e "  A control plane that manages your AI agents as a team."
+        echo -e "  Create tasks, assign them to Claude Code, Cursor, the"
+        echo -e "  KMac Assistant, or shell scripts — and track progress,"
+        echo -e "  costs, and approvals from one place."
+        echo ""
+        echo -e "  ${BOLD}How to use it:${NC}"
+        echo -e "  ${DIM}1.${NC} Press ${GREEN}s${NC} to start the orchestrator (runs on port 7892)"
+        echo -e "  ${DIM}2.${NC} Press ${GREEN}t${NC} to create a task (e.g. \"Add dark mode to the app\")"
+        echo -e "  ${DIM}3.${NC} Assign it to an agent and dispatch — the agent runs it"
+        echo -e "  ${DIM}4.${NC} Review results, approve or reject, track costs"
+        echo ""
+        echo -e "  ${DIM}CLI:  kmac orch task create \"Build login page\"${NC}"
+        echo -e "  ${DIM}API:  curl http://127.0.0.1:7892/api/dashboard${NC}"
+        echo ""
 
-        echo -e "  ${GREEN}t${NC}) Task       ${GREEN}a${NC}) Agents     ${GREEN}c${NC}) Costs"
-        echo -e "  ${GREEN}p${NC}) Approvals  ${GREEN}l${NC}) Logs       ${GREEN}r${NC}) Restart"
-        echo -e "  ${GREEN}s${NC}) Start      ${GREEN}x${NC}) Stop       ${GREEN}m${NC}) Back"
+        # Live status section
+        if _is_running; then
+            local pid; pid=$(_server_pid)
+            echo -e "  ${DIM}┌─ status ──────────────────────────────────────────┐${NC}"
+            echo -e "  ${DIM}│${NC}  ${GREEN}● Running${NC}  PID $pid  port $PORT                      ${DIM}│${NC}"
+
+            local stats
+            stats=$(_api GET /api/stats 2>/dev/null)
+            if [[ -n "$stats" ]]; then
+                echo "$stats" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+t = d.get('tasks', {})
+c = d.get('costs', {})
+agents = d.get('agents', [])
+idle = sum(1 for a in agents if a['status'] == 'idle')
+busy = sum(1 for a in agents if a['status'] == 'busy')
+off  = sum(1 for a in agents if a['status'] == 'offline')
+print(f'  \033[2m│\033[0m  Agents: \033[32m{idle} idle\033[0m  \033[33m{busy} busy\033[0m  \033[2m{off} offline\033[0m                 \033[2m│\033[0m')
+print(f'  \033[2m│\033[0m  Tasks:  {t.get(\"pending\",0)} pending  {t.get(\"running\",0)} running  {t.get(\"done\",0)} done  {t.get(\"failed\",0)} failed   \033[2m│\033[0m')
+print(f'  \033[2m│\033[0m  Cost:   \${c.get(\"last24hUsd\",0):.4f} today  \${c.get(\"totalUsd\",0):.4f} total            \033[2m│\033[0m')
+" 2>/dev/null
+            fi
+            echo -e "  ${DIM}└────────────────────────────────────────────────────┘${NC}"
+        else
+            echo -e "  ${DIM}┌─ status ──────────────────────────────────────────┐${NC}"
+            echo -e "  ${DIM}│${NC}  ${DIM}○ Stopped${NC}  ${DIM}— press${NC} ${GREEN}s${NC} ${DIM}to start${NC}                     ${DIM}│${NC}"
+            echo -e "  ${DIM}└────────────────────────────────────────────────────┘${NC}"
+        fi
+
+        echo ""
+        echo -e "   ${C_CYAN}${BOLD}Tasks${NC}                      ${C_TEAL}${BOLD}Service${NC}                    ${C_GREEN}${BOLD}Monitor${NC}"
+        echo -e "   ${DIM}─────${NC}                      ${DIM}───────${NC}                    ${DIM}───────${NC}"
+        echo -e "   ${GREEN}t${NC}  Task Manager           ${GREEN}s${NC}  Start                   ${GREEN}a${NC}  Agents"
+        echo -e "   ${GREEN}p${NC}  Approvals              ${GREEN}x${NC}  Stop                    ${GREEN}c${NC}  Costs"
+        echo -e "   ${GREEN}d${NC}  Dashboard              ${GREEN}r${NC}  Restart                 ${GREEN}l${NC}  Logs"
+        echo ""
+        echo -e "  ${DIM}m) Back to main menu${NC}"
         echo ""
         read -r -n1 -p "  > " ch; echo ""
         case "$ch" in
@@ -475,10 +526,11 @@ do_menu() {
             a) do_agents ;;
             c) do_costs ;;
             p) do_approve ;;
+            d) do_dashboard; read -r -n1 -p "  Press any key..." ;;
             l) do_logs; read -r -n1 -p "  Press any key..." ;;
-            r) do_restart ;;
-            s) do_start ;;
-            x) do_stop ;;
+            r) do_restart; read -r -n1 -p "  Press any key..." ;;
+            s) do_start; read -r -n1 -p "  Press any key..." ;;
+            x) do_stop; read -r -n1 -p "  Press any key..." ;;
             m|q) return ;;
         esac
     done

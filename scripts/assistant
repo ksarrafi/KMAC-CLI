@@ -288,27 +288,46 @@ do_sessions() {
 do_interactive() {
     while true; do
         clear
-        title_box "KMac Assistant — AI Gateway" "🤖"
+        title_box "KMac Assistant" "🤖"
+        echo ""
+        echo -e "  ${BOLD}What is this?${NC}"
+        echo -e "  Your personal AI assistant that runs as a local service."
+        echo -e "  It connects Claude to your machine with full tool access"
+        echo -e "  (shell, files, web, system info) and lets you chat from"
+        echo -e "  the terminal, Telegram, Discord, or any HTTP client."
+        echo ""
+        echo -e "  ${BOLD}How to use it:${NC}"
+        echo -e "  ${DIM}1.${NC} Press ${GREEN}s${NC} to start the gateway (runs on port 7891)"
+        echo -e "  ${DIM}2.${NC} Press ${GREEN}c${NC} to open a chat — ask anything, it can run"
+        echo -e "     commands, read/write files, search the web, and more"
+        echo -e "  ${DIM}3.${NC} Connect Telegram/Discord for mobile access"
+        echo ""
+        echo -e "  ${DIM}CLI:  kmac assistant chat${NC}"
+        echo -e "  ${DIM}API:  curl http://127.0.0.1:7891/api/sessions${NC}"
+        echo ""
+        echo -e "  ${DIM}┌─ status ──────────────────────────────────────────┐${NC}"
 
         local pid; pid=$(_gateway_pid)
         if [[ -n "$pid" ]]; then
             if _gateway_healthy; then
-                echo -e "  Status: ${GREEN}● Running${NC}  ${DIM}(PID $pid)${NC}"
+                echo -e "  ${DIM}│${NC}  ${GREEN}● Running${NC}  PID $pid  URL $(_gateway_url)           ${DIM}│${NC}"
             else
-                echo -e "  Status: ${YELLOW}● Running (unhealthy)${NC}  ${DIM}(PID $pid)${NC}"
+                echo -e "  ${DIM}│${NC}  ${YELLOW}● Unhealthy${NC}  PID $pid                            ${DIM}│${NC}"
             fi
-            echo -e "  URL:    ${GREEN}$(_gateway_url)${NC}"
         else
-            echo -e "  Status: ${DIM}○ Stopped${NC}"
+            echo -e "  ${DIM}│${NC}  ${DIM}○ Stopped${NC}  ${DIM}— press${NC} ${GREEN}s${NC} ${DIM}to start${NC}                     ${DIM}│${NC}"
         fi
+        echo -e "  ${DIM}└────────────────────────────────────────────────────┘${NC}"
+
         echo ""
-        echo -e "  ${GREEN}c${NC}) Chat                  ${GREEN}s${NC}) Start Gateway"
-        echo -e "  ${GREEN}S${NC}) Stop                  ${GREEN}r${NC}) Restart"
-        echo -e "  ${GREEN}t${NC}) Token                 ${GREEN}l${NC}) Logs ${DIM}(follow)${NC}"
-        echo -e "  ${GREEN}n${NC}) Sessions              ${GREEN}i${NC}) Status"
-        echo -e "  ${GREEN}h${NC}) Channels              ${GREEN}k${NC}) Skills"
+        echo -e "   ${C_CYAN}${BOLD}Chat${NC}                       ${C_TEAL}${BOLD}Service${NC}                    ${C_GREEN}${BOLD}Config${NC}"
+        echo -e "   ${DIM}────${NC}                       ${DIM}───────${NC}                    ${DIM}──────${NC}"
+        echo -e "   ${GREEN}c${NC}  Open Chat              ${GREEN}s${NC}  Start Gateway           ${GREEN}h${NC}  Channels"
+        echo -e "   ${GREEN}n${NC}  Sessions               ${GREEN}S${NC}  Stop                    ${GREEN}k${NC}  Skills"
+        echo -e "   ${GREEN}t${NC}  Show Token             ${GREEN}r${NC}  Restart                 ${GREEN}i${NC}  Status"
+        echo -e "                              ${GREEN}l${NC}  Logs ${DIM}(follow)${NC}"
         echo ""
-        echo -e "  ${DIM}m) Back${NC}"
+        echo -e "  ${DIM}m) Back to main menu${NC}"
         echo ""
         read -r -n1 -p "  > " ch; echo ""
         case "$ch" in
