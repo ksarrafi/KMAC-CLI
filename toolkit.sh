@@ -161,7 +161,7 @@ _refresh_status_cache() {
 declare -a PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
 _PLUGINS_DISCOVERED_TS=0
 
-_BUILTIN_KEYS="a v c s p e x k r d n . b u ? / i I o P R + 0 S w l A O"
+_BUILTIN_KEYS="a v c s p e x k r d n . b u ? / i I o P R + 0 S A O"
 
 discover_plugins() {
     local _now; _now=$(date +%s)
@@ -351,12 +351,11 @@ print_menu() {
     echo -e "   ${GREEN}A${NC}  KMac Assistant          ${GREEN}c${NC}  Smart Commit           ${GREEN}k${NC}  Kill Port"
     echo -e "   ${GREEN}O${NC}  KMac Orchestrator"
     echo ""
-    echo -e "   ${C_BLUE}${BOLD}External Platforms${NC}         ${YELLOW}${BOLD}System${NC}"
-    echo -e "   ${DIM}──────────────────${NC}         ${DIM}──────${NC}"
-    echo -e "   ${GREEN}w${NC}  Paperclip ${DIM}(external)${NC}   ${GREEN}S${NC}  Storage Manager        ${GREEN}u${NC}  Check Updates"
-    echo -e "   ${GREEN}l${NC}  OpenClaw ${DIM}(external)${NC}   ${GREEN}.${NC}  Secrets & Keys         ${GREEN}b${NC}  Backup Dotfiles"
-    echo -e "                             ${GREEN}i${NC}  Install / Bootstrap    ${GREEN}I${NC}  Software Manager"
-    echo -e "                             ${GREEN}?${NC}  Health Check           ${GREEN}/${NC}  Aliases"
+    echo -e "   ${YELLOW}${BOLD}System${NC}"
+    echo -e "   ${DIM}──────${NC}"
+    echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}u${NC}  Check Updates          ${GREEN}b${NC}  Backup Dotfiles"
+    echo -e "   ${GREEN}.${NC}  Secrets & Keys         ${GREEN}i${NC}  Install / Bootstrap    ${GREEN}I${NC}  Software Manager"
+    echo -e "   ${GREEN}?${NC}  Health Check           ${GREEN}/${NC}  Aliases"
 
     # ─── Plugins (sorted by key, 3-column grid) ───
     if (( ${#PLUGIN_NAMES[@]} > 0 )); then
@@ -889,9 +888,6 @@ main() {
             r) clear; do_remote_terminal ;;
             A) clear; bash "$SCRIPTS_DIR/assistant" ;;
             O) clear; bash "$SCRIPTS_DIR/orchestrator" ;;
-            # External Platforms
-            w) clear; bash "$SCRIPTS_DIR/paperclip" ;;
-            l) clear; bash "$SCRIPTS_DIR/openclaw" ;;
             P) clear; bash "$SCRIPTS_DIR/pilot" status; pause ;;
             n) clear; do_network ;;
             k) clear; echo -e "${BOLD}Kill Port:${NC}"; read -r -p "Port (blank=list): " pt; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" "$pt"; pause ;;
@@ -951,8 +947,6 @@ if [[ $# -gt 0 ]]; then
         ollama) exec bash "$SCRIPTS_DIR/ollama-setup" "$@" ;;
         assistant|ai) exec bash "$SCRIPTS_DIR/assistant" "$@" ;;
         orchestrator|orch) exec bash "$SCRIPTS_DIR/orchestrator" "$@" ;;
-        paperclip) exec bash "$SCRIPTS_DIR/paperclip" "$@" ;;
-        openclaw) exec bash "$SCRIPTS_DIR/openclaw" "$@" ;;
         version|-v|--version)
             print_logo
             echo ""
@@ -1010,10 +1004,6 @@ if [[ $# -gt 0 ]]; then
             echo "    ai [cmd]              Alias for assistant"
             echo "    orchestrator [cmd]    KMac Orchestrator (start|stop|status|task|agents|costs|approve)"
             echo "    orch [cmd]            Alias for orchestrator"
-            echo ""
-            echo -e "  ${BOLD}External Platforms${NC}"
-            echo "    paperclip [cmd]       Paperclip orchestration (start|stop|status|logs|open|doctor)"
-            echo "    openclaw [cmd]        OpenClaw AI assistant (install|start|stop|status|doctor|onboard|devices|channels)"
             echo ""
             echo -e "  ${BOLD}Meta${NC}"
             echo "    help, -h              Show this help"
