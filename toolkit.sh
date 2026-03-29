@@ -161,7 +161,7 @@ _refresh_status_cache() {
 declare -a PLUGIN_NAMES=() PLUGIN_PATHS=() PLUGIN_DESCS=() PLUGIN_KEYS=()
 _PLUGINS_DISCOVERED_TS=0
 
-_BUILTIN_KEYS="a v c s p e x k r d n . b u ? / i I o P R + 0 S"
+_BUILTIN_KEYS="a v c s p e x k r d n . b u ? / i I o P R + 0 S w l A"
 
 discover_plugins() {
     local _now; _now=$(date +%s)
@@ -308,6 +308,36 @@ print_menu() {
             echo -e "  ${DIM}│${NC}  ${YELLOW}▸${NC} ${_ucount} update(s) available ${DIM}— press${NC} ${BOLD}u${NC} ${DIM}to review${NC}           ${DIM}│${NC}"
         fi
     fi
+    # ─── System Stats ───
+    local _df_out _disk_used _disk_total _disk_pct _disk_num
+    _df_out=$(df -H / 2>/dev/null | tail -1)
+    _disk_used=$(echo "$_df_out" | awk '{print $3}')
+    _disk_total=$(echo "$_df_out" | awk '{print $2}')
+    _disk_pct=$(echo "$_df_out" | awk '{print $5}')
+    _disk_num=${_disk_pct%%%}
+
+    local _up_raw _uptime _load
+    _up_raw=$(uptime 2>/dev/null)
+    _uptime=$(echo "$_up_raw" | sed 's/.*up //;s/, [0-9]* user.*//' \
+        | sed 's/ days*/d/;s/ mins*/m/;s/,//;s/\([0-9]*\):[0-9]*/\1h/' | xargs)
+    _load=$(echo "$_up_raw" | sed 's/.*load average[s]*: //' | awk '{print $1}')
+
+    local _bat _bat_str=""
+    _bat=$(pmset -g batt 2>/dev/null | grep -o '[0-9]*%' | head -1)
+    [[ -n "$_bat" ]] && _bat_str="  ${DIM}·${NC}  Bat ${_bat}"
+
+    local _disk_color="${NC}"
+    (( _disk_num > 75 )) && _disk_color="${YELLOW}"
+    (( _disk_num > 90 )) && _disk_color="${RED}"
+
+    local _vis
+    printf -v _vis "  Disk %s/%s %s  ·  Load %s  ·  Up %s" \
+        "$_disk_used" "$_disk_total" "$_disk_pct" "$_load" "$_uptime"
+    [[ -n "$_bat" ]] && printf -v _vis "%s  ·  Bat %s" "$_vis" "$_bat"
+    local _spad; printf -v _spad '%*s' "$(( 50 - ${#_vis} ))" "" 2>/dev/null || _spad=" "
+
+    echo -e "  ${DIM}├─ system ─────────────────────────────────────────┤${NC}"
+    echo -e "  ${DIM}│${NC}  Disk ${_disk_used}/${_disk_total} ${_disk_color}${_disk_pct}${NC}  ${DIM}·${NC}  Load ${_load}  ${DIM}·${NC}  Up ${_uptime}${_bat_str}${_spad}${DIM}│${NC}"
     echo -e "  ${DIM}└────────────────────────────────────────────────────┘${NC}"
 
     # ─── Commands — 3-column layout ───
@@ -317,31 +347,41 @@ print_menu() {
     echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}p${NC}  Project Launcher       ${GREEN}d${NC}  Docker Manager"
     echo -e "   ${GREEN}o${NC}  Ollama (Local AI)      ${GREEN}e${NC}  Claude Code            ${GREEN}r${NC}  Remote Terminal"
     echo -e "   ${GREEN}+${NC}  AI Toolmaker           ${GREEN}x${NC}  Cursor Agent           ${GREEN}P${NC}  Pilot ${DIM}(remote)${NC}"
-    echo -e "   ${GREEN}R${NC}  Research ${DIM}(autorun)${NC}    ${GREEN}v${NC}  Code Review            ${GREEN}n${NC}  Network Info"
-    echo -e "                              ${GREEN}c${NC}  Smart Commit           ${GREEN}k${NC}  Kill Port"
+    echo -e "   ${GREEN}R${NC}  Research ${DIM}(autorun)${NC}     ${GREEN}v${NC}  Code Review            ${GREEN}n${NC}  Network Info"
+    echo -e "   ${GREEN}A${NC}  KMac Assistant          ${GREEN}c${NC}  Smart Commit           ${GREEN}k${NC}  Kill Port"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}System${NC}"
-    echo -e "   ${DIM}──────${NC}"
-    echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}b${NC}  Backup Dotfiles        ${GREEN}u${NC}  Check Updates"
-    echo -e "   ${GREEN}.${NC}  Secrets & Keys         ${GREEN}i${NC}  Install / Bootstrap    ${GREEN}I${NC}  Software Manager"
-    echo -e "   ${GREEN}?${NC}  Health Check           ${GREEN}/${NC}  Aliases"
+    echo -e "   ${C_BLUE}${BOLD}AI Platforms${NC}               ${YELLOW}${BOLD}System${NC}"
+    echo -e "   ${DIM}────────────${NC}               ${DIM}──────${NC}"
+    echo -e "   ${GREEN}w${NC}  Paperclip ${DIM}(orchestr.)${NC}  ${GREEN}S${NC}  Storage Manager        ${GREEN}u${NC}  Check Updates"
+    echo -e "   ${GREEN}l${NC}  OpenClaw ${DIM}(assistant)${NC}  ${GREEN}.${NC}  Secrets & Keys         ${GREEN}b${NC}  Backup Dotfiles"
+    echo -e "                             ${GREEN}i${NC}  Install / Bootstrap    ${GREEN}I${NC}  Software Manager"
+    echo -e "                             ${GREEN}?${NC}  Health Check           ${GREEN}/${NC}  Aliases"
 
-    # ─── Plugins ───
+    # ─── Plugins (sorted by key, 3-column grid) ───
     if (( ${#PLUGIN_NAMES[@]} > 0 )); then
         echo ""
-        echo -e "   ${MAGENTA}${BOLD}Plugins${NC}"
+        echo -e "   ${MAGENTA}${BOLD}Plugins${NC}  ${DIM}— drop-in extensions${NC}"
         echo -e "   ${DIM}───────${NC}"
-        for idx in "${!PLUGIN_NAMES[@]}"; do
-            local pkey="${PLUGIN_KEYS[$idx]:-$((idx+1))}"
-            printf "   ${GREEN}${pkey}${NC})  %-22s ${DIM}%s${NC}\n" "${PLUGIN_NAMES[$idx]}" "${PLUGIN_DESCS[$idx]}"
+        local _sorted_pi=()
+        _sorted_pi=($(
+            for _si in "${!PLUGIN_KEYS[@]}"; do
+                printf '%s %s\n' "${PLUGIN_KEYS[$_si]:-$((_si+1))}" "$_si"
+            done | sort -n -k1 | awk '{print $2}'
+        ))
+        local _pcol=0
+        for _si in "${_sorted_pi[@]}"; do
+            local _pk="${PLUGIN_KEYS[$_si]:-$((_si+1))}"
+            printf "   ${GREEN}%s${NC})  %-22s" "$_pk" "${PLUGIN_NAMES[$_si]}"
+            ((_pcol++))
+            if (( _pcol % 3 == 0 )); then echo ""; fi
         done
+        (( _pcol % 3 != 0 )) && echo ""
     fi
 
-    # ─── Footer with tip ───
+    # ─── Footer ───
     echo ""
     echo -e "  ${DIM}─────────────────────────────────────────────────────${NC}"
     random_tip
-    echo ""
     echo -e "   ${DIM}0  Exit${NC}"
     echo ""
 }
@@ -846,6 +886,10 @@ main() {
             # Infra
             d) clear; do_docker ;;
             r) clear; do_remote_terminal ;;
+            A) clear; bash "$SCRIPTS_DIR/assistant" ;;
+            # AI Platforms
+            w) clear; bash "$SCRIPTS_DIR/paperclip" ;;
+            l) clear; bash "$SCRIPTS_DIR/openclaw" ;;
             P) clear; bash "$SCRIPTS_DIR/pilot" status; pause ;;
             n) clear; do_network ;;
             k) clear; echo -e "${BOLD}Kill Port:${NC}"; read -r -p "Port (blank=list): " pt; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" "$pt"; pause ;;
@@ -903,6 +947,9 @@ if [[ $# -gt 0 ]]; then
         research) exec bash "$SCRIPTS_DIR/research" "$@" ;;
         software|sw) exec bash "$SCRIPTS_DIR/software" "$@" ;;
         ollama) exec bash "$SCRIPTS_DIR/ollama-setup" "$@" ;;
+        assistant|ai) exec bash "$SCRIPTS_DIR/assistant" "$@" ;;
+        paperclip) exec bash "$SCRIPTS_DIR/paperclip" "$@" ;;
+        openclaw) exec bash "$SCRIPTS_DIR/openclaw" "$@" ;;
         version|-v|--version)
             print_logo
             echo ""
@@ -954,6 +1001,14 @@ if [[ $# -gt 0 ]]; then
             echo "    dotbackup [cmd]       Backup/restore/diff/hook dotfiles"
             echo "    update                Check for updates"
             echo "    doctor                Health check"
+            echo ""
+            echo -e "  ${BOLD}AI Assistant${NC}"
+            echo "    assistant [cmd]       KMac AI Assistant gateway (start|stop|chat|sessions|status)"
+            echo "    ai [cmd]              Alias for assistant"
+            echo ""
+            echo -e "  ${BOLD}AI Platforms${NC}"
+            echo "    paperclip [cmd]       Paperclip orchestration (start|stop|status|logs|open|doctor)"
+            echo "    openclaw [cmd]        OpenClaw AI assistant (install|start|stop|status|doctor|onboard|devices|channels)"
             echo ""
             echo -e "  ${BOLD}Meta${NC}"
             echo "    help, -h              Show this help"

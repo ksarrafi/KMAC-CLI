@@ -120,6 +120,18 @@ kmac ollama status              # Check server + model status
 
 **AI Self-Healing** — built into every tool. When a command fails, KMac catches the error output, sends it to Claude with context about what was attempted, and presents a suggested fix command. Handles shell environments like nvm and rvm automatically. You choose to apply the fix, retry, or skip.
 
+**KMac Assistant** (`A` / `kmac assistant`) — a personal AI gateway inspired by [OpenClaw](https://github.com/openclaw/openclaw). Always-on TypeScript service with a WebSocket control plane, Claude agent with tool use (bash, file ops, grep, web fetch, system info), persistent sessions, and multi-channel messaging. Message your AI from Telegram, Discord, or the CLI and get back tool-augmented responses.
+
+```bash
+kmac assistant start          # Start the gateway on :7891
+kmac assistant chat           # Interactive CLI chat with tool use
+kmac ai chat                  # Alias
+```
+
+Features: Telegram and Discord channel adapters with chat commands (`/new`, `/status`, `/compact`, `/help`, `/tools`, `/whoami`), skills system (`~/.config/kmac/assistant/skills/`), cron scheduler for recurring tasks, webhook endpoint for external triggers, REST API + WebSocket gateway with OpenClaw-compatible req/res/event protocol.
+
+**AI Platforms** (`w` Paperclip / `l` OpenClaw) — first-class integration with [Paperclip](https://github.com/paperclipai/paperclip) (AI agent orchestration) and [OpenClaw](https://github.com/openclaw/openclaw) (personal AI assistant). Manage servers, run onboarding, control channels and devices, all from the KMac menu.
+
 ---
 
 ### 2. Docker Management

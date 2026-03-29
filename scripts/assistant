@@ -1,0 +1,446 @@
+#!/bin/bash
+# assistant — KMac AI Assistant gateway manager
+# Usage: assistant start|stop|status|chat|logs|config|help
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+
+ASSISTANT_DIR="$SCRIPT_DIR/../assistant"
+CONFIG_DIR="$HOME/.config/kmac/assistant"
+RUN_DIR="$CONFIG_DIR/run"
+PID_FILE="$RUN_DIR/gateway.pid"
+TOKEN_FILE="$RUN_DIR/gateway.token"
+INFO_FILE="$RUN_DIR/gateway.json"
+LOG_FILE="$RUN_DIR/gateway.log"
+
+_ensure_dirs() {
+    mkdir -p "$CONFIG_DIR" "$RUN_DIR"
+    chmod 700 "$CONFIG_DIR" "$RUN_DIR"
+}
+
+_check_prereqs() {
+    if ! command -v node &>/dev/null; then
+        ui_fail "Node.js >= 20 is required"
+        return 1
+    fi
+    if [[ ! -d "$ASSISTANT_DIR" ]]; then
+        ui_fail "Assistant directory not found: $ASSISTANT_DIR"
+        return 1
+    fi
+}
+
+_ensure_deps() {
+    if [[ ! -d "$ASSISTANT_DIR/node_modules" ]]; then
+        ui_info "Installing dependencies (first run)..."
+        (cd "$ASSISTANT_DIR" && npm install --no-fund --no-audit) || {
+            ui_fail "npm install failed"
+            return 1
+        }
+    fi
+}
+
+_gateway_pid() {
+    local pid=""
+    [[ -f "$PID_FILE" ]] && read -r pid < "$PID_FILE" 2>/dev/null
+    [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+
+_gateway_port() {
+    if [[ -f "$INFO_FILE" ]]; then
+        grep -o '"port":[0-9]*' "$INFO_FILE" 2>/dev/null | cut -d: -f2
+    else
+        echo "7891"
+    fi
+}
+
+_gateway_url() {
+    local port; port=$(_gateway_port)
+    echo "http://127.0.0.1:${port}"
+}
+
+_gateway_healthy() {
+    curl -sf --max-time 2 "$(_gateway_url)/health" &>/dev/null
+}
+
+_get_token() {
+    [[ -f "$TOKEN_FILE" ]] && cat "$TOKEN_FILE" 2>/dev/null
+}
+
+_ensure_anthropic_key() {
+    if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+        # Try vault
+        if [[ -f "$SCRIPT_DIR/_vault.sh" ]]; then
+            source "$SCRIPT_DIR/_vault.sh" 2>/dev/null
+            local key; key=$(vault_get "anthropic" 2>/dev/null)
+            if [[ -n "$key" ]]; then
+                export ANTHROPIC_API_KEY="$key"
+                return 0
+            fi
+        fi
+        ui_fail "ANTHROPIC_API_KEY is not set"
+        echo "  Set it with: kmac secrets set anthropic"
+        echo "  Or: export ANTHROPIC_API_KEY=sk-ant-..."
+        return 1
+    fi
+}
+
+do_start() {
+    _ensure_dirs
+    _check_prereqs || return 1
+    _ensure_deps || return 1
+    _ensure_anthropic_key || return 1
+
+    local pid; pid=$(_gateway_pid)
+    if [[ -n "$pid" ]]; then
+        ui_warn "Assistant already running (PID $pid)"
+        return 0
+    fi
+
+    ui_info "Starting KMac Assistant gateway..."
+    (cd "$ASSISTANT_DIR" && \
+        ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+        nohup npx tsx src/index.ts >> "$LOG_FILE" 2>&1 &
+        echo $! > "$PID_FILE"
+    )
+
+    local attempts=0
+    while (( attempts < 15 )); do
+        if _gateway_healthy; then
+            local token; token=$(_get_token)
+            local port; port=$(_gateway_port)
+            ui_success "Assistant started (PID $(cat "$PID_FILE"))"
+            echo ""
+            echo "  URL:   http://127.0.0.1:${port}"
+            echo "  WS:    ws://127.0.0.1:${port}/ws"
+            echo "  Token: ${token:0:8}..."
+            echo "  Logs:  $LOG_FILE"
+            echo ""
+            return 0
+        fi
+        sleep 1
+        ((attempts++))
+    done
+
+    ui_fail "Gateway failed to start — check $LOG_FILE"
+    return 1
+}
+
+do_stop() {
+    local pid; pid=$(_gateway_pid)
+    if [[ -z "$pid" ]]; then
+        ui_warn "Assistant not running"
+        rm -f "$PID_FILE"
+        return 0
+    fi
+    ui_info "Stopping assistant (PID $pid)..."
+    kill "$pid" 2>/dev/null
+    local i=0
+    while (( i < 10 )) && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.5; ((i++))
+    done
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+    rm -f "$PID_FILE"
+    ui_success "Assistant stopped"
+}
+
+do_restart() {
+    do_stop; sleep 1; do_start
+}
+
+do_status() {
+    local pid; pid=$(_gateway_pid)
+    if [[ -n "$pid" ]]; then
+        ui_success "Assistant running (PID $pid)"
+        echo ""
+        if _gateway_healthy; then
+            local resp; resp=$(curl -sf "$(_gateway_url)/health" 2>/dev/null)
+            echo "  URL:      $(_gateway_url)"
+            echo "  Health:   OK"
+            echo "  Sessions: $(echo "$resp" | grep -o '"sessions":[0-9]*' | cut -d: -f2)"
+            echo "  Clients:  $(echo "$resp" | grep -o '"clients":[0-9]*' | cut -d: -f2)"
+            echo "  Uptime:   $(echo "$resp" | grep -o '"uptime":[0-9]*' | cut -d: -f2)s"
+        else
+            echo "  Health:   NOT RESPONDING"
+        fi
+    else
+        ui_warn "Assistant not running"
+        rm -f "$PID_FILE"
+    fi
+}
+
+do_chat() {
+    if ! _gateway_healthy; then
+        ui_warn "Assistant not running — starting..."
+        do_start || return 1
+    fi
+
+    local token; token=$(_get_token)
+    local url; url=$(_gateway_url)
+    local session_id="${1:-}"
+
+    # Create session if none specified
+    if [[ -z "$session_id" ]]; then
+        session_id=$(curl -sf -X POST "$url/api/sessions" \
+            -H "Authorization: Bearer $token" \
+            -H "Content-Type: application/json" \
+            -d '{"title":"CLI Chat"}' 2>/dev/null | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+        if [[ -z "$session_id" ]]; then
+            ui_fail "Failed to create session"
+            return 1
+        fi
+    fi
+
+    clear
+    title_box "KMac Assistant" "🤖"
+    echo -e "  ${DIM}Session: ${session_id:0:8}...${NC}"
+    echo -e "  ${DIM}Type your message. Ctrl+D to exit, /new for new session, /compact to free context.${NC}"
+    echo ""
+
+    while true; do
+        echo -ne "  ${GREEN}you${NC} › "
+        local msg=""
+        IFS= read -r msg || { echo ""; break; }
+        [[ -z "$msg" ]] && continue
+
+        case "$msg" in
+            /new)
+                session_id=$(curl -sf -X POST "$url/api/sessions" \
+                    -H "Authorization: Bearer $token" \
+                    -H "Content-Type: application/json" \
+                    -d '{"title":"CLI Chat"}' 2>/dev/null | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+                echo -e "  ${DIM}New session: ${session_id:0:8}...${NC}"
+                continue
+                ;;
+            /compact)
+                curl -sf -X POST "$url/api/sessions/$session_id/compact" \
+                    -H "Authorization: Bearer $token" 2>/dev/null
+                echo -e "  ${DIM}Session compacted.${NC}"
+                continue
+                ;;
+            /status)
+                do_status
+                continue
+                ;;
+            /exit|/quit)
+                break
+                ;;
+        esac
+
+        echo ""
+        echo -ne "  ${CYAN}assistant${NC} › "
+
+        local response
+        response=$(curl -sf -X POST "$url/api/sessions/$session_id/message" \
+            -H "Authorization: Bearer $token" \
+            -H "Content-Type: application/json" \
+            -d "$(printf '{"message":%s}' "$(echo "$msg" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')")" 2>/dev/null)
+
+        if [[ -n "$response" ]]; then
+            local text; text=$(echo "$response" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('response', d.get('error', '(no response)')))
+except:
+    print('(parse error)')
+" 2>/dev/null)
+            echo "$text"
+        else
+            echo -e "${RED}(request failed)${NC}"
+        fi
+        echo ""
+    done
+}
+
+do_logs() {
+    if [[ ! -f "$LOG_FILE" ]]; then
+        ui_warn "No log file at $LOG_FILE"
+        return 1
+    fi
+    if [[ "${1:-}" == "-f" || "${1:-}" == "follow" ]]; then
+        tail -f "$LOG_FILE"
+    else
+        tail -n "${1:-50}" "$LOG_FILE"
+    fi
+}
+
+do_token() {
+    local token; token=$(_get_token)
+    if [[ -n "$token" ]]; then
+        echo "$token"
+        command -v pbcopy &>/dev/null && echo -n "$token" | pbcopy && ui_info "Copied to clipboard"
+    else
+        ui_warn "No token — start the assistant first"
+    fi
+}
+
+do_sessions() {
+    if ! _gateway_healthy; then
+        ui_warn "Assistant not running"
+        return 1
+    fi
+    local token; token=$(_get_token)
+    curl -sf "$(_gateway_url)/api/sessions" \
+        -H "Authorization: Bearer $token" 2>/dev/null \
+        | python3 -m json.tool 2>/dev/null || echo "(no sessions)"
+}
+
+do_interactive() {
+    while true; do
+        clear
+        title_box "KMac Assistant — AI Gateway" "🤖"
+
+        local pid; pid=$(_gateway_pid)
+        if [[ -n "$pid" ]]; then
+            if _gateway_healthy; then
+                echo -e "  Status: ${GREEN}● Running${NC}  ${DIM}(PID $pid)${NC}"
+            else
+                echo -e "  Status: ${YELLOW}● Running (unhealthy)${NC}  ${DIM}(PID $pid)${NC}"
+            fi
+            echo -e "  URL:    ${GREEN}$(_gateway_url)${NC}"
+        else
+            echo -e "  Status: ${DIM}○ Stopped${NC}"
+        fi
+        echo ""
+        echo -e "  ${GREEN}c${NC}) Chat                  ${GREEN}s${NC}) Start Gateway"
+        echo -e "  ${GREEN}S${NC}) Stop                  ${GREEN}r${NC}) Restart"
+        echo -e "  ${GREEN}t${NC}) Token                 ${GREEN}l${NC}) Logs ${DIM}(follow)${NC}"
+        echo -e "  ${GREEN}n${NC}) Sessions              ${GREEN}i${NC}) Status"
+        echo -e "  ${GREEN}h${NC}) Channels              ${GREEN}k${NC}) Skills"
+        echo ""
+        echo -e "  ${DIM}m) Back${NC}"
+        echo ""
+        read -r -n1 -p "  > " ch; echo ""
+        case "$ch" in
+            c) do_chat; read -r -n1 -p "  Press any key..."; echo "" ;;
+            s) do_start; read -r -n1 -p "  Press any key..."; echo "" ;;
+            S) do_stop; read -r -n1 -p "  Press any key..."; echo "" ;;
+            r) do_restart; read -r -n1 -p "  Press any key..."; echo "" ;;
+            t) do_token; read -r -n1 -p "  Press any key..."; echo "" ;;
+            l) do_logs -f ;;
+            n) do_sessions; read -r -n1 -p "  Press any key..."; echo "" ;;
+            i) do_status; read -r -n1 -p "  Press any key..."; echo "" ;;
+            h) do_channels; read -r -n1 -p "  Press any key..."; echo "" ;;
+            k) do_skills; read -r -n1 -p "  Press any key..."; echo "" ;;
+            m|M) return ;;
+        esac
+    done
+}
+
+do_channels() {
+    if ! _gateway_healthy; then
+        ui_warn "Assistant not running"
+        return 1
+    fi
+    local token; token=$(_get_token)
+    local url; url=$(_gateway_url)
+
+    local resp; resp=$(curl -sf "$url/api/channels" -H "Authorization: Bearer $token" 2>/dev/null)
+    echo ""
+    echo -e "  ${BOLD}Channel Status:${NC}"
+    echo ""
+
+    local tg_enabled; tg_enabled=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('telegram',{}).get('enabled',False))" 2>/dev/null)
+    if [[ "$tg_enabled" == "True" ]]; then
+        echo -e "  ${GREEN}●${NC} Telegram — connected"
+    else
+        echo -e "  ${DIM}○${NC} Telegram — not configured"
+        echo -e "    ${DIM}Set channels.telegram.enabled + botToken in config${NC}"
+    fi
+
+    local dc_enabled; dc_enabled=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('discord',{}).get('enabled',False))" 2>/dev/null)
+    if [[ "$dc_enabled" == "True" ]]; then
+        echo -e "  ${GREEN}●${NC} Discord — connected"
+    else
+        echo -e "  ${DIM}○${NC} Discord — not configured"
+    fi
+
+    echo ""
+    echo -e "  ${DIM}Config: ~/.config/kmac/assistant/config.json${NC}"
+}
+
+do_skills() {
+    local skills_dir="$HOME/.config/kmac/assistant/skills"
+    mkdir -p "$skills_dir"
+
+    echo ""
+    echo -e "  ${BOLD}Skills:${NC}"
+    echo ""
+    if [[ -d "$skills_dir" ]] && ls "$skills_dir"/*/ 2>/dev/null | grep -q .; then
+        for d in "$skills_dir"/*/; do
+            [[ -f "$d/SKILL.md" ]] || continue
+            local name; name=$(basename "$d")
+            local lines; lines=$(wc -l < "$d/SKILL.md" | tr -d ' ')
+            echo -e "  ${GREEN}✓${NC} ${name} ${DIM}(${lines} lines)${NC}"
+        done
+    else
+        echo -e "  ${DIM}No skills installed.${NC}"
+    fi
+    for f in "$skills_dir"/*.md; do
+        [[ -f "$f" ]] || continue
+        local name; name=$(basename "$f" .md)
+        echo -e "  ${GREEN}✓${NC} ${name}"
+    done
+    echo ""
+    echo -e "  ${DIM}Add skills: mkdir -p $skills_dir/<name> && edit SKILL.md${NC}"
+}
+
+do_help() {
+    cat <<'HELP'
+KMac Assistant — Personal AI Gateway
+
+Usage: kmac assistant <command>
+
+Commands:
+  start              Start the assistant gateway
+  stop               Stop the gateway
+  restart            Restart the gateway
+  status             Show gateway status + health
+  chat [session-id]  Interactive chat (auto-starts gateway if needed)
+  sessions           List active sessions
+  channels           Show channel status (Telegram, Discord, etc.)
+  skills             List installed skills
+  token              Show/copy the auth token
+  logs [N|-f]        Show last N log lines or follow
+
+Features:
+  • Claude agent with tool use (bash, files, web, grep, system)
+  • Telegram channel — message your AI from your phone
+  • Persistent sessions with context management
+  • Skills system — workspace knowledge injection
+  • Cron scheduler — automated recurring tasks
+  • Chat commands — /new, /status, /compact, /help
+  • WebSocket gateway with req/res/event protocol
+  • REST API for programmatic access
+
+Config: ~/.config/kmac/assistant/config.json
+
+  channels.telegram.enabled    true to activate Telegram bot
+  channels.telegram.botToken   Telegram bot token (or TELEGRAM_BOT_TOKEN env)
+  channels.telegram.allowedChatIds   Restrict access to specific chats
+  skillsDir                    Path to skills directory
+  cron                         Array of scheduled tasks
+
+Environment:
+  ANTHROPIC_API_KEY          Required (or set via: kmac secrets set anthropic)
+  TELEGRAM_BOT_TOKEN         Telegram bot token (alternative to config)
+  KMAC_ASSISTANT_TOKEN       Override auth token (auto-generated if not set)
+HELP
+}
+
+# ─── CLI Router ─────────────────────────────────────────────────────────────
+case "${1:-}" in
+    start)       do_start ;;
+    stop)        do_stop ;;
+    restart)     do_restart ;;
+    status)      do_status ;;
+    chat)        shift; do_chat "$@" ;;
+    sessions)    do_sessions ;;
+    channels)    do_channels ;;
+    skills)      do_skills ;;
+    token)       do_token ;;
+    logs)        shift; do_logs "$@" ;;
+    help|--help|-h) do_help ;;
+    "")          do_interactive ;;
+    *)           ui_fail "Unknown: $1"; do_help; exit 1 ;;
+esac
