@@ -40,6 +40,88 @@ export class OrchestratorServer {
   private registerRoutes(): void {
     const { app } = this;
 
+    // ─── Landing page ─────────────────────────────────────────────
+    app.get("/", (_req: Request, res: Response) => {
+      const uptime = Math.floor(process.uptime());
+      const h = Math.floor(uptime / 3600);
+      const m = Math.floor((uptime % 3600) / 60);
+      const agents = this.registry.list();
+      const stats = this.tasks.stats();
+      const costSummary = this.costs.summary();
+      const pending = this.approvals.listPending().length;
+
+      const agentRows = agents.map((a) => {
+        const s = a.state;
+        const color = s.status === "idle" ? "#3fb950" : s.status === "busy" ? "#d29922" : "#484f58";
+        return `<tr><td><span style="color:${color}">&bull;</span> ${a.config.name}</td><td>${a.config.type}</td><td>${s.status}</td><td>${s.totalTasks}</td><td>$${s.totalCostUsd.toFixed(4)}</td></tr>`;
+      }).join("");
+
+      res.setHeader("Content-Type", "text/html");
+      res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KMac Orchestrator</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e6edf3;min-height:100vh;display:flex;align-items:center;justify-content:center}
+    .card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:40px;max-width:620px;width:100%}
+    h1{font-size:1.6rem;margin-bottom:4px;color:#f0883e}
+    .sub{color:#8b949e;margin-bottom:24px;font-size:.9rem}
+    .status{display:flex;align-items:center;gap:8px;margin-bottom:20px;font-size:.95rem}
+    .dot{width:10px;height:10px;border-radius:50%;background:#3fb950;display:inline-block}
+    .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px}
+    .stat{background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px 16px}
+    .stat-label{color:#8b949e;font-size:.75rem;text-transform:uppercase;letter-spacing:.5px}
+    .stat-value{font-size:1.3rem;font-weight:600;margin-top:2px}
+    h2{font-size:.85rem;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin:20px 0 12px}
+    table{width:100%;border-collapse:collapse;font-size:.85rem}
+    th{text-align:left;color:#8b949e;font-weight:500;padding:6px 8px;border-bottom:1px solid #21262d;font-size:.75rem;text-transform:uppercase}
+    td{padding:6px 8px;border-bottom:1px solid #21262d}
+    .endpoints{list-style:none}
+    .endpoints li{padding:6px 0;border-bottom:1px solid #21262d;font-size:.85rem;display:flex;justify-content:space-between}
+    .endpoints li:last-child{border:none}
+    .method{background:#238636;color:#fff;padding:2px 6px;border-radius:4px;font-size:.7rem;font-weight:600}
+    code{color:#79c0ff;font-size:.82rem}
+    .footer{color:#484f58;font-size:.75rem;margin-top:20px;text-align:center}
+    .warn{color:#d29922}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>KMac Orchestrator</h1>
+    <p class="sub">Multi-agent task management, cost tracking, and governance</p>
+    <div class="status"><span class="dot"></span> Running &mdash; ${h}h ${m}m uptime</div>
+    <div class="grid">
+      <div class="stat"><div class="stat-label">Agents</div><div class="stat-value">${agents.length}</div></div>
+      <div class="stat"><div class="stat-label">Tasks</div><div class="stat-value">${stats.total}</div></div>
+      <div class="stat"><div class="stat-label">Cost (24h)</div><div class="stat-value">$${costSummary.last24hUsd.toFixed(2)}</div></div>
+    </div>
+    ${pending > 0 ? `<p class="warn" style="margin-bottom:16px">&#9888; ${pending} approval(s) pending review</p>` : ""}
+    <h2>Agents</h2>
+    <table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Tasks</th><th>Cost</th></tr></thead><tbody>${agentRows}</tbody></table>
+    <h2>API Endpoints</h2>
+    <ul class="endpoints">
+      <li><span><span class="method">GET</span> <code>/api/dashboard</code></span><span style="color:#8b949e">Full dashboard</span></li>
+      <li><span><span class="method">GET</span> <code>/api/agents</code></span><span style="color:#8b949e">List agents</span></li>
+      <li><span><span class="method">GET</span> <code>/api/tasks</code></span><span style="color:#8b949e">List tasks</span></li>
+      <li><span><span class="method">POST</span> <code>/api/tasks</code></span><span style="color:#8b949e">Create task</span></li>
+      <li><span><span class="method">POST</span> <code>/api/tasks/:id/dispatch</code></span><span style="color:#8b949e">Dispatch task</span></li>
+      <li><span><span class="method">GET</span> <code>/api/costs</code></span><span style="color:#8b949e">Cost report</span></li>
+      <li><span><span class="method">GET</span> <code>/api/approvals/pending</code></span><span style="color:#8b949e">Pending approvals</span></li>
+    </ul>
+    <div class="footer">KMac CLI &bull; <code>kmac orchestrator dashboard</code></div>
+  </div>
+</body>
+</html>`);
+    });
+
+    // Chrome DevTools probe
+    app.get("/.well-known/*splat", (_req: Request, res: Response) => {
+      res.status(204).end();
+    });
+
     // ─── Health ─────────────────────────────────────────────────────
     app.get("/health", (_req: Request, res: Response) => {
       const stats = this.tasks.stats();

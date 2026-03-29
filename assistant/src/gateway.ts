@@ -57,6 +57,76 @@ export class Gateway {
     const app = express();
     app.use(express.json({ limit: "1mb" }));
 
+    // ─── Landing page ──────────────────────────────────────────
+    app.get("/", (_req, res) => {
+      const uptime = Math.floor(process.uptime());
+      const h = Math.floor(uptime / 3600);
+      const m = Math.floor((uptime % 3600) / 60);
+      const sessions = this.sessions.list();
+      const skillCount = this.skills.getSkills().length;
+
+      res.setHeader("Content-Type", "text/html");
+      res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KMac Assistant</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e6edf3;min-height:100vh;display:flex;align-items:center;justify-content:center}
+    .card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:40px;max-width:560px;width:100%}
+    h1{font-size:1.6rem;margin-bottom:4px;color:#58a6ff}
+    .sub{color:#8b949e;margin-bottom:24px;font-size:.9rem}
+    .status{display:flex;align-items:center;gap:8px;margin-bottom:20px;font-size:.95rem}
+    .dot{width:10px;height:10px;border-radius:50%;background:#3fb950;display:inline-block}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px}
+    .stat{background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px 16px}
+    .stat-label{color:#8b949e;font-size:.75rem;text-transform:uppercase;letter-spacing:.5px}
+    .stat-value{font-size:1.3rem;font-weight:600;margin-top:2px}
+    h2{font-size:.85rem;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+    .endpoints{list-style:none}
+    .endpoints li{padding:6px 0;border-bottom:1px solid #21262d;font-size:.85rem;display:flex;justify-content:space-between}
+    .endpoints li:last-child{border:none}
+    .method{background:#238636;color:#fff;padding:2px 6px;border-radius:4px;font-size:.7rem;font-weight:600}
+    .method.ws{background:#8957e5}
+    code{color:#79c0ff;font-size:.82rem}
+    .footer{color:#484f58;font-size:.75rem;margin-top:20px;text-align:center}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>KMac Assistant</h1>
+    <p class="sub">Personal AI gateway with tool use, channels, and sessions</p>
+    <div class="status"><span class="dot"></span> Running &mdash; ${h}h ${m}m uptime</div>
+    <div class="grid">
+      <div class="stat"><div class="stat-label">Sessions</div><div class="stat-value">${sessions.length}</div></div>
+      <div class="stat"><div class="stat-label">Clients</div><div class="stat-value">${this.clients.size}</div></div>
+      <div class="stat"><div class="stat-label">Skills</div><div class="stat-value">${skillCount}</div></div>
+      <div class="stat"><div class="stat-label">Model</div><div class="stat-value" style="font-size:.9rem">${this.config.model}</div></div>
+    </div>
+    <h2>API Endpoints</h2>
+    <ul class="endpoints">
+      <li><span><span class="method">GET</span> <code>/health</code></span><span style="color:#8b949e">Health check</span></li>
+      <li><span><span class="method">GET</span> <code>/api/sessions</code></span><span style="color:#8b949e">List sessions</span></li>
+      <li><span><span class="method">POST</span> <code>/api/sessions</code></span><span style="color:#8b949e">Create session</span></li>
+      <li><span><span class="method">POST</span> <code>/api/sessions/:id/message</code></span><span style="color:#8b949e">Send message</span></li>
+      <li><span><span class="method">GET</span> <code>/api/tools</code></span><span style="color:#8b949e">List tools</span></li>
+      <li><span><span class="method">GET</span> <code>/api/skills</code></span><span style="color:#8b949e">List skills</span></li>
+      <li><span><span class="method">POST</span> <code>/api/webhook</code></span><span style="color:#8b949e">External trigger</span></li>
+      <li><span><span class="method ws">WS</span> <code>/ws</code></span><span style="color:#8b949e">WebSocket gateway</span></li>
+    </ul>
+    <div class="footer">KMac CLI &bull; Token required for API access &bull; <code>kmac assistant token</code></div>
+  </div>
+</body>
+</html>`);
+    });
+
+    // Chrome DevTools probe — return 204 instead of 404
+    app.get("/.well-known/*splat", (_req, res) => {
+      res.status(204).end();
+    });
+
     // ─── REST API ────────────────────────────────────────────────
     app.get("/health", (_req, res) => {
       res.json({
