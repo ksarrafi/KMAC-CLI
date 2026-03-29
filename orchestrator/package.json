@@ -1,0 +1,28 @@
+{
+  "name": "@kmac/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KMac Orchestrator — multi-agent task management, cost tracking, and governance",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.2",
+    "@types/node": "^22.15.3",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

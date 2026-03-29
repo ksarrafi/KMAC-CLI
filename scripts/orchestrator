@@ -1,0 +1,520 @@
+#!/bin/bash
+# KMac Orchestrator — multi-agent task management, cost tracking, governance
+# Manages AI agents (Claude Code, Cursor, KMac Assistant, shell) as a team.
+
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do _dir="$(cd "$(dirname "$_src")" && pwd)"; _src="$(readlink "$_src")"; [[ "$_src" != /* ]] && _src="$_dir/$_src"; done
+SCRIPT_DIR="$(cd "$(dirname "$_src")" && pwd)"
+TOOLKIT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ORCH_DIR="$TOOLKIT_DIR/orchestrator"
+
+source "$SCRIPT_DIR/_ui.sh" 2>/dev/null
+source "$SCRIPT_DIR/_vault.sh" 2>/dev/null
+
+CONFIG_DIR="$HOME/.config/kmac/orchestrator"
+RUN_DIR="$CONFIG_DIR/run"
+PID_FILE="$RUN_DIR/orchestrator.pid"
+INFO_FILE="$RUN_DIR/orchestrator.json"
+LOG_FILE="$CONFIG_DIR/orchestrator.log"
+PORT=7892
+BASE_URL="http://127.0.0.1:$PORT"
+
+_ensure_dirs() {
+    mkdir -p "$CONFIG_DIR" "$RUN_DIR" 2>/dev/null
+    chmod 700 "$CONFIG_DIR" 2>/dev/null
+}
+
+_server_pid() {
+    [[ -f "$PID_FILE" ]] || return
+    local pid
+    read -r pid < "$PID_FILE" 2>/dev/null
+    [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+
+_is_running() {
+    [[ -n "$(_server_pid)" ]]
+}
+
+_ensure_deps() {
+    if [[ ! -d "$ORCH_DIR/node_modules" ]]; then
+        ui_info "Installing orchestrator dependencies..."
+        (cd "$ORCH_DIR" && npm install --silent 2>&1) || {
+            ui_error "npm install failed"
+            return 1
+        }
+    fi
+}
+
+_api() {
+    local method="$1" path="$2" data="$3"
+    local args=(-sf --max-time 10 -H "Content-Type: application/json" -X "$method")
+    [[ -n "$data" ]] && args+=(-d "$data")
+    curl "${args[@]}" "${BASE_URL}${path}" 2>/dev/null
+}
+
+# ─── Commands ─────────────────────────────────────────────────────────
+
+do_start() {
+    _ensure_dirs
+    if _is_running; then
+        ui_warn "Orchestrator already running (PID $(_server_pid))"
+        return 0
+    fi
+
+    _ensure_deps || return 1
+
+    ui_info "Starting KMac Orchestrator..."
+    (cd "$ORCH_DIR" && nohup npx tsx src/index.ts >> "$LOG_FILE" 2>&1 &
+     echo $! > "$PID_FILE")
+
+    sleep 2
+    if _is_running; then
+        local pid; pid=$(_server_pid)
+        ui_success "Orchestrator running (PID $pid, port $PORT)"
+    else
+        ui_error "Failed to start — check logs: $LOG_FILE"
+        return 1
+    fi
+}
+
+do_stop() {
+    local pid; pid=$(_server_pid)
+    if [[ -z "$pid" ]]; then
+        ui_warn "Orchestrator is not running"
+        return 0
+    fi
+    ui_info "Stopping orchestrator (PID $pid)..."
+    kill "$pid" 2>/dev/null
+    sleep 1
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+    rm -f "$PID_FILE"
+    ui_success "Stopped"
+}
+
+do_restart() {
+    do_stop
+    sleep 1
+    do_start
+}
+
+do_status() {
+    title_box "KMac Orchestrator" "🎯"
+    if ! _is_running; then
+        echo -e "  Status: ${DIM}○ Stopped${NC}"
+        echo ""
+        echo -e "  ${GREEN}s${NC}) Start    ${GREEN}m${NC}) Back"
+        echo ""
+        read -r -n1 -p "  > " ch; echo ""
+        case "$ch" in s|S) do_start ;; esac
+        return
+    fi
+
+    local pid; pid=$(_server_pid)
+    echo -e "  Status: ${GREEN}● Running${NC} (PID $pid, port $PORT)"
+    echo ""
+
+    local health
+    health=$(_api GET /health)
+    if [[ -n "$health" ]]; then
+        local uptime agents_count
+        uptime=$(echo "$health" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{int(d['uptime']//3600)}h {int(d['uptime']%3600//60)}m\")" 2>/dev/null)
+        agents_count=$(echo "$health" | python3 -c "import sys,json; print(json.load(sys.stdin)['agents'])" 2>/dev/null)
+        echo -e "  Uptime:  $uptime"
+        echo -e "  Agents:  $agents_count"
+    fi
+
+    local stats
+    stats=$(_api GET /api/stats)
+    if [[ -n "$stats" ]]; then
+        echo ""
+        echo -e "  ${BOLD}Tasks:${NC}"
+        echo "$stats" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+t = d.get('tasks', {})
+print(f\"    Pending: {t.get('pending',0)}  Running: {t.get('running',0)}  Done: {t.get('done',0)}  Failed: {t.get('failed',0)}\")
+c = d.get('costs', {})
+print(f\"  Cost (24h): \${c.get('last24hUsd',0):.4f}  (7d): \${c.get('last7dUsd',0):.4f}  (total): \${c.get('totalUsd',0):.4f}\")
+" 2>/dev/null
+        echo ""
+        echo -e "  ${BOLD}Agents:${NC}"
+        echo "$stats" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for a in d.get('agents', []):
+    sym = '●' if a['status'] in ('idle','busy') else '○'
+    clr = '\033[32m' if a['status'] == 'idle' else ('\033[33m' if a['status'] == 'busy' else '\033[2m')
+    print(f\"    {clr}{sym}\033[0m {a['id']:30s} {a['status']:8s} tasks={a.get('tasks',0)} cost=\${a.get('cost',0):.4f}\")
+" 2>/dev/null
+    fi
+    echo ""
+}
+
+do_agents() {
+    if ! _is_running; then
+        ui_error "Orchestrator is not running. Start with: kmac orchestrator start"
+        return 1
+    fi
+
+    title_box "Agents" "🤖"
+    local agents
+    agents=$(_api GET /api/agents)
+    if [[ -z "$agents" ]]; then
+        ui_error "Could not fetch agents"
+        return 1
+    fi
+
+    echo "$agents" | python3 -c "
+import sys, json
+agents = json.load(sys.stdin)
+for a in agents:
+    s = a.get('state', {})
+    sym = '●' if s.get('status') in ('idle','busy') else '○'
+    clr = '\033[32m' if s.get('status') == 'idle' else ('\033[33m' if s.get('status') == 'busy' else '\033[2m')
+    enabled = '✓' if a.get('enabled') else '✗'
+    print(f\"  {clr}{sym}\033[0m {enabled} {a['name']:25s} type={a['type']:12s} status={s.get('status','?'):8s}\")
+    print(f\"      tasks={s.get('totalTasks',0)}  cost=\${s.get('totalCostUsd',0):.4f}  errors={s.get('errors',0)}\")
+" 2>/dev/null
+    echo ""
+
+    echo -e "  ${GREEN}p${NC}) Ping all    ${GREEN}m${NC}) Back"
+    echo ""
+    read -r -n1 -p "  > " ch; echo ""
+    case "$ch" in
+        p|P)
+            ui_info "Pinging all agents..."
+            local results
+            results=$(_api POST /api/agents/ping-all)
+            echo "$results" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for k, v in d.items():
+    sym = '\033[32m●\033[0m' if v else '\033[31m✗\033[0m'
+    print(f'  {sym} {k}')
+" 2>/dev/null
+            ;;
+    esac
+}
+
+do_task() {
+    if ! _is_running; then
+        ui_error "Orchestrator is not running. Start with: kmac orchestrator start"
+        return 1
+    fi
+
+    local subcmd="${1:-}"; shift 2>/dev/null
+
+    case "$subcmd" in
+        create)
+            local title="${1:-}"
+            [[ -z "$title" ]] && { read -r -p "Task title: " title; }
+            [[ -z "$title" ]] && { ui_error "Title required"; return 1; }
+            local desc=""
+            read -r -p "Description (optional): " desc
+            local priority="normal"
+            read -r -p "Priority (low/normal/high/urgent) [normal]: " priority
+            [[ -z "$priority" ]] && priority="normal"
+            local agent=""
+            read -r -p "Assign to agent (blank=auto): " agent
+            local project=""
+            read -r -p "Project directory (blank=none): " project
+
+            local body
+            body=$(python3 -c "
+import json
+d = {'title': '''$title''', 'description': '''$desc''', 'priority': '$priority'}
+if '''$project''': d['projectDir'] = '''$project'''
+print(json.dumps(d))
+" 2>/dev/null)
+
+            local result
+            result=$(_api POST /api/tasks "$body")
+            local task_id
+            task_id=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+
+            if [[ -n "$task_id" ]]; then
+                ui_success "Task created: $task_id"
+                if [[ -n "$agent" ]]; then
+                    _api POST "/api/tasks/$task_id/assign" "{\"agentId\":\"$agent\"}" > /dev/null
+                    ui_info "Assigned to: $agent"
+                fi
+                echo ""
+                read -r -n1 -p "  Dispatch now? (y/N) " dispatch; echo ""
+                if [[ "$dispatch" == [yY] ]]; then
+                    ui_info "Dispatching..."
+                    local dr
+                    dr=$(_api POST "/api/tasks/$task_id/dispatch" "${agent:+{\"agentId\":\"$agent\"}}")
+                    local status
+                    status=$(echo "$dr" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null)
+                    echo -e "  Result: $status"
+                fi
+            else
+                ui_error "Failed to create task"
+            fi
+            ;;
+
+        list|ls)
+            local filter="${1:-}"
+            local path="/api/tasks"
+            [[ -n "$filter" ]] && path="/api/tasks?status=$filter"
+            local tasks
+            tasks=$(_api GET "$path")
+            echo "$tasks" | python3 -c "
+import sys, json
+tasks = json.load(sys.stdin)
+if not tasks:
+    print('  No tasks found.')
+    sys.exit(0)
+for t in tasks[:20]:
+    sym = {'pending':'⏳','assigned':'📋','running':'⚡','review':'👀','done':'✅','failed':'❌','cancelled':'🚫'}.get(t['status'],'?')
+    agent = t.get('assignedAgentId') or '-'
+    print(f\"  {sym} {t['id'][:8]}  {t['status']:10s} {t['title'][:50]:50s} agent={agent}\")
+" 2>/dev/null
+            ;;
+
+        dispatch)
+            local task_id="${1:-}"
+            [[ -z "$task_id" ]] && { read -r -p "Task ID: " task_id; }
+            [[ -z "$task_id" ]] && { ui_error "Task ID required"; return 1; }
+            ui_info "Dispatching $task_id..."
+            local result
+            result=$(_api POST "/api/tasks/$task_id/dispatch")
+            echo "$result" | python3 -c "
+import sys, json
+t = json.load(sys.stdin)
+print(f\"  Status: {t.get('status','?')}\")
+if t.get('result'): print(f\"  Result: {t['result'][:200]}\")
+if t.get('error'): print(f\"  Error:  {t['error'][:200]}\")
+c = t.get('cost', {})
+print(f\"  Cost: \${c.get('estimatedUsd',0):.4f} ({c.get('tokensIn',0)} in / {c.get('tokensOut',0)} out)\")
+" 2>/dev/null
+            ;;
+
+        show)
+            local task_id="${1:-}"
+            [[ -z "$task_id" ]] && { read -r -p "Task ID: " task_id; }
+            _api GET "/api/tasks/$task_id" | python3 -m json.tool 2>/dev/null
+            ;;
+
+        logs)
+            local task_id="${1:-}"
+            [[ -z "$task_id" ]] && { read -r -p "Task ID: " task_id; }
+            _api GET "/api/tasks/$task_id/logs" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for l in d.get('logs', []):
+    print(l)
+" 2>/dev/null
+            ;;
+
+        cancel)
+            local task_id="${1:-}"
+            [[ -z "$task_id" ]] && { read -r -p "Task ID: " task_id; }
+            _api POST "/api/tasks/$task_id/cancel" | python3 -c "
+import sys,json; t=json.load(sys.stdin); print(f\"Task {t['id'][:8]} → {t['status']}\")
+" 2>/dev/null
+            ;;
+
+        *)
+            echo -e "  ${BOLD}Task Commands:${NC}"
+            echo "    task create [title]     Create a new task"
+            echo "    task list [status]      List tasks (pending|running|done|failed)"
+            echo "    task dispatch <id>      Run a task on an available agent"
+            echo "    task show <id>          Show task details"
+            echo "    task logs <id>          Show task output logs"
+            echo "    task cancel <id>        Cancel a running task"
+            ;;
+    esac
+}
+
+do_costs() {
+    if ! _is_running; then
+        ui_error "Orchestrator is not running"
+        return 1
+    fi
+
+    title_box "Cost Report" "💰"
+    local costs
+    costs=$(_api GET /api/costs)
+    echo "$costs" | python3 -c "
+import sys, json
+c = json.load(sys.stdin)
+print(f\"  Total:       \${c.get('totalUsd',0):.4f}\")
+print(f\"  Last 24h:    \${c.get('last24hUsd',0):.4f}\")
+print(f\"  Last 7d:     \${c.get('last7dUsd',0):.4f}\")
+print(f\"  Tokens In:   {c.get('totalTokensIn',0):,}\")
+print(f\"  Tokens Out:  {c.get('totalTokensOut',0):,}\")
+print()
+ba = c.get('byAgent', {})
+if ba:
+    print('  Per Agent:')
+    for k, v in ba.items():
+        print(f\"    {k:30s}  \${v['usd']:.4f}  tasks={v['tasks']}  tokens={v['tokensIn']+v['tokensOut']:,}\")
+else:
+    print('  No cost data yet.')
+" 2>/dev/null
+    echo ""
+}
+
+do_approve() {
+    if ! _is_running; then
+        ui_error "Orchestrator is not running"
+        return 1
+    fi
+
+    local subcmd="${1:-list}"; shift 2>/dev/null
+
+    case "$subcmd" in
+        list)
+            title_box "Pending Approvals" "👀"
+            local approvals
+            approvals=$(_api GET /api/approvals/pending)
+            echo "$approvals" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items:
+    print('  No pending approvals.')
+    sys.exit(0)
+for a in items:
+    print(f\"  {a['id'][:8]}  task={a['taskId'][:8]}  agent={a['agentId']}\")
+    print(f\"    {a.get('summary','')[:80]}\")
+    print()
+" 2>/dev/null
+            ;;
+        accept|yes)
+            local id="${1:-}"
+            [[ -z "$id" ]] && { read -r -p "Approval ID: " id; }
+            _api POST "/api/approvals/$id/approve" '{"by":"cli"}' | python3 -c "
+import sys,json; a=json.load(sys.stdin); print(f\"Approved: {a['id'][:8]} → {a['status']}\")
+" 2>/dev/null
+            ;;
+        reject|no)
+            local id="${1:-}"
+            [[ -z "$id" ]] && { read -r -p "Approval ID: " id; }
+            local comment=""
+            read -r -p "Reason (optional): " comment
+            _api POST "/api/approvals/$id/reject" "{\"by\":\"cli\",\"comment\":\"$comment\"}" | python3 -c "
+import sys,json; a=json.load(sys.stdin); print(f\"Rejected: {a['id'][:8]} → {a['status']}\")
+" 2>/dev/null
+            ;;
+        *)
+            echo "  approve list        List pending approvals"
+            echo "  approve accept <id> Approve a task"
+            echo "  approve reject <id> Reject a task"
+            ;;
+    esac
+}
+
+do_dashboard() {
+    if ! _is_running; then
+        do_status
+        return
+    fi
+
+    local dash
+    dash=$(_api GET /api/dashboard)
+    if [[ -z "$dash" ]]; then
+        ui_error "Could not reach orchestrator"
+        return 1
+    fi
+
+    title_box "KMac Orchestrator Dashboard" "🎯"
+
+    echo "$dash" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+
+# Agents
+print('  \033[1mAgents\033[0m')
+for a in d.get('agents', []):
+    s = a.get('state', {})
+    sym = '●' if s.get('status') in ('idle','busy') else '○'
+    clr = '\033[32m' if s.get('status') == 'idle' else ('\033[33m' if s.get('status') == 'busy' else '\033[2m')
+    print(f\"    {clr}{sym}\033[0m {a['name']:25s} {s.get('status','?'):8s} tasks={s.get('totalTasks',0)} cost=\${s.get('totalCostUsd',0):.4f}\")
+
+# Tasks
+ts = d.get('tasks', {}).get('stats', {})
+print(f\"  \n  \033[1mTasks\033[0m  pending={ts.get('pending',0)} running={ts.get('running',0)} done={ts.get('done',0)} failed={ts.get('failed',0)}\")
+for t in d.get('tasks', {}).get('recent', [])[:5]:
+    sym = {'pending':'⏳','running':'⚡','done':'✅','failed':'❌'}.get(t['status'],'?')
+    print(f\"    {sym} {t['id'][:8]} {t['title'][:45]}\")
+
+# Costs
+c = d.get('costs', {})
+print(f\"  \n  \033[1mCosts\033[0m  24h=\${c.get('last24hUsd',0):.4f}  7d=\${c.get('last7dUsd',0):.4f}  total=\${c.get('totalUsd',0):.4f}\")
+
+# Approvals
+ap = d.get('approvals', {})
+pending = ap.get('pending', 0)
+if pending > 0:
+    print(f\"  \n  \033[33m⚠  {pending} approval(s) pending\033[0m\")
+" 2>/dev/null
+    echo ""
+}
+
+do_logs() {
+    if [[ -f "$LOG_FILE" ]]; then
+        tail -50 "$LOG_FILE"
+    else
+        ui_warn "No log file found"
+    fi
+}
+
+do_menu() {
+    while true; do
+        clear
+        do_dashboard
+
+        echo -e "  ${GREEN}t${NC}) Task       ${GREEN}a${NC}) Agents     ${GREEN}c${NC}) Costs"
+        echo -e "  ${GREEN}p${NC}) Approvals  ${GREEN}l${NC}) Logs       ${GREEN}r${NC}) Restart"
+        echo -e "  ${GREEN}s${NC}) Start      ${GREEN}x${NC}) Stop       ${GREEN}m${NC}) Back"
+        echo ""
+        read -r -n1 -p "  > " ch; echo ""
+        case "$ch" in
+            t) do_task ;;
+            a) do_agents ;;
+            c) do_costs ;;
+            p) do_approve ;;
+            l) do_logs; read -r -n1 -p "  Press any key..." ;;
+            r) do_restart ;;
+            s) do_start ;;
+            x) do_stop ;;
+            m|q) return ;;
+        esac
+    done
+}
+
+# ─── Routing ──────────────────────────────────────────────────────────
+
+cmd="${1:-menu}"; shift 2>/dev/null
+
+case "$cmd" in
+    start)      do_start ;;
+    stop)       do_stop ;;
+    restart)    do_restart ;;
+    status)     do_status ;;
+    agents)     do_agents ;;
+    task)       do_task "$@" ;;
+    costs)      do_costs ;;
+    approve)    do_approve "$@" ;;
+    dashboard)  do_dashboard ;;
+    logs)       do_logs ;;
+    menu)       do_menu ;;
+    *)
+        echo "KMac Orchestrator — multi-agent task management"
+        echo ""
+        echo "Usage: kmac orchestrator <command>"
+        echo ""
+        echo "  start          Start the orchestrator service"
+        echo "  stop           Stop the orchestrator service"
+        echo "  restart        Restart the orchestrator"
+        echo "  status         Show orchestrator status"
+        echo "  dashboard      Full dashboard view"
+        echo "  agents         List and manage agents"
+        echo "  task <cmd>     Task management (create|list|dispatch|show|logs|cancel)"
+        echo "  costs          Cost report"
+        echo "  approve <cmd>  Approval workflow (list|accept|reject)"
+        echo "  logs           View service logs"
+        echo ""
+        ;;
+esac
