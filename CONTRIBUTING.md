@@ -57,6 +57,14 @@ Follow these conventions:
 - Use `aiohttp` for async routes.
 - JSON responses for all API endpoints.
 
+**TypeScript (assistant, orchestrator)**
+- TypeScript strict mode for `assistant/` and `orchestrator/` services.
+- Run with `tsx` (no build step needed for development).
+- Express.js for HTTP/REST, native `ws` for WebSocket.
+- Config stored in `~/.config/kmac/<service>/`.
+- PID files in `~/.config/kmac/<service>/` for process management.
+- Each service has a bash wrapper in `scripts/` (e.g., `scripts/assistant`, `scripts/orchestrator`).
+
 **General**
 - No secrets, credentials, or machine-specific paths in committed code.
 - Test on macOS before submitting (this is a macOS-first toolkit).

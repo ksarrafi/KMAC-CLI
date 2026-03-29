@@ -30,19 +30,18 @@ Type `kmac` and you get this:
   │  ● Remote Terminal   ● Docker (8)   ○ ngrok        │
   └────────────────────────────────────────────────────┘
 
-    AI                        Dev                       Infra
-    a  Ask Claude             p  Project Launcher       r  Remote Terminal
-    +  Build a Tool           e  Claude Code            d  Docker Manager
-    o  Ollama (Local AI)      x  Cursor Agent           n  Network Info
-                              v  Code Review            k  Kill Port
-                              c  Smart Commit
-                              P  Pilot (remote agent)
+    AI & Research              Dev                       Infra
+    a  Ask Claude             p  Project Launcher       d  Docker Manager
+    o  Ollama (Local AI)      e  Claude Code            r  Remote Terminal
+    +  AI Toolmaker           x  Cursor Agent           P  Pilot (remote)
+    R  Research (autorun)     v  Code Review            n  Network Info
+    A  KMac Assistant         c  Smart Commit           k  Kill Port
+    O  KMac Orchestrator      G  Skill Optimizer
 
     System
-    S  Storage Manager        b  Backup Dotfiles        u  Check Updates
-    .  Secrets & Keys         /  Show Aliases           i  Install/Update
-    ?  Health Check           q  Connection QR          B  Bootstrap Mac
-    I  Software Manager
+    S  Storage Manager        u  Check Updates          b  Backup Dotfiles
+    .  Secrets & Keys         i  Install / Bootstrap    I  Software Manager
+    ?  Health Check           /  Aliases
 
     0  Exit
 ```
@@ -120,7 +119,7 @@ kmac ollama status              # Check server + model status
 
 **AI Self-Healing** — built into every tool. When a command fails, KMac catches the error output, sends it to Claude with context about what was attempted, and presents a suggested fix command. Handles shell environments like nvm and rvm automatically. You choose to apply the fix, retry, or skip.
 
-**KMac Assistant** (`A` / `kmac assistant`) — a personal AI gateway inspired by [OpenClaw](https://github.com/openclaw/openclaw). Always-on TypeScript service with a WebSocket control plane, Claude agent with tool use (bash, file ops, grep, web fetch, system info), persistent sessions, and multi-channel messaging. Message your AI from Telegram, Discord, or the CLI and get back tool-augmented responses.
+**KMac Assistant** (`A` / `kmac assistant`) — a personal AI gateway that runs as an always-on TypeScript service. Features a WebSocket control plane, Claude agent with tool use (bash, file ops, grep, web fetch, system info), persistent sessions, and multi-channel messaging. Message your AI from Telegram, Discord, or the CLI and get back tool-augmented responses.
 
 ```bash
 kmac assistant start          # Start the gateway on :7891
@@ -130,7 +129,23 @@ kmac ai chat                  # Alias
 
 Features: Telegram and Discord channel adapters with chat commands (`/new`, `/status`, `/compact`, `/help`, `/tools`, `/whoami`), skills system (`~/.config/kmac/assistant/skills/`), cron scheduler for recurring tasks, webhook endpoint for external triggers, REST API + WebSocket gateway with OpenClaw-compatible req/res/event protocol.
 
-**AI Platforms** (`w` Paperclip / `l` OpenClaw) — first-class integration with [Paperclip](https://github.com/paperclipai/paperclip) (AI agent orchestration) and [OpenClaw](https://github.com/openclaw/openclaw) (personal AI assistant). Manage servers, run onboarding, control channels and devices, all from the KMac menu.
+**KMac Orchestrator** (`O` / `kmac orchestrator`) — a multi-agent task management platform. Dispatch tasks to Claude Code, Cursor Agent, KMac Assistant, or shell commands through a unified API. Built-in cost tracking, approval workflows, and heartbeat monitoring. Runs as a TypeScript service with a web dashboard.
+
+```bash
+kmac orchestrator start          # Start on :7892
+kmac orchestrator task "migrate auth to MSAL" --agent=claude-code
+kmac orchestrator agents         # List registered agents + status
+kmac orchestrator costs          # Token/USD spend summary
+kmac orchestrator approve <id>   # Approve a pending task
+```
+
+**Skill Optimizer** (`G` / `kmac skillopt`) — Karpathy-style autoresearch loop for iteratively improving AI skill files (SKILL.md). Generates test cases, evaluates skill performance with a judge LLM, and refines instructions until a target success rate is met.
+
+```bash
+kmac skillopt init <skill-dir>   # Generate eval config for a skill
+kmac skillopt run <skill-dir>    # Run optimization loop
+kmac skillopt status             # Show all skills + eval scores
+```
 
 ---
 
@@ -504,6 +519,20 @@ Configure your domain in `deploy/Caddyfile` for automatic Let's Encrypt TLS.
 └────────────────────────────────────┬────────────────────────────┘
                                      │
 ┌────────────────────────────────────┴────────────────────────────┐
+│  assistant/ (TypeScript)           port 7891                    │
+│  gateway.ts — WebSocket + REST API, Claude tool use, sessions   │
+│  channels/ — Telegram, Discord adapters                         │
+│  skills.ts — skill loading, cron.ts — scheduled tasks           │
+└────────────────────────────────────┬────────────────────────────┘
+                                     │
+┌────────────────────────────────────┴────────────────────────────┐
+│  orchestrator/ (TypeScript)        port 7892                    │
+│  server.ts — REST API, task dispatch, agent registry            │
+│  agents/ — claude-code, cursor, assistant, shell adapters       │
+│  costs.ts, approvals.ts, heartbeat.ts                           │
+└────────────────────────────────────┬────────────────────────────┘
+                                     │
+┌────────────────────────────────────┴────────────────────────────┐
 │  ios/KMacPilot/ (SwiftUI)                                       │
 │  Dashboard · Sessions · Terminal · Files · Git · Docker · Shell  │
 └─────────────────────────────────────────────────────────────────┘
@@ -562,7 +591,34 @@ KMac-CLI/
 │   ├── install-aicoder     AICoder global installer
 │   ├── server             Server lifecycle manager (start/stop/status/install)
 │   ├── remote-access      Secure remote access (Tailscale/Cloudflare/ngrok)
+│   ├── assistant           KMac Assistant manager (start|stop|chat|status)
+│   ├── orchestrator        KMac Orchestrator manager (start|stop|task|agents|costs)
+│   ├── skillopt            Skill Optimizer CLI (init|run|status)
 │   └── create-aicoder.sh   Create global 'aicoder' command
+├── assistant/              KMac Assistant (TypeScript)
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── src/
+│       ├── gateway.ts      WebSocket + REST gateway
+│       ├── config.ts       Configuration loader
+│       ├── types.ts        Type definitions
+│       ├── skills.ts       Skill loading system
+│       ├── cron.ts         Scheduled task runner
+│       ├── optimizer.ts    Skill Optimizer CLI (Karpathy loop)
+│       └── channels/       Telegram, Discord adapters
+├── orchestrator/           KMac Orchestrator (TypeScript)
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── src/
+│       ├── index.ts        Entry point
+│       ├── server.ts       REST API + web dashboard
+│       ├── types.ts        Core types
+│       ├── config.ts       Configuration
+│       ├── tasks.ts        Task store + dispatch
+│       ├── costs.ts        Cost tracking
+│       ├── approvals.ts    Approval workflow
+│       ├── heartbeat.ts    Agent health monitor
+│       └── agents/         Adapters (claude-code, cursor, assistant, shell)
 ├── deploy/
 │   ├── Caddyfile            Reverse proxy config (TLS termination)
 │   ├── com.kmac.pilot.plist macOS launchd service definition
@@ -602,6 +658,15 @@ The Python server exposes a REST + WebSocket API for the iOS app, web dashboards
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/ping` | Health check (no auth) |
+| GET | `/health` (Assistant :7891) | Assistant health check |
+| GET | `/api/sessions` (Assistant) | List chat sessions |
+| POST | `/api/sessions/:id/message` | Send message to session |
+| GET | `/api/tools` (Assistant) | List available tools |
+| WS | `/ws` (Assistant) | WebSocket gateway |
+| GET | `/api/agents` (Orchestrator :7892) | List agents |
+| GET | `/api/tasks` (Orchestrator) | List tasks |
+| POST | `/api/tasks` (Orchestrator) | Create task |
+| GET | `/api/costs` (Orchestrator) | Cost summary |
 | GET | `/api/system` | Hostname, uptime, load, active agent |
 | GET | `/api/projects` | List discovered git repositories |
 | GET | `/api/files/tree` | File tree for a project |
