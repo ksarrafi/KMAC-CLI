@@ -55,11 +55,12 @@ pick_model_interactive() {
       ((i++))
     done
     echo "  c) Custom..."
-    echo ""
-    read -r -p "Enter choice (1-${#MODELS[@]} or 'c'): " choice
+    menu_back
+    read -r -n1 -p "  > " choice; echo "" >&2
     case "$choice" in
-      [1-9]*) local idx=$((choice-1)); if (( idx>=0 && idx<${#MODELS[@]} )); then echo "${MODELS[$idx]}"; fi ;;
-      c|C) read -r -p "Enter custom model id: " custom; echo "$custom" ;;
+      [1-9]) local idx=$((choice-1)); if (( idx>=0 && idx<${#MODELS[@]} )); then echo "${MODELS[$idx]}"; fi ;;
+      c|C) read -r -p "  Model id: " custom; echo "$custom" ;;
+      m|M|"") echo "" ;;
       *) echo "" ;;
     esac
   fi

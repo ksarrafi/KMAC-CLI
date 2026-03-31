@@ -274,9 +274,8 @@ print(f'{name} {ec} {oom} {img} {fin}')")
     echo -e "   ${GREEN}l${NC})  View logs for a container"
     echo -e "   ${GREEN}r${NC})  Restart a stopped container"
     echo -e "   ${GREEN}c${NC})  Clean up all stopped containers"
-    echo -e "   ${GREEN}m${NC})  Back"
-    echo ""
-    read -r -p "  > " action
+    menu_back
+    read -r -n1 -p "  > " action; echo ""
 
     case "$action" in
         l)
@@ -376,7 +375,7 @@ do_disk() {
         (( stopped > 0 ))       && echo -e "  ${YELLOW}${stopped} stopped container(s)${NC}"
         echo ""
         echo -e "  Clean all reclaimable resources? (y/N)"
-        read -r -p "  > " yn
+        read -r -n1 -p "  > " yn; echo ""
         if [[ "$yn" == [yY]* ]]; then
             echo ""
             docker system prune -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
@@ -429,9 +428,8 @@ do_scheduler() {
     echo -e "   ${GREEN}3${NC})  Run cleanup now"
     echo -e "   ${GREEN}4${NC})  View recent cleanup log"
     echo -e "   ${GREEN}5${NC})  Disable auto-cleanup"
-    echo -e "   ${GREEN}m${NC})  Back"
-    echo ""
-    read -r -p "  > " choice
+    menu_back
+    read -r -n1 -p "  > " choice; echo ""
 
     case "$choice" in
         1) _install_cleanup; _set_cron "0 2 * * 0" "Weekly (Sunday 2 AM)" ;;
@@ -459,6 +457,7 @@ do_scheduler() {
                 echo -e "  ${DIM}Nothing to disable.${NC}"
             fi
             ;;
+        m|M|"") ;;
     esac
 }
 
@@ -527,9 +526,8 @@ for i,p in enumerate(ps,1):
     echo -e "   ${GREEN}s${NC})  Stop a project"
     echo -e "   ${GREEN}r${NC})  Restart a project"
     echo -e "   ${GREEN}u${NC})  Start a project from compose file"
-    echo -e "   ${GREEN}m${NC})  Back"
-    echo ""
-    read -r -p "  > " action
+    menu_back
+    read -r -n1 -p "  > " action; echo ""
 
     case "$action" in
         l)
@@ -559,6 +557,7 @@ for i,p in enumerate(ps,1):
                 echo -e "  ${RED}File not found: ${cpath}${NC}"
             fi
             ;;
+        m|M|"") ;;
     esac
 }
 
@@ -599,9 +598,8 @@ do_mcp() {
     echo -e "   ${GREEN}3${NC})  Manage profiles"
     echo -e "   ${GREEN}4${NC})  Connect client (Cursor, Claude, VS Code)"
     echo -e "   ${GREEN}5${NC})  AI-assisted Docker troubleshoot"
-    echo -e "   ${GREEN}m${NC})  Back"
-    echo ""
-    read -r -p "  > " action
+    menu_back
+    read -r -n1 -p "  > " action; echo ""
 
     case "$action" in
         1) _mcp_search ;;
@@ -609,6 +607,7 @@ do_mcp() {
         3) _mcp_profiles ;;
         4) _mcp_connect ;;
         5) _mcp_troubleshoot ;;
+        m|M|"") ;;
     esac
 }
 
@@ -662,9 +661,8 @@ _mcp_profiles() {
     echo -e "  ${BOLD}Actions${NC}"
     echo -e "   ${GREEN}c${NC})  Create new profile"
     echo -e "   ${GREEN}s${NC})  Show profile details"
-    echo -e "   ${GREEN}m${NC})  Back"
-    echo ""
-    read -r -p "  > " paction
+    menu_back
+    read -r -n1 -p "  > " paction; echo ""
     case "$paction" in
         c)
             read -r -p "  Profile name: " pname
@@ -674,6 +672,7 @@ _mcp_profiles() {
             read -r -p "  Profile name: " pname
             [[ -n "$pname" ]] && docker mcp profile show "$pname" 2>&1 | while IFS= read -r line; do echo "  $line"; done
             ;;
+        m|M|"") ;;
     esac
 }
 
@@ -687,7 +686,7 @@ _mcp_connect() {
     echo -e "   ${GREEN}3${NC})  VS Code"
     echo -e "   ${GREEN}4${NC})  Custom (show config)"
     echo ""
-    read -r -p "  > " client_choice
+    read -r -n1 -p "  > " client_choice; echo ""
 
     local profile_name
     read -r -p "  Profile name (default): " profile_name
@@ -791,9 +790,8 @@ do_quick_clean() {
     echo -e "   ${GREEN}3${NC})  Unused volumes only"
     echo -e "   ${GREEN}4${NC})  Build cache (older than 1 week)"
     echo -e "   ${GREEN}5${NC})  Full cleanup (everything unused)"
-    echo -e "   ${GREEN}m${NC})  Back"
-    echo ""
-    read -r -p "  > " choice
+    menu_back
+    read -r -n1 -p "  > " choice; echo ""
 
     case "$choice" in
         1)
@@ -826,6 +824,7 @@ do_quick_clean() {
                 docker system df 2>/dev/null | while IFS= read -r line; do echo "  $line"; done
             fi
             ;;
+        m|M|"") ;;
     esac
 }
 
@@ -908,7 +907,7 @@ PYEOF
         echo -e "  ${DIM}Start it with: cd server && python3 app.py${NC}"
         echo ""
         echo -e "  Start server now? (y/N)"
-        read -r -p "  > " yn
+        read -r -n1 -p "  > " yn; echo ""
         if [[ "$yn" == [yY]* ]]; then
             echo -e "  ${DIM}Starting server in background...${NC}"
             (cd "$server_dir" && python3 app.py &>/dev/null &)
@@ -962,10 +961,8 @@ do_menu() {
         if $_HAS_MCP; then
             echo -e "   ${GREEN}8${NC})  MCP Toolkit             ${DIM}catalog, profiles, clients${NC}"
         fi
-        echo ""
-        echo -e "   ${GREEN}q${NC})  Back to toolkit"
-        echo ""
-        read -r -p "  > " choice
+        menu_back m "Back to toolkit"
+        read -r -n1 -p "  > " choice; echo ""
 
         case "$choice" in
             1) do_dashboard ;;
@@ -979,12 +976,11 @@ do_menu() {
             7) do_scheduler ;;
             8) $_HAS_MCP && do_mcp ;;
             9) bash "$SCRIPT_DIR/docker-health" --diagnose ;;
-            q|Q|"") return ;;
+            m|M|"") return ;;
             *) echo -e "  ${RED}Invalid choice${NC}" ;;
         esac
 
-        echo ""
-        read -r -p "  Press Enter to continue..."
+        pause
     done
 }
 

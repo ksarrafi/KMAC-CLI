@@ -218,8 +218,7 @@ do_pull_menu() {
 
     echo ""
     echo -e "   ${GREEN}c${NC}) Enter custom model name"
-    echo -e "   ${GREEN}m${NC}) Back"
-    echo ""
+    menu_back
     read -r -p "  Pick a number (or c/m): " pick
 
     case "$pick" in
@@ -259,8 +258,8 @@ do_models() {
         if ! _ollama_running; then
             ui_warn "Ollama server is not running"
             echo ""
-            echo -e "   ${GREEN}s${NC}) Start server    ${GREEN}m${NC}) Back"
-            echo ""
+            echo -e "   ${GREEN}s${NC}) Start server"
+            menu_back
             read -r -n1 -p "  > " ch; echo ""
             case "$ch" in
                 s|S)
@@ -271,7 +270,8 @@ do_models() {
                     fi
                     sleep 1
                     ;;
-                *) return ;;
+                m|M|"") return ;;
+                *) ui_fail "Unknown: '$ch'"; sleep 0.5 ;;
             esac
             continue
         fi
@@ -300,8 +300,7 @@ do_models() {
         echo -e "   ${GREEN}p${NC}) Pull a new model"
         echo -e "   ${GREEN}r${NC}) Remove a model"
         echo -e "   ${GREEN}c${NC}) Chat with a model"
-        echo -e "   ${GREEN}m${NC}) Back"
-        echo ""
+        menu_back
         read -r -n1 -p "  > " ch; echo ""
 
         case "$ch" in
@@ -464,21 +463,20 @@ do_menu() {
 
         echo ""
         echo -e "   ${GREEN}i${NC}) Install / Setup"
-        echo -e "   ${GREEN}m${NC}) Manage Models"
+        echo -e "   ${GREEN}o${NC}) Manage Models"
         echo -e "   ${GREEN}c${NC}) Chat"
         echo -e "   ${GREEN}s${NC}) Start Server"
         echo -e "   ${GREEN}t${NC}) Status"
-        echo -e "   ${GREEN}q${NC}) Back"
-        echo ""
+        menu_back
         read -r -n1 -p "  > " ch; echo ""
 
         case "$ch" in
             i|I) clear; do_install; pause ;;
-            m|M) do_models ;;
+            o|O) do_models ;;
             c|C) clear; do_chat; pause ;;
             s|S) clear; do_serve; pause ;;
             t|T) clear; do_status; pause ;;
-            q|Q|0|"") return ;;
+            m|M|"") return ;;
             *) ui_fail "Unknown: '$ch'"; sleep 0.5 ;;
         esac
     done

@@ -453,8 +453,8 @@ do_category_menu() {
         done
 
         echo ""
-        echo -e "   ${GREEN}a${NC}) Install all missing    ${GREEN}m${NC}) Back"
-        echo ""
+        echo -e "   ${GREEN}a${NC}) Install all missing"
+        menu_back m "Back"
         read -r -p "  Pick a number to install (or a/m): " pick
 
         case "$pick" in
@@ -691,8 +691,7 @@ do_menu() {
         echo -e "   ${GREEN}a${NC})  Install all missing"
         echo -e "   ${GREEN}u${NC})  Update installed"
         echo -e "   ${GREEN}s${NC})  Search"
-        echo -e "   ${GREEN}m${NC})  Back to KMac"
-        echo ""
+        menu_back m "Back to KMac"
         read -r -n1 -p "  > " choice; echo ""
 
         case "$choice" in
@@ -705,7 +704,7 @@ do_menu() {
             a|A) clear; do_install_all ;;
             u|U) clear; do_update ;;
             s|S) clear; title_box "Search" "🔍"; do_search; pause ;;
-            m|M|0|"") return ;;
+            m|M|"") return ;;
             *) ui_fail "Unknown: '$choice'"; sleep 0.5 ;;
         esac
     done

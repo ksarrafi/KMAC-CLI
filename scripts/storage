@@ -461,12 +461,11 @@ Be concise. For SAFETY: SAFE means deletable without consequences, CAUTION means
     # ── Phase 6: Interactive actions ──
     echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
     echo -e "  ${BOLD}Actions:${NC}"
-    echo -e "   ${GREEN}d${NC} ${BOLD}1,3,5${NC})    Delete selected files (comma-separated)"
-    echo -e "   ${GREEN}b${NC} ${BOLD}1,3,5${NC})    Backup selected to iCloud then delete"
+    echo -e "   ${GREEN}d${NC})          Delete selected files (then enter comma-separated numbers)"
+    echo -e "   ${GREEN}b${NC})          Backup selected to iCloud then delete (then enter numbers)"
     echo -e "   ${GREEN}D${NC})          Delete all ${GREEN}SAFE TO DELETE${NC} files"
-    echo -e "   ${GREEN}m${NC})          Back"
-    echo ""
-    read -r -p "  > " action
+    menu_back
+    read -r -n1 -p "  > " action; echo ""
 
     case "$action" in
         m|M|"") rm -f "$datafile"; return ;;
@@ -501,14 +500,14 @@ Be concise. For SAFETY: SAFE means deletable without consequences, CAUTION means
             echo ""
             echo -e "  ${GREEN}✓ Deleted ${del_count} files, freed ${freed_h}${NC}"
             ;;
-        d\ *|d[0-9]*)
-            local nums="${action#d}"
-            nums="${nums#\ }"
+        d)
+            echo ""
+            read -r -p "  Numbers (e.g. 1,3,5): " nums
             _act_on_files "delete" "$nums" "$datafile"
             ;;
-        b\ *|b[0-9]*)
-            local nums="${action#b}"
-            nums="${nums#\ }"
+        b|B)
+            echo ""
+            read -r -p "  Numbers (e.g. 1,3,5): " nums
             _act_on_files "backup" "$nums" "$datafile"
             ;;
     esac
@@ -698,11 +697,11 @@ do_clean() {
     echo -e "   ${GREEN}4${NC})  Clear npm cache"
     echo -e "   ${GREEN}5${NC})  Clear pip cache"
     echo -e "   ${GREEN}6${NC})  Clear system logs (sudo)"
-    echo -e "   ${GREEN}m${NC})  Back"
-    echo ""
+    menu_back
     read -r -n1 -p "  > " cc; echo ""
 
     case "$cc" in
+        m|M|"") return ;;
         1)
             echo ""
             rm -rf "$HOME/.Trash/"* 2>/dev/null &
@@ -851,18 +850,21 @@ do_icloud() {
     echo -e "  ${BOLD}Options:${NC}"
     echo -e "   ${GREEN}number${NC})  Move selected item to iCloud (with local symlink)"
     echo -e "   ${GREEN}o${NC})       Optimize Mac Storage (opens System Settings)"
-    echo -e "   ${GREEN}m${NC})       Back"
-    echo ""
-    read -r -p "  > " ic_choice
+    menu_back
+    read -r -n1 -p "  > " ic_choice; echo ""
 
     case "$ic_choice" in
+        m|M|"") return ;;
         o|O)
             echo -e "\n  Opening iCloud settings..."
             open "x-apple.systempreferences:com.apple.preferences.AppleIDPrefPane" 2>/dev/null \
                 || open "x-apple.systempreferences:com.apple.SystemProfiler.AboutExtension" 2>/dev/null
             ;;
-        m|M) return ;;
-        [0-9]*)
+        [0-9])
+            local next
+            while IFS= read -r -s -n1 -t 0.15 next 2>/dev/null && [[ "$next" =~ ^[0-9]$ ]]; do
+                ic_choice+="$next"
+            done
             local sel_idx=-1
             for i in "${!candidates[@]}"; do
                 if [[ "${candidates[$i]}" == "$ic_choice" ]]; then
@@ -874,6 +876,9 @@ do_icloud() {
             else
                 echo -e "  ${RED}Invalid selection${NC}"
             fi
+            ;;
+        *)
+            echo -e "  ${RED}Invalid selection${NC}"
             ;;
     esac
 }
@@ -1049,29 +1054,31 @@ do_node_modules() {
     echo -e "  ${BOLD}Total: ${YELLOW}${total_h}${NC} across $((idx-1)) projects"
     echo ""
     echo -e "  ${GREEN}a${NC})  Remove ALL stale node_modules (> 30 days old)"
-    echo -e "  ${GREEN}m${NC})  Back"
-    echo ""
+    menu_back
     read -r -n1 -p "  > " nm_ch; echo ""
 
-    if [[ "$nm_ch" == "a" || "$nm_ch" == "A" ]]; then
-        local removed=0 freed=0
-        while IFS= read -r d; do
-            local parent="${d%/node_modules}"
-            local pkg="$parent/package.json"
-            if [[ -f "$pkg" ]]; then
-                local age
-                age=$(( ( $(date +%s) - $(stat -f%m "$pkg" 2>/dev/null || echo 0) ) / 86400 ))
-                if (( age > 30 )); then
-                    local sz; sz=$(du -sk "$d" 2>/dev/null | awk '{print $1}')
-                    echo -e "  ${DIM}Removing ${d/#$HOME/~}...${NC}"
-                    rm -rf "$d"
-                    (( freed += sz )); (( removed++ ))
+    case "$nm_ch" in
+        a|A)
+            local removed=0 freed=0
+            while IFS= read -r d; do
+                local parent="${d%/node_modules}"
+                local pkg="$parent/package.json"
+                if [[ -f "$pkg" ]]; then
+                    local age
+                    age=$(( ( $(date +%s) - $(stat -f%m "$pkg" 2>/dev/null || echo 0) ) / 86400 ))
+                    if (( age > 30 )); then
+                        local sz; sz=$(du -sk "$d" 2>/dev/null | awk '{print $1}')
+                        echo -e "  ${DIM}Removing ${d/#$HOME/~}...${NC}"
+                        rm -rf "$d"
+                        (( freed += sz )); (( removed++ ))
+                    fi
                 fi
-            fi
-        done <<< "$results"
-        local freed_h; freed_h=$(human_size $(( freed * 1024 )))
-        echo -e "\n  ${GREEN}✓ Removed ${removed} stale node_modules (${freed_h} freed)${NC}"
-    fi
+            done <<< "$results"
+            local freed_h; freed_h=$(human_size $(( freed * 1024 )))
+            echo -e "\n  ${GREEN}✓ Removed ${removed} stale node_modules (${freed_h} freed)${NC}"
+            ;;
+        m|M|"") return ;;
+    esac
 }
 
 # ─── Interactive Menu ───────────────────────────────────────────────────────
@@ -1090,8 +1097,7 @@ do_menu() {
         echo -e "   ${GREEN}4${NC})  iCloud migration analysis"
         echo -e "   ${GREEN}5${NC})  node_modules cleanup"
         echo -e "   ${GREEN}6${NC})  Open System Storage Settings"
-        echo -e "   ${GREEN}0${NC})  Back"
-        echo ""
+        menu_back
         read -r -n1 -p "  > " ch; echo ""
 
         case "$ch" in
@@ -1102,7 +1108,7 @@ do_menu() {
             5) clear; do_node_modules; pause ;;
             6) open "x-apple.systempreferences:com.apple.settings.Storage" 2>/dev/null \
                 || open "/System/Applications/System Settings.app" ;;
-            0|q|m) return ;;
+            m|M|"") return ;;
             *) echo -e "  ${RED}Unknown option${NC}"; sleep 0.3 ;;
         esac
     done

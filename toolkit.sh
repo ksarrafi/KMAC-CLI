@@ -289,25 +289,33 @@ print_menu() {
     # ─── Logo ───
     print_logo
 
-    # ─── Status Bar ───
+    # ─── Status Bar (fixed-width box with absolute cursor positioning) ───
     echo ""
-    echo -e "  ${DIM}┌─ services ─────────────────────────────────────────┐${NC}"
+    local _BW=56  # box inner width (content area between │ markers)
+    local _BR=58  # right-border column (2 indent + 1 border + _BW + 1 border)
+
+    _box_top()    { printf "  ${DIM}┌─ %s " "$1"; printf '%*s' "$(( _BW - ${#1} - 3 ))" '' | tr ' ' '─'; printf "┐${NC}\n"; }
+    _box_mid()    { printf "  ${DIM}├─ %s " "$1"; printf '%*s' "$(( _BW - ${#1} - 3 ))" '' | tr ' ' '─'; printf "┤${NC}\n"; }
+    _box_bottom() { printf "  ${DIM}└"; printf '%*s' "$(( _BW ))" '' | tr ' ' '─'; printf "┘${NC}\n"; }
+    _box_row()    { printf "  ${DIM}│${NC}  %b" "$1"; printf "\033[${_BR}G${DIM}│${NC}\n"; }
 
     local rt_label dk_label ng_label
     if [[ "$rt" == "up" ]]; then rt_label="${GREEN}●${NC} Remote Terminal"; else rt_label="${DIM}○ Remote Terminal${NC}"; fi
     if [[ "$dk_state" == "up" ]]; then dk_label="${GREEN}●${NC} Docker ${DIM}(${dk_count})${NC}"; else dk_label="${DIM}○ Docker${NC}"; fi
     if [[ "$ng" == "up" ]]; then ng_label="${GREEN}●${NC} ngrok"; else ng_label="${DIM}○ ngrok${NC}"; fi
 
-    echo -e "  ${DIM}│${NC}  ${rt_label}    ${dk_label}    ${ng_label}             ${DIM}│${NC}"
+    _box_top "services"
+    _box_row "${rt_label}    ${dk_label}    ${ng_label}"
 
     local _cache="$KMAC_CACHE_DIR/last-check.json"
     if [[ -s "$_cache" ]]; then
         local _ucount
         _ucount=$(wc -l < "$_cache" 2>/dev/null | tr -d ' ')
         if (( _ucount > 0 )); then
-            echo -e "  ${DIM}│${NC}  ${YELLOW}▸${NC} ${_ucount} update(s) available ${DIM}— press${NC} ${BOLD}u${NC} ${DIM}to review${NC}           ${DIM}│${NC}"
+            _box_row "${YELLOW}▸${NC} ${_ucount} update(s) available ${DIM}— press${NC} ${BOLD}u${NC} ${DIM}to review${NC}"
         fi
     fi
+
     # ─── System Stats ───
     local _df_out _disk_used _disk_total _disk_pct _disk_num
     _df_out=$(df -H / 2>/dev/null | tail -1)
@@ -330,15 +338,9 @@ print_menu() {
     (( _disk_num > 75 )) && _disk_color="${YELLOW}"
     (( _disk_num > 90 )) && _disk_color="${RED}"
 
-    local _vis
-    printf -v _vis "  Disk %s/%s %s  ·  Load %s  ·  Up %s" \
-        "$_disk_used" "$_disk_total" "$_disk_pct" "$_load" "$_uptime"
-    [[ -n "$_bat" ]] && printf -v _vis "%s  ·  Bat %s" "$_vis" "$_bat"
-    local _spad; printf -v _spad '%*s' "$(( 50 - ${#_vis} ))" "" 2>/dev/null || _spad=" "
-
-    echo -e "  ${DIM}├─ system ─────────────────────────────────────────┤${NC}"
-    echo -e "  ${DIM}│${NC}  Disk ${_disk_used}/${_disk_total} ${_disk_color}${_disk_pct}${NC}  ${DIM}·${NC}  Load ${_load}  ${DIM}·${NC}  Up ${_uptime}${_bat_str}${_spad}${DIM}│${NC}"
-    echo -e "  ${DIM}└────────────────────────────────────────────────────┘${NC}"
+    _box_mid "system"
+    _box_row "Disk ${_disk_used}/${_disk_total} ${_disk_color}${_disk_pct}${NC}  ${DIM}·${NC}  Load ${_load}  ${DIM}·${NC}  Up ${_uptime}${_bat_str}"
+    _box_bottom
 
     # ─── Commands — 3-column layout (absolute column positioning for ANSI-safe alignment) ───
     echo ""
@@ -429,8 +431,7 @@ do_remote_terminal() {
         echo -e "  ${GREEN}r${NC}) Restart"
         echo -e "  ${GREEN}s${NC}) Stop"
         echo -e "  ${GREEN}t${NC}) Re-attach tmux (reconnect only)"
-        echo -e "  ${GREEN}m${NC}) Back"
-        echo ""
+        menu_back
         read -r -n1 -p "  > " rt_ch; echo ""
         case "$rt_ch" in
             p|P)
@@ -447,15 +448,17 @@ do_remote_terminal() {
                 echo "Re-attaching to tmux session 'remote'..."
                 tmux attach -t remote 2>/dev/null || echo "No tmux session found."
                 ;;
+            m|M|"") return ;;
         esac
     else
         echo -e "  Status: ${DIM}○ Stopped${NC}"
         echo ""
-        echo -e "  ${GREEN}s${NC}) Start    ${GREEN}m${NC}) Back"
-        echo ""
+        echo -e "  ${GREEN}s${NC}) Start"
+        menu_back
         read -r -n1 -p "  > " rt_ch; echo ""
         case "$rt_ch" in
             s|S) remote-terminal || tool_error "Failed to start Remote Terminal" ;;
+            m|M|"") return ;;
         esac
     fi
     pause
@@ -622,9 +625,7 @@ do_install_bootstrap() {
     echo -e "  ${GREEN}B${NC}) Install from Brewfile"
     echo -e "  ${GREEN}p${NC}) Apply macOS Preferences"
     echo -e "  ${GREEN}f${NC}) Full Bootstrap ${DIM}(Brewfile + prefs + install)${NC}"
-    echo ""
-    echo -e "  ${DIM}m) Back${NC}"
-    echo ""
+    menu_back
     read -r -n1 -p "  > " bc; echo ""
     case "$bc" in
         i)  safe_run "Install/Update Toolkit" bash "$TOOLKIT_DIR/install.sh" ;;

@@ -99,14 +99,15 @@ if [[ -z "$ACTION" ]]; then
 
     echo ""
     echo -e "  ${GREEN}1${NC}) Claude Code    ${GREEN}2${NC}) Cursor Agent    ${GREEN}3${NC}) cd    ${GREEN}4${NC}) IDE    ${GREEN}5${NC}) AI Review"
-    echo ""
-    read -r -p "  Action [1-5]: " act
+    menu_back
+    read -r -n1 -p "  > " act; echo ""
     case "$act" in
         1) ACTION="claude" ;;
         2) ACTION="cursor" ;;
         3) ACTION="cd" ;;
         4) ACTION="ide" ;;
         5) ACTION="review" ;;
+        m|M|"") return 0 2>/dev/null || exit 0 ;;
         *) ACTION="cd" ;;
     esac
 fi

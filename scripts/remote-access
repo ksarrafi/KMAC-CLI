@@ -38,15 +38,14 @@ do_setup() {
     echo "  1) Tailscale   — Mesh VPN, always-on, best for personal use (recommended)"
     echo "  2) Cloudflare  — Free tunnel, custom domains, great for sharing"
     echo "  3) ngrok       — Quick tunnels, easy setup, good for testing"
-    echo ""
-    printf "  Choice [1-3]: "
+    menu_back
     local choice
-    read -r choice
-    
+    read -r -n1 -p "  > " choice; echo ""
     case "$choice" in
         1) _setup_tailscale ;;
         2) _setup_cloudflare ;;
         3) _setup_ngrok ;;
+        m|M|"") return 0 ;;
         *) ui_fail "Invalid choice"; return 1 ;;
     esac
 }
