@@ -46,6 +46,8 @@ class AgentDaemon:
         self._watcher: FileWatcher | None = None
         self._web_server = None
         self._plugins: list[dict] = []
+        self._heartbeats: dict[str, float] = {}
+        self._heartbeat_timeout = 120
 
     # ── database helpers ─────────────────────────────────────────────
 
@@ -54,6 +56,7 @@ class AgentDaemon:
             db_path = DB_DIR / agent_name / "memory.db"
             self.dbs[agent_name] = MemoryDB(db_path)
             db = self.dbs[agent_name]
+            db.migrate()
             if not db.get_agent(agent_name):
                 db.create_agent(
                     agent_name, model=DEFAULT_MODEL,
@@ -121,6 +124,9 @@ class AgentDaemon:
             "memory-delete":  lambda: self._oneshot(self._memory_delete(request)),
             "task-create":    lambda: self._oneshot(self._task_create(agent, request)),
             "task-cancel":    lambda: self._oneshot(self._task_cancel(request)),
+            "task-approve":   lambda: self._oneshot(self._task_approve(request)),
+            "task-reject":    lambda: self._oneshot(self._task_reject(request)),
+            "task-subtasks":  lambda: self._oneshot(self._task_subtasks(request)),
             "task-run":       lambda: self._oneshot(self._task_run(agent, request)),
             "task-result":    lambda: self._oneshot(self._task_result(agent, request)),
             "tasks-list":     lambda: self._oneshot(self._tasks_list(agent)),
@@ -163,6 +169,7 @@ class AgentDaemon:
             yield {"type": "error", "message": "No message provided"}
             return
 
+        self._heartbeats[agent_name] = time.time()
         db = self._get_db(agent_name)
         agent_cfg = db.get_agent(agent_name) or {
             "model": DEFAULT_MODEL,
@@ -223,6 +230,17 @@ class AgentDaemon:
                 web_port = self._web_server.server_address[1]
             except Exception:
                 pass
+        total_cost = sum(
+            db.stats().get("total_task_cost_usd", 0) for db in self.dbs.values()
+        )
+        now = time.time()
+        agent_health = {}
+        for name, last_beat in self._heartbeats.items():
+            elapsed = now - last_beat
+            if elapsed < self._heartbeat_timeout:
+                agent_health[name] = "healthy"
+            else:
+                agent_health[name] = "stale"
         return {
             "type": "result",
             "data": {
@@ -234,10 +252,12 @@ class AgentDaemon:
                 "running_tasks": len(self._running_tasks),
                 "completed_tasks": self._tasks_completed,
                 "total_tokens": total_in + total_out,
+                "total_cost_usd": round(total_cost, 4),
                 "plugins": len(self._plugins),
                 "mcp_servers": mcp_stats.get("servers", 0),
                 "mcp_tools": mcp_stats.get("tools", 0),
                 "web_port": web_port,
+                "agent_health": agent_health,
                 **total,
             },
         }
@@ -358,13 +378,23 @@ class AgentDaemon:
         desc = req.get("description", "")
         if not desc:
             return {"type": "error", "message": "No description"}
-        task = self._get_db(agent_name).create_task(agent_name, desc)
+        task = self._get_db(agent_name).create_task(
+            agent_name, desc,
+            priority=req.get("priority", "normal"),
+            tags=req.get("tags"),
+            parent_task_id=req.get("parent_task_id"),
+            approval_required=req.get("approval_required", False),
+        )
         return {"type": "result", "data": {"task": task}}
 
     def _tasks_list(self, agent_name):
+        db = self._get_db(agent_name)
         return {
             "type": "result",
-            "data": {"tasks": self._get_db(agent_name).list_tasks(agent_name)},
+            "data": {
+                "tasks": db.list_tasks(agent_name),
+                "stats": db.task_stats(agent_name),
+            },
         }
 
     def _task_cancel(self, req):
@@ -377,16 +407,51 @@ class AgentDaemon:
         self._get_db(agent).update_task(tid, "cancelled")
         return {"type": "result", "data": {"cancelled": tid}}
 
+    def _task_approve(self, req):
+        tid = req.get("task_id", "")
+        agent = req.get("agent", "default")
+        if not tid:
+            return {"type": "error", "message": "No task ID"}
+        db = self._get_db(agent)
+        task = db.get_task(tid)
+        if not task:
+            return {"type": "error", "message": f"Task {tid} not found"}
+        if task["status"] != "review":
+            return {"type": "error", "message": f"Task {tid} is not in review (status: {task['status']})"}
+        db.approve_task(tid, approved_by=req.get("approved_by", "user"))
+        return {"type": "result", "data": {"approved": tid}}
+
+    def _task_reject(self, req):
+        tid = req.get("task_id", "")
+        agent = req.get("agent", "default")
+        if not tid:
+            return {"type": "error", "message": "No task ID"}
+        db = self._get_db(agent)
+        task = db.get_task(tid)
+        if not task:
+            return {"type": "error", "message": f"Task {tid} not found"}
+        db.reject_task(tid)
+        return {"type": "result", "data": {"rejected": tid}}
+
+    def _task_subtasks(self, req):
+        tid = req.get("task_id", "")
+        agent = req.get("agent", "default")
+        if not tid:
+            return {"type": "error", "message": "No task ID"}
+        subs = self._get_db(agent).get_subtasks(tid)
+        return {"type": "result", "data": {"subtasks": subs}}
+
     def _task_run(self, agent_name, req):
-        """Immediately trigger a queued task."""
+        """Immediately trigger a pending task."""
         tid = req.get("task_id", "")
         if not tid:
             return {"type": "error", "message": "No task ID"}
         db = self._get_db(agent_name)
-        tasks = db.list_tasks(agent_name, status="queued")
-        task = next((t for t in tasks if t["id"] == tid), None)
+        task = db.get_task(tid)
         if not task:
-            return {"type": "error", "message": f"Task {tid} not found or not queued"}
+            return {"type": "error", "message": f"Task {tid} not found"}
+        if task["status"] not in ("pending", "approved"):
+            return {"type": "error", "message": f"Task {tid} cannot run (status: {task['status']})"}
         asyncio.ensure_future(self._execute_task(agent_name, task))
         return {"type": "result", "data": {"started": tid}}
 
@@ -415,15 +480,17 @@ class AgentDaemon:
                     self._last_schedule_check = now
                     self._check_schedules()
 
-                # Pick up queued tasks
+                # Pick up pending tasks (sorted by priority)
                 if len(self._running_tasks) >= MAX_CONCURRENT_TASKS:
                     continue
                 for agent_dir in sorted(DB_DIR.iterdir()) if DB_DIR.exists() else []:
                     if not agent_dir.is_dir():
                         continue
                     db = self._get_db(agent_dir.name)
-                    queued = db.list_tasks(agent_dir.name, status="queued")
-                    for task in queued:
+                    pending = db.list_tasks(agent_dir.name, status="pending")
+                    for task in pending:
+                        if task.get("approval_required") and task["status"] != "approved":
+                            continue
                         if len(self._running_tasks) >= MAX_CONCURRENT_TASKS:
                             break
                         if task["id"] not in self._running_tasks:
@@ -483,11 +550,12 @@ class AgentDaemon:
         return False
 
     async def _execute_task(self, agent_name, task):
-        """Run a single task through the agent conversation loop."""
+        """Run a single task through the agent conversation loop with cost tracking."""
         tid = task["id"]
         db = self._get_db(agent_name)
         log.info("Task %s starting: %s", tid, task["description"][:60])
         db.update_task(tid, "running")
+        start_ms = int(time.time() * 1000)
 
         agent_cfg = db.get_agent(agent_name) or {
             "model": DEFAULT_MODEL,
@@ -496,6 +564,7 @@ class AgentDaemon:
         }
         messages = []
         full_output = []
+        total_in = total_out = 0
 
         try:
             async for event in runtime.process_message(
@@ -506,11 +575,31 @@ class AgentDaemon:
                     full_output.append(event.get("content", ""))
                 elif etype == "error":
                     full_output.append(f"ERROR: {event.get('message', '')}")
+                elif etype == "done":
+                    total_in = event.get("input_tokens", 0)
+                    total_out = event.get("output_tokens", 0)
 
+            duration_ms = int(time.time() * 1000) - start_ms
             result_text = "\n".join(full_output) or "(no output)"
-            db.update_task(tid, "completed", result=result_text[:50000])
+            model = agent_cfg.get("model", DEFAULT_MODEL)
+            from .config import MODEL_COSTS
+            costs = MODEL_COSTS.get(model, (0, 0))
+            usd = (total_in * costs[0] + total_out * costs[1]) / 1_000_000
+
+            final_status = "review" if task.get("approval_required") else "completed"
+            db.update_task(
+                tid, final_status,
+                result=result_text[:50000],
+                cost={
+                    "tokens_in": total_in,
+                    "tokens_out": total_out,
+                    "usd": round(usd, 6),
+                    "duration_ms": duration_ms,
+                },
+            )
             self._tasks_completed += 1
-            log.info("Task %s completed", tid)
+            log.info("Task %s %s (%.4f USD, %dms)",
+                     tid, final_status, usd, duration_ms)
             self._notify("KmacAgent Task Done", f"Task {tid}: {task['description'][:60]}")
         except asyncio.CancelledError:
             db.update_task(tid, "cancelled", result="Cancelled by user")
@@ -526,10 +615,11 @@ class AgentDaemon:
         if not tid:
             return {"type": "error", "message": "No task ID"}
         db = self._get_db(agent_name)
-        tasks = db.list_tasks(agent_name)
-        task = next((t for t in tasks if t["id"] == tid), None)
+        task = db.get_task(tid)
         if not task:
             return {"type": "error", "message": f"Task {tid} not found"}
+        subtasks = db.get_subtasks(tid)
+        task["subtasks"] = subtasks
         return {"type": "result", "data": {"task": task}}
 
     # ── agent update ─────────────────────────────────────────────────

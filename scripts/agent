@@ -30,7 +30,12 @@
 #
 # Tasks:
 #   kmac agent task "description"   Queue a background task
-#   kmac agent tasks                List tasks
+#   kmac agent task -p high "desc"  Queue with priority (low/normal/high/urgent)
+#   kmac agent task --approve "d"   Queue with approval required
+#   kmac agent tasks                List tasks with stats
+#   kmac agent approve <id>         Approve a completed task
+#   kmac agent reject <id>          Reject a completed task
+#   kmac agent subtasks <id>        Show subtasks of a task
 #
 # Meta:
 #   kmac agent logs                 Tail daemon log
@@ -272,6 +277,9 @@ case "$subcmd" in
             _auto_start && _engine task-create "$@"
         fi ;;
     tasks)       _auto_start && _engine tasks-list "$@" ;;
+    approve)     _auto_start && _engine task-approve "$@" ;;
+    reject)      _auto_start && _engine task-reject "$@" ;;
+    subtasks)    _auto_start && _engine task-subtasks "$@" ;;
     update)      _auto_start && _engine agent-update "$@" ;;
     usage)       _auto_start && _engine token-usage "$@" ;;
     prune)       _auto_start && _engine prune "$@" ;;

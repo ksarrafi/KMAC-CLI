@@ -493,7 +493,11 @@ def _build_request(action, args):
         "--cron": "cron",
         "-q": "query", "--query": "query",
         "--id": "id",
+        "-p": "priority", "--priority": "priority",
+        "--parent": "parent_task_id",
+        "--tag": "tag",
     }
+    _BOOL_FLAGS = {"--approve": "approval_required"}
 
     # First pass: extract all flags
     positional = []
@@ -503,6 +507,9 @@ def _build_request(action, args):
         if a in _FLAGS and i + 1 < len(args):
             req[_FLAGS[a]] = args[i + 1]
             i += 2
+        elif a in _BOOL_FLAGS:
+            req[_BOOL_FLAGS[a]] = True
+            i += 1
         else:
             positional.append(args[i])
             i += 1
@@ -512,7 +519,8 @@ def _build_request(action, args):
         "agent-create": "name", "agent-delete": "name",
         "memory-delete": "id", "session-delete": "session_id",
         "task-cancel": "task_id", "task-run": "task_id",
-        "task-result": "task_id",
+        "task-result": "task_id", "task-approve": "task_id",
+        "task-reject": "task_id", "task-subtasks": "task_id",
         "schedule-delete": "schedule_id",
         "import": "path",
         "session-fork": "session_id",

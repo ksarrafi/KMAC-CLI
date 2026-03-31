@@ -96,11 +96,50 @@ class TestMemoryDB(unittest.TestCase):
 
     def test_task_lifecycle(self):
         task = self.db.create_task("default", "do something")
-        self.assertEqual(task["status"], "queued")
+        self.assertEqual(task["status"], "pending")
         self.db.update_task(task["id"], "running")
         self.db.update_task(task["id"], "completed", result="done")
         tasks = self.db.list_tasks("default", status="completed")
         self.assertEqual(len(tasks), 1)
+
+    def test_task_priority_and_approval(self):
+        t1 = self.db.create_task("default", "urgent fix", priority="urgent")
+        t2 = self.db.create_task("default", "nice to have", priority="low")
+        t3 = self.db.create_task(
+            "default", "needs review", approval_required=True,
+        )
+        self.assertEqual(t1["priority"], "urgent")
+        self.assertEqual(t2["priority"], "low")
+        tasks = self.db.list_tasks("default")
+        self.assertEqual(tasks[0]["priority"], "urgent")
+        task = self.db.get_task(t3["id"])
+        self.assertEqual(task["approval_required"], 1)
+        self.db.update_task(t3["id"], "review")
+        self.db.approve_task(t3["id"], approved_by="admin")
+        task = self.db.get_task(t3["id"])
+        self.assertEqual(task["status"], "approved")
+        self.assertEqual(task["approved_by"], "admin")
+
+    def test_task_subtasks(self):
+        parent = self.db.create_task("default", "parent task")
+        child = self.db.create_task(
+            "default", "child task", parent_task_id=parent["id"],
+        )
+        subs = self.db.get_subtasks(parent["id"])
+        self.assertEqual(len(subs), 1)
+        self.assertEqual(subs[0]["id"], child["id"])
+
+    def test_task_cost_tracking(self):
+        task = self.db.create_task("default", "costly task")
+        self.db.update_task(task["id"], "completed", result="done", cost={
+            "tokens_in": 5000, "tokens_out": 2000,
+            "usd": 0.045, "duration_ms": 3200,
+        })
+        t = self.db.get_task(task["id"])
+        self.assertEqual(t["cost_tokens_in"], 5000)
+        self.assertEqual(t["cost_usd"], 0.045)
+        stats = self.db.task_stats("default")
+        self.assertGreater(stats["total_cost_usd"], 0)
 
     def test_token_logging(self):
         self.db.log_tokens("default", "claude-sonnet-4-6", 1000, 500)

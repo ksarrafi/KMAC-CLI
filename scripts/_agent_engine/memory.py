@@ -35,14 +35,23 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
-    id          TEXT PRIMARY KEY,
-    agent       TEXT NOT NULL DEFAULT 'default',
-    description TEXT NOT NULL,
-    status      TEXT NOT NULL DEFAULT 'queued',
-    result      TEXT,
-    created     TEXT NOT NULL,
-    started     TEXT,
-    completed   TEXT
+    id              TEXT PRIMARY KEY,
+    agent           TEXT NOT NULL DEFAULT 'default',
+    description     TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    priority        TEXT NOT NULL DEFAULT 'normal',
+    result          TEXT,
+    cost_tokens_in  INTEGER NOT NULL DEFAULT 0,
+    cost_tokens_out INTEGER NOT NULL DEFAULT 0,
+    cost_usd        REAL NOT NULL DEFAULT 0.0,
+    cost_duration_ms INTEGER NOT NULL DEFAULT 0,
+    approval_required INTEGER NOT NULL DEFAULT 0,
+    approved_by     TEXT,
+    tags            TEXT NOT NULL DEFAULT '[]',
+    parent_task_id  TEXT,
+    created         TEXT NOT NULL,
+    started         TEXT,
+    completed       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS token_usage (
@@ -242,43 +251,142 @@ class MemoryDB:
 
     # ── Tasks ────────────────────────────────────────────────────────
 
-    def create_task(self, agent, description):
+    VALID_PRIORITIES = ("low", "normal", "high", "urgent")
+    VALID_STATUSES = (
+        "pending", "assigned", "queued", "running",
+        "review", "approved", "rejected",
+        "completed", "done", "failed", "cancelled",
+    )
+    _PRIORITY_RANK = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
+
+    def create_task(self, agent, description, priority="normal",
+                    tags=None, parent_task_id=None, approval_required=False):
         tid = uuid.uuid4().hex[:8]
+        if priority not in self.VALID_PRIORITIES:
+            priority = "normal"
         self.conn.execute(
-            "INSERT INTO tasks (id, agent, description, status, created) "
-            "VALUES (?, ?, ?, 'queued', ?)",
-            (tid, agent, description, _now()),
+            "INSERT INTO tasks (id, agent, description, status, priority, "
+            "tags, parent_task_id, approval_required, created) "
+            "VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
+            (tid, agent, description, priority,
+             json.dumps(tags or []), parent_task_id,
+             1 if approval_required else 0, _now()),
         )
         self.conn.commit()
-        return {"id": tid, "agent": agent,
-                "description": description, "status": "queued"}
+        return {"id": tid, "agent": agent, "description": description,
+                "status": "pending", "priority": priority}
 
-    def update_task(self, task_id, status, result=None):
+    def update_task(self, task_id, status, result=None, cost=None):
         now = _now()
+        if status not in self.VALID_STATUSES:
+            return
+        parts = ["status = ?"]
+        vals = [status]
         if status == "running":
-            self.conn.execute(
-                "UPDATE tasks SET status=?, started=? WHERE id=?",
-                (status, now, task_id),
-            )
-        elif status in ("completed", "failed", "cancelled"):
-            self.conn.execute(
-                "UPDATE tasks SET status=?, completed=?, result=? WHERE id=?",
-                (status, now, result, task_id),
-            )
-        else:
-            self.conn.execute(
-                "UPDATE tasks SET status=? WHERE id=?", (status, task_id)
-            )
+            parts.append("started = ?")
+            vals.append(now)
+        elif status in ("completed", "done", "failed", "cancelled", "rejected"):
+            parts.append("completed = ?")
+            vals.append(now)
+            if result is not None:
+                parts.append("result = ?")
+                vals.append(result)
+        elif result is not None:
+            parts.append("result = ?")
+            vals.append(result)
+        if cost:
+            for col, key in [("cost_tokens_in", "tokens_in"),
+                              ("cost_tokens_out", "tokens_out"),
+                              ("cost_usd", "usd"),
+                              ("cost_duration_ms", "duration_ms")]:
+                if key in cost:
+                    parts.append(f"{col} = ?")
+                    vals.append(cost[key])
+        vals.append(task_id)
+        self.conn.execute(
+            f"UPDATE tasks SET {', '.join(parts)} WHERE id = ?", vals
+        )
         self.conn.commit()
 
-    def list_tasks(self, agent=None, status=None):
+    def approve_task(self, task_id, approved_by="user"):
+        self.conn.execute(
+            "UPDATE tasks SET status='approved', approved_by=? WHERE id=?",
+            (approved_by, task_id),
+        )
+        self.conn.commit()
+
+    def reject_task(self, task_id):
+        self.conn.execute(
+            "UPDATE tasks SET status='rejected', completed=? WHERE id=?",
+            (_now(), task_id),
+        )
+        self.conn.commit()
+
+    def get_task(self, task_id):
+        row = self.conn.execute(
+            "SELECT * FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if not row:
+            return None
+        t = dict(row)
+        try:
+            t["tags"] = json.loads(t.get("tags", "[]"))
+        except (json.JSONDecodeError, TypeError):
+            t["tags"] = []
+        return t
+
+    def get_subtasks(self, parent_id):
+        rows = self.conn.execute(
+            "SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY created",
+            (parent_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_tasks(self, agent=None, status=None, tag=None):
         q, p = "SELECT * FROM tasks WHERE 1=1", []
         if agent:
             q += " AND agent = ?"; p.append(agent)
         if status:
             q += " AND status = ?"; p.append(status)
         q += " ORDER BY created DESC LIMIT 50"
-        return [dict(r) for r in self.conn.execute(q, p).fetchall()]
+        rows = self.conn.execute(q, p).fetchall()
+        tasks = []
+        for r in rows:
+            t = dict(r)
+            try:
+                t["tags"] = json.loads(t.get("tags", "[]"))
+            except (json.JSONDecodeError, TypeError):
+                t["tags"] = []
+            if tag and tag not in t["tags"]:
+                continue
+            tasks.append(t)
+        tasks.sort(key=lambda t: self._PRIORITY_RANK.get(t.get("priority", "normal"), 2))
+        return tasks
+
+    def task_stats(self, agent=None):
+        where = "WHERE agent = ?" if agent else ""
+        params = (agent,) if agent else ()
+        def _cnt(status):
+            r = self.conn.execute(
+                f"SELECT COUNT(*) FROM tasks {where}"
+                f"{' AND' if where else ' WHERE'} status = ?",
+                (*params, status),
+            ).fetchone()
+            return r[0]
+        total_cost = self.conn.execute(
+            f"SELECT COALESCE(SUM(cost_usd), 0) FROM tasks {where}", params
+        ).fetchone()[0]
+        return {
+            "total": self.conn.execute(
+                f"SELECT COUNT(*) FROM tasks {where}", params
+            ).fetchone()[0],
+            "pending": _cnt("pending"),
+            "running": _cnt("running"),
+            "done": _cnt("completed") + _cnt("done"),
+            "failed": _cnt("failed"),
+            "review": _cnt("review"),
+            "total_cost_usd": round(total_cost, 4),
+        }
 
     # ── Token Usage ──────────────────────────────────────────────────
 
@@ -418,6 +526,41 @@ class MemoryDB:
 
     # ── Stats ────────────────────────────────────────────────────────
 
+    # ── Schema migration ────────────────────────────────────────────
+
+    def migrate(self):
+        """Add columns from newer schema versions if missing."""
+        existing = {
+            row[1] for row in
+            self.conn.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+        migrations = [
+            ("priority", "TEXT NOT NULL DEFAULT 'normal'"),
+            ("cost_tokens_in", "INTEGER NOT NULL DEFAULT 0"),
+            ("cost_tokens_out", "INTEGER NOT NULL DEFAULT 0"),
+            ("cost_usd", "REAL NOT NULL DEFAULT 0.0"),
+            ("cost_duration_ms", "INTEGER NOT NULL DEFAULT 0"),
+            ("approval_required", "INTEGER NOT NULL DEFAULT 0"),
+            ("approved_by", "TEXT"),
+            ("tags", "TEXT NOT NULL DEFAULT '[]'"),
+            ("parent_task_id", "TEXT"),
+        ]
+        for col, typedef in migrations:
+            if col not in existing:
+                try:
+                    self.conn.execute(
+                        f"ALTER TABLE tasks ADD COLUMN {col} {typedef}"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+        # Rename old 'queued' status to 'pending' for consistency
+        self.conn.execute(
+            "UPDATE tasks SET status='pending' WHERE status='queued'"
+        )
+        self.conn.commit()
+
+    # ── Stats ────────────────────────────────────────────────────────
+
     def stats(self):
         def _count(sql):
             return self.conn.execute(sql).fetchone()[0]
@@ -431,14 +574,22 @@ class MemoryDB:
             total_input, total_output = row[0], row[1]
         except Exception:
             pass
+        task_cost = 0.0
+        try:
+            task_cost = self.conn.execute(
+                "SELECT COALESCE(SUM(cost_usd),0) FROM tasks"
+            ).fetchone()[0]
+        except Exception:
+            pass
         return {
             "agents": _count("SELECT COUNT(*) FROM agents"),
             "sessions": _count("SELECT COUNT(*) FROM sessions"),
             "memories": _count("SELECT COUNT(*) FROM memories"),
             "active_tasks": _count(
                 "SELECT COUNT(*) FROM tasks "
-                "WHERE status IN ('queued','running')"
+                "WHERE status IN ('pending','assigned','running')"
             ),
             "total_input_tokens": total_input,
             "total_output_tokens": total_output,
+            "total_task_cost_usd": round(task_cost, 4),
         }
