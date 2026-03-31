@@ -491,7 +491,8 @@ do_show_qr() {
 
 do_ask() {
     title_box "Ask Claude"
-    echo -e "  ${DIM}(use 'kmac ask -i' for interactive mode, or 'kmac ask -m opus' for hard questions)${NC}"
+    echo -e "  ${DIM}kmac ask -i  interactive  |  kmac ask -m opus  hard questions${NC}"
+    echo -e "  ${DIM}Enter = back to menu${NC}"
     echo ""
     read -r -p "  Question: " q
     [[ -z "$q" ]] && return
@@ -899,7 +900,7 @@ main() {
             # Dev
             p) clear; safe_run "Project Launcher" bash "$SCRIPTS_DIR/project" ;;
             e) clear; bash "$SCRIPTS_DIR/claudeme" ;;
-            x) clear; echo -e "${BOLD}Cursor Agent Task:${NC}"; read -r -p "Task: " t; safe_run "Cursor Agent" bash "$SCRIPTS_DIR/cursoragent" "$t" ;;
+            x) clear; echo -e "${BOLD}Cursor Agent Task:${NC} ${DIM}(Enter = back)${NC}"; read -r -p "  Task: " t; [[ -z "$t" ]] && continue; safe_run "Cursor Agent" bash "$SCRIPTS_DIR/cursoragent" "$t" ;;
             v) clear; safe_run "Code Review" bash "$SCRIPTS_DIR/review"; pause ;;
             c) clear; safe_run "Smart Commit" bash "$SCRIPTS_DIR/aicommit"; pause ;;
             # Infra
@@ -907,7 +908,7 @@ main() {
             r) clear; do_remote_terminal ;;
             P) clear; bash "$SCRIPTS_DIR/pilot" status; pause ;;
             n) clear; do_network ;;
-            k) clear; echo -e "${BOLD}Kill Port:${NC}"; read -r -p "Port (blank=list): " pt; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" "$pt"; pause ;;
+            k) clear; echo -e "${BOLD}Kill Port:${NC} ${DIM}(Enter = list, m = back)${NC}"; read -r -p "  Port: " pt; [[ "$pt" == [mM] ]] && continue; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" "$pt"; pause ;;
             # System
             .) clear; do_secrets ;;
             S) clear; bash "$SCRIPTS_DIR/storage" ;;
