@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-    title_box "AI Code Review" "🔍"
+    title_box "AI Code Review"
     echo -e "  ${YELLOW}⚠${NC}  Not inside a git repository."
     echo ""
     echo -e "  ${DIM}Navigate to a project first, or use ${NC}${GREEN}p${NC}${DIM} (Project Launcher) from the menu.${NC}"
@@ -54,7 +54,7 @@ FILE_COUNT=$(printf '%s\n' "$DIFF" | grep -c '^diff --git' || true)
 
 # Agent-powered review: uses KmacAgent with tool access for deeper analysis
 if $USE_AGENT && agent_running; then
-    title_box "AI Code Review (Agent)" "🔍"
+    title_box "AI Code Review (Agent)"
     echo -e "  Reviewing ${BOLD}$FILE_COUNT${NC} file(s) on ${BOLD}$REPO/$BRANCH${NC} via KmacAgent..."
     echo ""
 
@@ -127,7 +127,7 @@ $SUMMARY"
     hooks_emit post-review
 else
     # Single-pass review for smaller diffs
-    title_box "AI Code Review" "🔍"
+    title_box "AI Code Review"
     echo -e "  Reviewing ${BOLD}$FILE_COUNT${NC} file(s) on ${BOLD}$REPO/$BRANCH${NC} ($MODE mode)..."
     echo ""
 

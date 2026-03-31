@@ -416,7 +416,7 @@ do_remote_terminal() {
     source "$SCRIPTS_DIR/remote-terminal.sh" 2>/dev/null
     local status
     status=$(check_rt)
-    title_box "Remote Terminal" "🖥"
+    title_box "Remote Terminal"
     if [[ "$status" == "up" ]]; then
         local url
         url=$(curl -sf http://localhost:4040/api/tunnels 2>/dev/null \
@@ -472,7 +472,7 @@ do_show_qr() {
     local url
     url=$(curl -sf http://localhost:4040/api/tunnels 2>/dev/null \
         | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
-    title_box "Remote Terminal — QR" "📡"
+    title_box "Remote Terminal — QR"
     echo -e "  URL:      ${GREEN}${url:-unknown}${NC}"
     echo -e "  Username: ${GREEN}user${NC}"
     echo -e "  Password: ${GREEN}********${NC} ${DIM}(stored in vault)${NC}"
@@ -490,7 +490,7 @@ do_show_qr() {
 }
 
 do_ask() {
-    title_box "Ask Claude" "🤖"
+    title_box "Ask Claude"
     echo -e "  ${DIM}(use 'kmac ask -i' for interactive mode, or 'kmac ask -m opus' for hard questions)${NC}"
     echo ""
     read -r -p "  Question: " q
@@ -501,7 +501,7 @@ do_ask() {
 }
 
 do_network() {
-    title_box "Network Info" "🌐"
+    title_box "Network Info"
     local lip pip wifi gw
     lip=$(ipconfig getifaddr en0 2>/dev/null || echo "Not connected")
     pip=$(curl -sf --max-time 3 https://ifconfig.me 2>/dev/null || echo "Unavailable")
@@ -520,7 +520,7 @@ do_network() {
 }
 
 do_health() {
-    title_box "Health Check" "🩺"
+    title_box "Health Check"
     local issues=0
     echo -e "  ${BOLD}Dependencies:${NC}"
     for dep in ttyd ngrok caddy qrencode tmux bat fzf git docker brew claude cursor; do
@@ -595,7 +595,7 @@ do_health() {
 
 do_aliases() {
     clear
-    title_box "Aliases" "📋"
+    title_box "Aliases"
     if [[ -f "$TOOLKIT_DIR/aliases.sh" ]]; then
         grep "^alias\|^[a-z_]*() " "$TOOLKIT_DIR/aliases.sh" | while IFS= read -r line; do
             if [[ "$line" == alias* ]]; then
@@ -619,7 +619,7 @@ do_secrets() {
 }
 
 do_install_bootstrap() {
-    title_box "Install / Bootstrap" "⚙"
+    title_box "Install / Bootstrap"
     echo -e "  ${GREEN}i${NC}) Install/Update Toolkit"
     echo -e "  ${GREEN}b${NC}) Export Brewfile ${DIM}(save current)${NC}"
     echo -e "  ${GREEN}B${NC}) Install from Brewfile"
@@ -917,7 +917,7 @@ main() {
             I) clear; bash "$SCRIPTS_DIR/software" ;;
             /) clear; do_aliases ;;
             \?) clear; do_health ;;
-            0) hooks_emit on-exit || true; echo -e "\n  ${C_TEAL}See you! ✌${NC}\n"; exit 0 ;;
+            0) hooks_emit on-exit || true; echo -e "\n  ${C_TEAL}See you.${NC}\n"; exit 0 ;;
             *)
                 # Check plugins
                 local matched=false

@@ -132,7 +132,7 @@ cmd_stop() {
 }
 
 cmd_status() {
-    title_box "KmacAgent" "🤖"
+    title_box "KmacAgent"
     if _is_running; then
         _engine status
     else

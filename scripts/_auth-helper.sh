@@ -61,9 +61,9 @@ _ai_spin_start() {
                 9|10|11) dots="..." ;;
             esac
             if [[ -n "$model_tag" ]]; then
-                printf '\r  %b%s\033[0m \033[1m🤖 %s%s\033[0m \033[2m(%s)\033[0m  ' "$clr" "$f" "$label" "$dots" "$model_tag" >&2
+                printf '\r  %b%s\033[0m \033[1m%s%s\033[0m \033[2m(%s)\033[0m  ' "$clr" "$f" "$label" "$dots" "$model_tag" >&2
             else
-                printf '\r  %b%s\033[0m \033[1m🤖 %s%s\033[0m  ' "$clr" "$f" "$label" "$dots" >&2
+                printf '\r  %b%s\033[0m \033[1m%s%s\033[0m  ' "$clr" "$f" "$label" "$dots" >&2
             fi
             ((i++))
             (( i % 4 == 0 )) && ((c++))

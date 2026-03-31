@@ -15,9 +15,9 @@ RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-ICON_SUCCESS="✅"
-ICON_WARNING="⚠️"
-ICON_INFO="ℹ️"
+ICON_SUCCESS="[OK]"
+ICON_WARNING="⚠"
+ICON_INFO="[i]"
 
 # Available subagents
 SUBAGENTS=(

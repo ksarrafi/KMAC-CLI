@@ -112,7 +112,7 @@ show_quick_alert() {
     local count
     count=$(wc -l < "$CACHE_FILE" | tr -d ' ')
     if (( count > 0 )) && [[ -s "$CACHE_FILE" ]]; then
-        echo -e "  ${YELLOW}⚡ $count update(s) available — press 'u' for details${NC}"
+        echo -e "  ${YELLOW}* $count update(s) available — press 'u' for details${NC}"
         echo ""
     fi
 }
@@ -153,7 +153,7 @@ run_update() {
 # ─── Full Interactive Report ──────────────────────────────────────────────
 
 show_full_report() {
-    title_box "Update Check" "🔄"
+    title_box "Update Check"
     run_checks >/dev/null 2>&1 &
     spin $!
 
@@ -168,11 +168,11 @@ show_full_report() {
         [[ -z "$tool" ]] && continue
         case "$status" in
             outdated|stale|"no backup")
-                echo -e "  ${YELLOW}⚡${NC} ${BOLD}$tool${NC}: $current → $status"
+                echo -e "  ${YELLOW}*${NC} ${BOLD}$tool${NC}: $current → $status"
                 echo -e "     ${DIM}Fix: $cmd${NC}"
                 ;;
             *)
-                echo -e "  ${YELLOW}⚡${NC} ${BOLD}$tool${NC}: v$current → v$status"
+                echo -e "  ${YELLOW}*${NC} ${BOLD}$tool${NC}: v$current → v$status"
                 echo -e "     ${DIM}Fix: $cmd${NC}"
                 ;;
         esac

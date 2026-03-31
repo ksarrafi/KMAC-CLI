@@ -88,7 +88,7 @@ start_output_stream() {
                 fi
                 last_lines=$cur_lines
 
-                tg_send "$cid" "⏳ *${agent_name}* working on *${project_name}*...
+                tg_send "$cid" "*${agent_name}* working on *${project_name}*...
 _${elapsed_str} elapsed_ · ${cur_lines} lines · ${size_str}${preview}"
             fi
         done
@@ -108,22 +108,22 @@ stop_output_stream() {
 cmd_start_message() {
     local cid="$1"
     tg_send "$cid" "$(cat <<'MSG'
-*KMac Pilot* is online 🟢
+*KMac Pilot* is online
 
-🤖 *AI Agent*
+*AI Agent*
 `/task <project> <prompt>` — Start a task
 `/ask <question>` — Follow-up question
 `/status` — Check progress
 `/stop` — Stop agent
 `/agent [claude|cursor]` — Switch AI
 
-📂 *Browse*
+*Browse*
 `/projects [filter]` — List projects
 `/tree [subdir]` — Directory tree
 `/cat <file>` — View a file
 `/run <cmd>` — Allowed read-only cmds only (see /help)
 
-✅ *Review*
+*Review*
 `/log` — Agent output
 `/diff` — Git changes
 `/approve [msg]` — Commit
@@ -187,7 +187,7 @@ cmd_projects() {
         # Group by scan dir label
         if [[ "$plabel" != "$cur_label" ]]; then
             cur_label="$plabel"
-            list+=$'\n'"📁 *${plabel}*"$'\n'
+            list+=$'\n'"*${plabel}*"$'\n'
         fi
         if [[ "$pbranch" == "—" ]]; then
             list+="  • \`${pname}\`"$'\n'
@@ -593,7 +593,7 @@ Example: \`/cat src/app/page.tsx\`
         local content
         content=$(cat "$full_path")
         local ext="${filepath##*.}"
-        tg_send_plain "$cid" "$(printf "📄 %s:\n\`\`\`%s\n%s\n\`\`\`" "$filepath" "$ext" "$content")"
+        tg_send_plain "$cid" "$(printf "%s:\n\`\`\`%s\n%s\n\`\`\`" "$filepath" "$ext" "$content")"
     fi
 }
 
@@ -641,7 +641,7 @@ cmd_tree() {
 ...(truncated)"
     fi
 
-    tg_send_plain "$cid" "$(printf "📁 %s%s:\n\`\`\`\n%s\n\`\`\`" "$project_name" "${subdir:+/$subdir}" "$tree_output")"
+    tg_send_plain "$cid" "$(printf "%s%s:\n\`\`\`\n%s\n\`\`\`" "$project_name" "${subdir:+/$subdir}" "$tree_output")"
 }
 
 # Strict allowlist for /run — first word (and git/docker/brew subcommand) must match.

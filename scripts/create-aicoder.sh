@@ -13,10 +13,10 @@ RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-ICON_SUCCESS="✅"
-ICON_WARNING="⚠️"
-ICON_INFO="ℹ️"
-ICON_ROCKET="🚀"
+ICON_SUCCESS="[OK]"
+ICON_WARNING="⚠"
+ICON_INFO="[i]"
+ICON_ROCKET="*"
 
 echo -e "${BOLD}${CYAN}Creating Global AICoder Command${NC}"
 echo ""
@@ -65,10 +65,10 @@ RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-ICON_SUCCESS="✅"
-ICON_WARNING="⚠️"
-ICON_INFO="ℹ️"
-ICON_ROCKET="🚀"
+ICON_SUCCESS="[OK]"
+ICON_WARNING="⚠"
+ICON_INFO="[i]"
+ICON_ROCKET="*"
 
 # Available subagents
 SUBAGENTS=(
@@ -316,10 +316,10 @@ RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-ICON_SUCCESS="✅"
-ICON_WARNING="⚠️"
-ICON_INFO="ℹ️"
-ICON_ROCKET="🚀"
+ICON_SUCCESS="[OK]"
+ICON_WARNING="⚠"
+ICON_INFO="[i]"
+ICON_ROCKET="*"
 
 # Available subagents
 SUBAGENTS=(

@@ -73,7 +73,7 @@ def _parse_stream_event(raw: str) -> Optional[list[str] | str]:
 
     if etype == "system" and evt.get("subtype") == "init":
         model = _strip_ansi(evt.get("model", "unknown"))
-        return f"⚙ Agent initialized (model: {model})"
+        return f"Agent initialized (model: {model})"
 
     if etype == "assistant":
         msg = evt.get("message", {})
@@ -89,7 +89,7 @@ def _parse_stream_event(raw: str) -> Optional[list[str] | str]:
                 name = block.get("name", "unknown")
                 inp = block.get("input", {})
                 summary = _tool_summary(name, inp)
-                lines.append(f"🔧 {name}: {summary}")
+                lines.append(f"  {name}: {summary}")
         if msg.get("stop_reason") == "tool_use" and not lines:
             return None
         return lines if lines else None

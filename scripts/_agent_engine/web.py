@@ -59,7 +59,7 @@ td{color:#c9d1d9}
 </style>
 </head>
 <body>
-<h1>🤖 KmacAgent Dashboard</h1>
+<h1>KmacAgent Dashboard</h1>
 <div id="error"></div>
 <div class="grid" id="status-cards"></div>
 <h2>Agents</h2>

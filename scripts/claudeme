@@ -101,7 +101,7 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   ui_warn "Anthropic API key not set — run ${GREEN}kmac secrets set anthropic${NC}"
 fi
 
-title_box "Claude Code Session" "🚀"
+title_box "Claude Code Session"
 echo -e "  ${BOLD}Model:${NC}   ${CYAN}$MODEL${NC}"
 echo -e "  ${BOLD}Session:${NC} $SESSION_NAME"
 echo -e "  ${BOLD}Dir:${NC}     ${DIM}$WORKDIR${NC}"

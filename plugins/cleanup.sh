@@ -25,7 +25,7 @@ dir_size() {
     du -sk "$1" 2>/dev/null | awk '{print $1 * 1024}'
 }
 
-title_box "System Cleanup" "🧹"
+title_box "System Cleanup"
 
 # Show current free space
 local_free=$(df -k / | awk 'NR==2 {print $4 * 1024}')

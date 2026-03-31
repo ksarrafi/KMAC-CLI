@@ -16,7 +16,7 @@ pilot_ensure_dirs
 # ─── Setup Wizard ────────────────────────────────────────────────────────
 
 do_setup() {
-    title_box "KMac Pilot Setup" "🛰"
+    title_box "KMac Pilot Setup"
     echo -e "  ${BOLD}Step 1: Create a Telegram Bot${NC}"
     echo -e "  ${DIM}Open Telegram on your phone and message @BotFather:${NC}"
     echo ""
@@ -172,7 +172,7 @@ do_stop() {
 }
 
 do_status() {
-    title_box "KMac Pilot" "🛰"
+    title_box "KMac Pilot"
 
     # Bot status
     if pilot_bot_running; then

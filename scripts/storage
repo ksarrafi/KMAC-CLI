@@ -69,7 +69,7 @@ spinner() {
 # ─── Disk Overview ──────────────────────────────────────────────────────────
 
 do_overview() {
-    title_box "Disk Usage Overview" "💾"
+    title_box "Disk Usage Overview"
 
     local disk_info
     disk_info=$(df -H / 2>/dev/null | awk 'NR==2')
@@ -107,7 +107,7 @@ do_overview() {
 # ─── Top Space Consumers ───────────────────────────────────────────────────
 
 do_scan() {
-    title_box "Top Space Consumers" "📊"
+    title_box "Top Space Consumers"
 
     local tmpdir="$_KMAC_TMP/storage-$$"
     mkdir -p "$tmpdir"
@@ -213,7 +213,7 @@ do_scan() {
 # ─── Find Big Files ─────────────────────────────────────────────────────────
 
 do_big_files() {
-    title_box "Largest Files" "🔍"
+    title_box "Largest Files"
 
     local min_mb=${1:-100}
     local tmpfile="$_KMAC_TMP/bigfiles-$$"
@@ -587,7 +587,7 @@ _act_on_files() {
 # ─── Cleanable Caches ──────────────────────────────────────────────────────
 
 do_clean() {
-    title_box "Cleanable Space" "🧹"
+    title_box "Cleanable Space"
 
     local total_reclaimable=0
 
@@ -742,7 +742,7 @@ do_clean() {
 # ─── iCloud Analysis ────────────────────────────────────────────────────────
 
 do_icloud() {
-    title_box "iCloud Storage Analysis" "☁️"
+    title_box "iCloud Storage Analysis"
 
     if ! $ICLOUD_AVAIL; then
         echo -e "  ${RED}✗ iCloud Drive not found${NC}"
@@ -968,7 +968,7 @@ do_move() {
 # ─── Node Modules Scanner ──────────────────────────────────────────────────
 
 do_node_modules() {
-    title_box "node_modules Cleanup" "📦"
+    title_box "node_modules Cleanup"
 
     # Find node_modules with live count
     local tmpfile="$_KMAC_TMP/nm-$$"
@@ -1086,7 +1086,7 @@ do_node_modules() {
 do_menu() {
     while true; do
         clear
-        title_box "Storage Manager" "💾"
+        title_box "Storage Manager"
 
         do_overview
 

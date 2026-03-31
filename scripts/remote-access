@@ -31,7 +31,7 @@ _tunnel_pid() {
 
 do_setup() {
     _ensure_dirs
-    title_box "Remote Access Setup" "🌐"
+    title_box "Remote Access Setup"
     echo ""
     echo "  Choose a tunnel method:"
     echo ""
@@ -337,7 +337,7 @@ do_status() {
     local url
     url=$(cat "$REMOTE_URL_FILE" 2>/dev/null)
     
-    title_box "Remote Access Status" "📡"
+    title_box "Remote Access Status"
     echo ""
     echo "  Method:  ${method:-not configured}"
     

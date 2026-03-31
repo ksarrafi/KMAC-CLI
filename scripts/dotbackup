@@ -50,7 +50,7 @@ _scrub_secrets() {
 }
 
 show_diff() {
-    title_box "Dotfile Changes" "📋"
+    title_box "Dotfile Changes"
     local changes=0
     for f in "${DOTFILES[@]}"; do
         local name
@@ -73,7 +73,7 @@ show_diff() {
 
 do_backup() {
     mkdir -p "$BACKUP_DIR"
-    title_box "Dotfile Backup" "💾"
+    title_box "Dotfile Backup"
     for f in "${DOTFILES[@]}"; do
         [[ -f "$f" ]] || continue
         local name
@@ -120,7 +120,7 @@ do_restore() {
     [[ -d "$BACKUP_DIR" ]] || { ui_fail "No backup found at $BACKUP_DIR"; return 1; }
     local ts
     ts=$(date +%Y%m%d-%H%M%S)
-    title_box "Dotfile Restore" "📥"
+    title_box "Dotfile Restore"
     ui_warn "Current files will be saved as .bak-$ts"
     echo ""
     for f in "${DOTFILES[@]}"; do

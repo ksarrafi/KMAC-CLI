@@ -10,7 +10,7 @@ PROMPT="$*"
 
 if [[ -z "$PROMPT" ]]; then
     if [[ -t 0 ]]; then
-        title_box "Cursor Agent" "⚡"
+        title_box "Cursor Agent"
         read -r -p "  Task: " PROMPT
         echo ""
     else

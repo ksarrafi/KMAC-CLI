@@ -62,15 +62,15 @@ _docker_ok() {
 
 # ─── Spinner ─────────────────────────────────────────────────────────────────
 
-_SPIN_CHARS=('⣾' '⣽' '⣻' '⢿' '⡿' '⣟' '⣯' '⣷')
-_SPIN_N=8
+_SPIN_CHARS=('|' '/' '-' "\\")
+_SPIN_N=4
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 1. HEALTH DASHBOARD — live stats via Engine API
 # ═════════════════════════════════════════════════════════════════════════════
 
 do_dashboard() {
-    title_box "Docker Health Dashboard" "🐳"
+    title_box "Docker Health Dashboard"
     _docker_ok || return
 
     # System overview via /info — parse all fields in one python call
@@ -168,7 +168,7 @@ print(f'{cpu_pct:.1f} {mem_h} {h(rx)} {h(tx)}')")
         (( cpu_num > 50 && cpu_num <= 80 )) && cpu_color="$YELLOW"
 
         printf "  ${DIM}%2d${NC}  %-24s %b ${cpu_color}%-9s${NC} %-12s %-10s %s\n" \
-            "$idx" "$name" "$badge" "${cpu_pct}%" "$mem_usage" "${net_rx}↓${net_tx}↑" "$uptime"
+            "$idx" "$name" "$badge" "${cpu_pct}%" "$mem_usage" "rx ${net_rx} tx ${net_tx}" "$uptime"
 
         if (( cpu_num > 80 )); then
             alerts+="  ${RED}⚠${NC}  ${BOLD}${name}${NC}: CPU at ${cpu_pct}%\n"
@@ -200,7 +200,7 @@ for c in cs:
 # ═════════════════════════════════════════════════════════════════════════════
 
 do_crashes() {
-    title_box "Crash Detective" "🔍"
+    title_box "Crash Detective"
     _docker_ok || return
 
     local exited
@@ -240,13 +240,13 @@ fin = d.get('State',{}).get('FinishedAt','?')[:19].replace('T',' ')
 print(f'{name} {ec} {oom} {img} {fin}')")
 
         if [[ "$oom_killed" == "True" ]]; then
-            badge="${RED}☠ OOM KILLED${NC}"
+            badge="${RED}OOM KILLED${NC}"
             reason="Out of memory — increase container memory limit"
         elif [[ "$exit_code" == "137" ]]; then
-            badge="${RED}⚡ SIGKILL(137)${NC}"
+            badge="${RED}SIGKILL (137)${NC}"
             reason="Killed by signal — likely OOM or manual kill"
         elif [[ "$exit_code" == "139" ]]; then
-            badge="${RED}💥 SEGFAULT(139)${NC}"
+            badge="${RED}SEGFAULT (139)${NC}"
             reason="Segmentation fault in application"
         elif [[ "$exit_code" == "1" ]]; then
             badge="${YELLOW}✗ ERROR(1)${NC}"
@@ -313,7 +313,7 @@ print(f'{name} {ec} {oom} {img} {fin}')")
 # ═════════════════════════════════════════════════════════════════════════════
 
 do_disk() {
-    title_box "Docker Disk Monitor" "💾"
+    title_box "Docker Disk Monitor"
     _docker_ok || return
 
     # Host disk context
@@ -395,7 +395,7 @@ CLEANUP_SCRIPT="$HOME/cleanup-docker.sh"
 CLEANUP_LOG="$HOME/.docker-cleanup.log"
 
 do_scheduler() {
-    title_box "Auto-Cleanup Scheduler" "⏰"
+    title_box "Auto-Cleanup Scheduler"
 
     local script_exists=false cron_exists=false cron_schedule=""
     [[ -f "$CLEANUP_SCRIPT" ]] && script_exists=true
@@ -496,7 +496,7 @@ _set_cron() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 do_compose() {
-    title_box "Compose Deployments" "🚀"
+    title_box "Compose Deployments"
     _docker_ok || return
 
     # Find running compose projects
@@ -566,12 +566,12 @@ for i,p in enumerate(ps,1):
 # ═════════════════════════════════════════════════════════════════════════════
 
 do_mcp() {
-    title_box "Docker MCP Toolkit" "🤖"
+    title_box "Docker MCP Toolkit"
 
     if ! $_HAS_MCP; then
         echo -e "  ${YELLOW}Docker MCP is not installed.${NC}"
         echo -e "  ${DIM}Requires Docker Desktop 4.62+ with MCP Toolkit enabled.${NC}"
-        echo -e "  ${DIM}Enable in Docker Desktop → Settings → Beta features → MCP Toolkit${NC}"
+        echo -e "  ${DIM}Enable in Docker Desktop -> Settings -> Beta features -> MCP Toolkit${NC}"
         return
     fi
 
@@ -726,7 +726,7 @@ _mcp_troubleshoot() {
 
     if ! type _ensure_claude_auth &>/dev/null || ! _ensure_claude_auth 2>/dev/null; then
         echo -e "  ${YELLOW}AI troubleshooting requires an Anthropic API key.${NC}"
-        echo -e "  ${DIM}Set up: toolkit → Secrets (.) → add ANTHROPIC_API_KEY${NC}"
+        echo -e "  ${DIM}Set up: toolkit -> Secrets (.) -> add ANTHROPIC_API_KEY${NC}"
         return
     fi
 
@@ -780,7 +780,7 @@ Be concise and actionable. Format with clear headers."
 # ═════════════════════════════════════════════════════════════════════════════
 
 do_quick_clean() {
-    title_box "Quick Cleanup" "🧹"
+    title_box "Quick Cleanup"
     _docker_ok || return
 
     echo -e "  ${BOLD}What to clean?${NC}"
@@ -833,7 +833,7 @@ do_quick_clean() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 do_restart() {
-    title_box "Restart Docker Desktop" "🔄"
+    title_box "Restart Docker Desktop"
 
     echo -e "  ${YELLOW}This will stop all running containers temporarily.${NC}"
     read -r -p "  Continue? (y/N) " yn

@@ -92,7 +92,7 @@ NOTE: optional one-line note if the user should know something"
     note=$(echo "$response" | grep -i '^NOTE:' | sed 's/^NOTE: *//')
 
     echo ""
-    echo -e "${BOLD}${CYAN}🤖 AI Diagnosis${NC}"
+    echo -e "${BOLD}${CYAN}AI Diagnosis${NC}"
     echo -e "   ${diagnosis}"
     if [[ -n "$note" && "$note" != "none" && "$note" != "N/A" ]]; then
         echo -e "   ${DIM}${note}${NC}"

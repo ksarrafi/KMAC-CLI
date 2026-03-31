@@ -375,19 +375,19 @@ _cat_label() {
 
 _cat_icon() {
     case "$1" in
-        dev)   echo "⚒" ;;
-        ai)    echo "🤖" ;;
-        app)   echo "💻" ;;
-        infra) echo "🏗" ;;
-        shell) echo "🐚" ;;
-        *)     echo "📦" ;;
+        dev)   echo "[dev]" ;;
+        ai)    echo "[ai]" ;;
+        app)   echo "[app]" ;;
+        infra) echo "[infra]" ;;
+        shell) echo "[shell]" ;;
+        *)     echo "[pkg]" ;;
     esac
 }
 
 # ─── List All Software ──────────────────────────────────────────────────
 
 do_list() {
-    title_box "Software Catalog" "📦"
+    title_box "Software Catalog"
 
     local current_cat=""
     local installed=0 total=0
@@ -428,7 +428,7 @@ do_category_menu() {
 
     while true; do
         clear
-        title_box "$cat_label" "$(_cat_icon "$cat")"
+        title_box "$cat_label"
 
         local -a names=() checks=() installs=() descs=() urls=()
         local idx=1
@@ -485,7 +485,7 @@ do_category_menu() {
 # ─── Install All Missing ────────────────────────────────────────────────
 
 do_install_all() {
-    title_box "Install All Missing" "🚀"
+    title_box "Install All Missing"
 
     local missing=0
     for entry in "${REGISTRY[@]}"; do
@@ -519,7 +519,7 @@ do_install_all() {
 # ─── Update Installed ───────────────────────────────────────────────────
 
 do_update() {
-    title_box "Update Installed Tools" "🔄"
+    title_box "Update Installed Tools"
 
     if [[ "${KMAC_OS:-}" == macos ]] && command -v brew &>/dev/null; then
         ui_info "Updating Homebrew packages..."
@@ -671,7 +671,7 @@ do_search() {
 do_menu() {
     while true; do
         clear
-        title_box "Software Manager" "📦"
+        title_box "Software Manager"
 
         local installed=0 total=${#REGISTRY[@]}
         for entry in "${REGISTRY[@]}"; do
@@ -703,7 +703,7 @@ do_menu() {
             l|L) clear; do_list; pause ;;
             a|A) clear; do_install_all ;;
             u|U) clear; do_update ;;
-            s|S) clear; title_box "Search" "🔍"; do_search; pause ;;
+            s|S) clear; title_box "Search"; do_search; pause ;;
             m|M|"") return ;;
             *) ui_fail "Unknown: '$choice'"; sleep 0.5 ;;
         esac

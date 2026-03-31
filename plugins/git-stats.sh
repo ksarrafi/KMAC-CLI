@@ -75,7 +75,7 @@ case "${1:-}" in
         _run_on_startup
         ;;
     *)
-        title_box "Git Stats" "📊"
+        title_box "Git Stats"
         if ! git rev-parse --is-inside-work-tree &>/dev/null; then
             echo -e "  ${YELLOW}⚠${NC}  Not inside a git repository."
         else

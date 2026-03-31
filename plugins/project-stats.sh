@@ -27,7 +27,7 @@ project_stats_report() {
         return 1
     fi
 
-    title_box "Project Stats" "📊"
+    title_box "Project Stats"
 
     local total_commits
     total_commits=$(git -C "$dir" rev-list --count HEAD 2>/dev/null || echo "0")

@@ -54,12 +54,12 @@ _disk_color() {
     fi
 }
 
-_disk_icon() {
+_disk_marker() {
     local pct=$1
-    if (( pct >= 90 )); then   echo "🔴"
-    elif (( pct >= 85 )); then echo "🟠"
-    elif (( pct >= 75 )); then echo "🟡"
-    else                       echo "🟢"
+    if (( pct >= 90 )); then   echo -e "${RED}[CRIT]${NC}"
+    elif (( pct >= 85 )); then printf '%b\n' '\033[38;5;208m[WARN]\033[0m'
+    elif (( pct >= 75 )); then echo -e "${YELLOW}[OK]${NC}"
+    else                       echo -e "${GREEN}[GOOD]${NC}"
     fi
 }
 
@@ -223,13 +223,13 @@ print(json.dumps({
     fi
 
     # ─── Display ──────────────────────────────────────────────────────
-    title_box "Docker Health Monitor" "🏥"
+    title_box "Docker Health Monitor"
 
     # Disk status bar
     local disk_color
     disk_color=$(_disk_color "$disk_pct")
-    local icon
-    icon=$(_disk_icon "$disk_pct")
+    local disk_marker
+    disk_marker=$(_disk_marker "$disk_pct")
     local badge
     badge=$(_disk_badge "$disk_pct")
     local filled=$(( disk_pct * 30 / 100 )) empty=$(( 30 - disk_pct * 30 / 100 ))
@@ -237,7 +237,7 @@ print(json.dumps({
     for (( b=0; b<filled; b++ )); do bar+="▇"; done
     for (( b=0; b<empty; b++ )); do bar+="░"; done
 
-    echo -e "  ${BOLD}Host Disk${NC}  ${icon} ${badge}"
+    echo -e "  ${BOLD}Host Disk${NC}  ${disk_marker} ${badge}"
     printf "  ${disk_color}%s${NC} %s%%  (%s used / %s total, %s free)\n" "$bar" "$disk_pct" "$disk_used" "$disk_total" "$disk_avail"
     echo ""
 
@@ -325,7 +325,7 @@ print(json.dumps({
                     [[ -z "$p" ]] && continue
                     [[ " $seen_ports " == *" $p "* ]] && continue
                     seen_ports+=" $p"
-                    echo -e "  ${CYAN}→${NC} ${name}: ${BOLD}http://localhost:${p}${NC}"
+                    echo -e "  ${CYAN}->${NC} ${name}: ${BOLD}http://localhost:${p}${NC}"
                 done
             done <<< "$container_data"
             echo ""
@@ -353,7 +353,7 @@ with open(f, 'w') as fh: json.dump(data, fh)
 }
 
 show_history() {
-    title_box "Docker Health History" "📊"
+    title_box "Docker Health History"
 
     if [[ ! -f "$HISTORY_FILE" ]]; then
         echo -e "  ${DIM}No history data yet. Run 'docker-health' first to start collecting.${NC}"
@@ -448,7 +448,7 @@ elif $OUTPUT_JSON; then
 else
     # Show a spinner while collecting container stats (can take several seconds)
     if [[ -t 1 ]]; then
-        _frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+        _frames=('|' '/' '-' "\\")
         _fi=0
         _tmpout="$_KMAC_TMP/dh-output.$$"
         collect_health > "$_tmpout" 2>&1 &

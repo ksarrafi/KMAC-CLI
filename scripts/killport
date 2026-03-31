@@ -23,7 +23,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#PORTS[@]} -eq 0 ]]; then
-    title_box "Listening Ports" "🔌"
+    title_box "Listening Ports"
     printf "  ${BOLD}%-8s %-15s %-8s${NC}\n" "PORT" "PROCESS" "PID"
     echo -e "  ${DIM}$(printf '─%.0s' {1..35})${NC}"
     lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR>1 {

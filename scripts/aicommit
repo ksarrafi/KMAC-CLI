@@ -28,7 +28,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-    title_box "AI Commit" "✍️"
+    title_box "AI Commit"
     echo -e "  ${YELLOW}⚠${NC}  Not inside a git repository."
     echo ""
     echo -e "  ${DIM}Navigate to a project first, or use ${NC}${GREEN}p${NC}${DIM} (Project Launcher) from the menu.${NC}"
@@ -64,7 +64,7 @@ elif echo "$DIRS" | grep -q "^test\|^spec\|^__test"; then
     SCOPE="tests"
 fi
 
-title_box "AI Commit" "✍️"
+title_box "AI Commit"
 echo -e "  Generating commit message for ${BOLD}$FILE_COUNT${NC} file(s)..."
 [[ -n "$SCOPE" ]] && echo -e "\033[2mDetected scope: $SCOPE\033[0m"
 

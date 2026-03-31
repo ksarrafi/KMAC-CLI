@@ -24,7 +24,7 @@ TOOL_KEY=""
 
 gather_spec() {
     echo ""
-    title_box "Tool Maker" "🔧"
+    title_box "Tool Maker"
     echo -e "${D}Describe what you want and AI will build it for you.${NC}"
     echo ""
 
