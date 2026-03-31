@@ -893,7 +893,7 @@ main() {
             # AI
             a) clear; do_ask ;;
             A) clear; bash "$SCRIPTS_DIR/agent" ;;
-            +) clear; bash "$SCRIPTS_DIR/toolmaker"; pause ;;
+            +) clear; bash "$SCRIPTS_DIR/toolmaker" ;;
             o) clear; bash "$SCRIPTS_DIR/ollama-setup" ;;
             R) clear; bash "$SCRIPTS_DIR/research" ;;
             # Dev
@@ -910,9 +910,9 @@ main() {
             k) clear; echo -e "${BOLD}Kill Port:${NC}"; read -r -p "Port (blank=list): " pt; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" "$pt"; pause ;;
             # System
             .) clear; do_secrets ;;
-            S) clear; bash "$SCRIPTS_DIR/storage"; pause ;;
+            S) clear; bash "$SCRIPTS_DIR/storage" ;;
             b) clear; safe_run "Dotfile Backup" bash "$SCRIPTS_DIR/dotbackup"; pause ;;
-            u) clear; safe_run "Update Check" bash "$SCRIPTS_DIR/update-check"; pause ;;
+            u) clear; safe_run "Update Check" bash "$SCRIPTS_DIR/update-check" ;;
             i) clear; do_install_bootstrap ;;
             I) clear; bash "$SCRIPTS_DIR/software" ;;
             /) clear; do_aliases ;;

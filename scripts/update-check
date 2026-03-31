@@ -182,8 +182,7 @@ show_full_report() {
     echo -e "  ${GREEN}a)${NC} Run all updates"
     echo -e "  ${GREEN}b)${NC} Just update brew packages"
     echo -e "  ${GREEN}c)${NC} Just update Claude CLI"
-    echo -e "  ${GREEN}m)${NC} Back"
-    echo ""
+    menu_back
     read -r -n1 -p "  > " up_choice; echo ""
 
     case "$up_choice" in
@@ -196,7 +195,6 @@ show_full_report() {
             echo -e "${CYAN}Running dotfile backup...${NC}"
             bash "$TOOLKIT_DIR/scripts/dotbackup" 2>&1
             echo ""
-            # Always refresh cache after updates so menu reflects reality
             echo -e "${DIM}Refreshing update status...${NC}"
             run_checks &>/dev/null
             if [[ -s "$CACHE_FILE" ]]; then
@@ -206,6 +204,7 @@ show_full_report() {
             else
                 echo -e "${GREEN}✓ All updates complete!${NC}"
             fi
+            pause
             ;;
         b|B)
             echo ""
@@ -214,6 +213,7 @@ show_full_report() {
             echo -e "${DIM}Refreshing update status...${NC}"
             run_checks &>/dev/null
             echo -e "${GREEN}✓ Done.${NC}"
+            pause
             ;;
         c|C)
             echo ""
@@ -222,6 +222,7 @@ show_full_report() {
             echo -e "${DIM}Refreshing update status...${NC}"
             run_checks &>/dev/null
             echo -e "${GREEN}✓ Done.${NC}"
+            pause
             ;;
         m|M|"") ;;
     esac

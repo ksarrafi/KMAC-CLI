@@ -965,22 +965,20 @@ do_menu() {
         read -r -n1 -p "  > " choice; echo ""
 
         case "$choice" in
-            1) do_dashboard ;;
-            2) do_crashes ;;
-            3) do_disk ;;
-            h|H) bash "$SCRIPT_DIR/docker-health" ;;
+            1) do_dashboard; pause ;;
+            2) do_crashes; pause ;;
+            3) do_disk; pause ;;
+            h|H) bash "$SCRIPT_DIR/docker-health"; pause ;;
             w|W) _open_web_dashboard ;;
-            4) do_compose ;;
-            5) do_restart ;;
-            6) do_quick_clean ;;
-            7) do_scheduler ;;
-            8) $_HAS_MCP && do_mcp ;;
-            9) bash "$SCRIPT_DIR/docker-health" --diagnose ;;
+            4) do_compose; pause ;;
+            5) do_restart; pause ;;
+            6) do_quick_clean; pause ;;
+            7) do_scheduler; pause ;;
+            8) $_HAS_MCP && do_mcp; pause ;;
+            9) bash "$SCRIPT_DIR/docker-health" --diagnose; pause ;;
             m|M|"") return ;;
-            *) echo -e "  ${RED}Invalid choice${NC}" ;;
+            *) echo -e "  ${RED}Invalid choice${NC}"; sleep 0.3 ;;
         esac
-
-        pause
     done
 }
 
