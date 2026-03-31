@@ -1,7 +1,7 @@
 #!/bin/bash
-# cask — quick Cursor Agent task from the command line
-# Usage: cask "add error handling to server.js"
-#        cask   (interactive prompt)
+# cursoragent — quick Cursor Agent task from the command line
+# Usage: cursoragent "add error handling to server.js"
+#        cursoragent   (interactive prompt)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh"
@@ -19,7 +19,7 @@ if [[ -z "$PROMPT" ]]; then
 fi
 
 if [[ -z "$PROMPT" ]]; then
-    echo -e "  ${BOLD}Usage:${NC} cask \"your task description\""
+    echo -e "  ${BOLD}Usage:${NC} cursoragent \"your task description\""
     exit 1
 fi
 

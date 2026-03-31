@@ -491,9 +491,9 @@ do_show_qr() {
 
 do_ask() {
     title_box "Ask Claude" "🤖"
-    echo -e "  ${DIM}(-m opus for hard questions, Ctrl+D when done)${NC}"
+    echo -e "  ${DIM}(use 'kmac ask -i' for interactive mode, or 'kmac ask -m opus' for hard questions)${NC}"
     echo ""
-    read -r -p "Question: " q
+    read -r -p "  Question: " q
     [[ -z "$q" ]] && return
     echo ""
     bash "$SCRIPTS_DIR/ask" "$q"
