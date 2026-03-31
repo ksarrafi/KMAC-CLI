@@ -1,0 +1,50 @@
+{
+  "name": "Deploy Readiness Check",
+  "description": "Verify project is ready for deployment: tests, build, git status",
+  "steps": [
+    {
+      "id": "git_status",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "git status --porcelain 2>/dev/null | head -20; echo '---'; git log --oneline -5 2>/dev/null"}
+    },
+    {
+      "id": "check_dirty",
+      "type": "check",
+      "variable": "git_status",
+      "operator": "regex",
+      "value": "^[MADRCU?]",
+      "then_goto": "warn_dirty",
+      "else_goto": "run_tests"
+    },
+    {
+      "id": "warn_dirty",
+      "type": "log",
+      "message": "WARNING: Uncommitted changes detected"
+    },
+    {
+      "id": "run_tests",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "if [ -f package.json ]; then npm test 2>&1 | tail -20; elif [ -f pytest.ini ] || [ -f pyproject.toml ]; then python3 -m pytest --tb=short 2>&1 | tail -20; elif [ -f Makefile ]; then make test 2>&1 | tail -20; else echo 'No test runner detected'; fi"},
+      "on_error": "skip"
+    },
+    {
+      "id": "build",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "if [ -f package.json ]; then npm run build 2>&1 | tail -10; elif [ -f Makefile ]; then make build 2>&1 | tail -10; elif [ -f Dockerfile ]; then echo 'Dockerfile found — docker build required'; else echo 'No build step detected'; fi"},
+      "on_error": "skip"
+    },
+    {
+      "id": "summary",
+      "type": "agent",
+      "prompt": "Give a deploy readiness verdict (READY / NOT READY / CAUTION) based on:\n\nGit: {{git_status}}\nTests: {{run_tests}}\nBuild: {{build}}"
+    },
+    {
+      "id": "done",
+      "type": "log",
+      "message": "Deploy check complete"
+    }
+  ]
+}

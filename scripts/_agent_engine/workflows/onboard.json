@@ -1,0 +1,35 @@
+{
+  "name": "Developer Onboarding",
+  "description": "Generate a new-developer onboarding guide for the project",
+  "steps": [
+    {
+      "id": "readme",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "cat README.md 2>/dev/null | head -100 || echo 'No README'"}
+    },
+    {
+      "id": "structure",
+      "type": "tool",
+      "tool": "list_dir",
+      "input": {"path": ".", "depth": 2}
+    },
+    {
+      "id": "setup",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "cat Makefile 2>/dev/null | head -30 || echo 'No Makefile'; echo '---'; cat package.json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); [print(f\"  npm run {k}: {v}\") for k,v in d.get(\"scripts\",{}).items()]' 2>/dev/null || true"}
+    },
+    {
+      "id": "env",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "cat .env.example 2>/dev/null || cat .env.template 2>/dev/null || echo 'No env template'; echo '---'; cat .tool-versions 2>/dev/null || cat .node-version 2>/dev/null || cat .python-version 2>/dev/null || echo 'No version file'"}
+    },
+    {
+      "id": "guide",
+      "type": "agent",
+      "prompt": "Write a concise developer onboarding guide (markdown format) with sections: Prerequisites, Setup Steps, Key Directories, Available Commands, and Tips. Base it on:\n\nREADME:\n{{readme}}\n\nProject Structure:\n{{structure}}\n\nBuild/Scripts:\n{{setup}}\n\nEnvironment:\n{{env}}"
+    }
+  ]
+}

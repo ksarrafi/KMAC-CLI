@@ -161,6 +161,10 @@ Agents:
     -m, --model MODEL    Model (default: sonnet)
     --system-prompt "X"  Custom system prompt
     --context "X"        Persistent context/rules
+  update                 Update agent config
+    -m, --model MODEL    Change model
+    --system-prompt "X"  Change system prompt
+    --context "X"        Change context
   delete NAME            Delete an agent
   info [NAME]            Show agent details
 
@@ -180,8 +184,38 @@ Tasks:
   task result ID         Show task output
   tasks                  List all tasks
 
+Schedules:
+  schedule "desc" --cron "@hourly"   Create a recurring task
+  schedule "desc" --cron "every 30m" Shorthand intervals
+  schedules              List all schedules
+  schedule delete ID     Remove a schedule
+
+Sessions:
+  sessions               List conversation sessions
+  fork SESSION_ID        Fork/branch a session
+
+Workflows:
+  workflows              List available workflows
+  workflow run <id>      Run a workflow (lint-fix, security-scan, etc)
+  workflow <id>          Shorthand for workflow run
+
+Skills:
+  skills                 List loaded SKILL.md files
+
+Profiles:
+  profiles               List available tool profiles + groups
+
+Maintenance:
+  usage                  Show token usage by model
+  prune                  Remove stale sessions (>14 days)
+  export                 Export agent data to JSON
+  import FILE            Import agent data from JSON
+  plugins                List loaded plugins + MCP tools
+  watches                List file watches
+
 Meta:
   logs                   Tail the daemon log
+  web                    Open web dashboard in browser
   help                   Show this help
 
 Integration:
@@ -238,6 +272,43 @@ case "$subcmd" in
             _auto_start && _engine task-create "$@"
         fi ;;
     tasks)       _auto_start && _engine tasks-list "$@" ;;
+    update)      _auto_start && _engine agent-update "$@" ;;
+    usage)       _auto_start && _engine token-usage "$@" ;;
+    prune)       _auto_start && _engine prune "$@" ;;
+    export)      _auto_start && _engine export "$@" ;;
+    import)      _auto_start && _engine import "$@" ;;
+    schedule)
+        if [[ "${1:-}" == "delete" ]]; then
+            shift; _auto_start && _engine schedule-delete "$@"
+        elif [[ "${1:-}" == "list" ]]; then
+            shift; _auto_start && _engine schedule-list "$@"
+        else
+            _auto_start && _engine schedule-create "$@"
+        fi ;;
+    schedules)   _auto_start && _engine schedule-list "$@" ;;
+    fork)        _auto_start && _engine session-fork "$@" ;;
+    plugins)     _auto_start && _engine plugins-list "$@" ;;
+    watches)     _auto_start && _engine watches-list "$@" ;;
+    workflows)   _auto_start && _engine workflows-list "$@" ;;
+    workflow)
+        if [[ "${1:-}" == "run" ]]; then
+            shift; _auto_start && _engine workflow-run "$@"
+        elif [[ "${1:-}" == "list" ]]; then
+            shift; _auto_start && _engine workflows-list "$@"
+        else
+            _auto_start && _engine workflow-run "$@"
+        fi ;;
+    skills)      _auto_start && _engine skills-list "$@" ;;
+    profiles)    _auto_start && _engine profiles-list "$@" ;;
+    web)
+        _auto_start
+        local port
+        port=$(_engine status 2>/dev/null | grep -oP 'web_port.*?(\d+)' | grep -oP '\d+' || echo "7890")
+        if command -v open &>/dev/null; then
+            open "http://127.0.0.1:${port:-7890}"
+        else
+            echo "  Open http://127.0.0.1:${port:-7890} in your browser"
+        fi ;;
     logs)        tail -f "$AGENT_LOG" ;;
     -h|--help|help) show_help ;;
     *)

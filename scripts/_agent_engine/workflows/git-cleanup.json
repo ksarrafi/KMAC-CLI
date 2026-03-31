@@ -1,0 +1,29 @@
+{
+  "name": "Git Cleanup",
+  "description": "Clean up merged branches, stale remotes, and large files",
+  "steps": [
+    {
+      "id": "merged_branches",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "echo 'Merged branches (can delete):'; git branch --merged main 2>/dev/null | grep -v 'main\\|master\\|\\*' || echo 'None'"}
+    },
+    {
+      "id": "stale_remotes",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "echo 'Stale remote branches:'; git remote prune origin --dry-run 2>/dev/null || echo 'None'"}
+    },
+    {
+      "id": "large_files",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "echo 'Largest tracked files:'; git ls-files | xargs ls -la 2>/dev/null | sort -k5 -n -r | head -10"}
+    },
+    {
+      "id": "recommend",
+      "type": "agent",
+      "prompt": "Recommend git cleanup actions based on:\n\nMerged branches:\n{{merged_branches}}\n\nStale remotes:\n{{stale_remotes}}\n\nLarge files:\n{{large_files}}\n\nList safe commands to run. Be conservative."
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "Code Review",
+  "description": "Review recent changes for quality, bugs, and style",
+  "steps": [
+    {
+      "id": "diff",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "git diff HEAD~1 --stat 2>/dev/null; echo '==='; git diff HEAD~1 2>/dev/null | head -200"}
+    },
+    {
+      "id": "check_diff",
+      "type": "check",
+      "variable": "diff",
+      "operator": "not_empty",
+      "then_goto": "review",
+      "else_goto": "no_changes"
+    },
+    {
+      "id": "review",
+      "type": "agent",
+      "prompt": "Review this code diff. Focus on: bugs, security issues, performance problems, and style. Be specific and concise:\n\n{{diff}}"
+    },
+    {
+      "id": "done",
+      "type": "log",
+      "message": "Code review complete"
+    },
+    {
+      "id": "no_changes",
+      "type": "log",
+      "message": "No recent changes to review"
+    }
+  ]
+}

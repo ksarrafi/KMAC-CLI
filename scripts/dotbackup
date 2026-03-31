@@ -11,6 +11,7 @@ BACKUP_DIR="$TOOLKIT_DIR/dotfiles"
 ACTION="${1:-backup}"
 
 source "$SCRIPT_DIR/_ui.sh"
+source "$SCRIPT_DIR/_agent-hook.sh" 2>/dev/null
 
 # Aliases for backward compat within this script
 G="$GREEN" Y="$YELLOW" D="$DIM" N="$NC"
@@ -174,7 +175,10 @@ HOOK
 }
 
 case "$ACTION" in
-    backup)  do_backup ;;
+    backup)
+        do_backup
+        agent_remember "Dotfiles backed up on $(date +%Y-%m-%d)" 2>/dev/null
+        ;;
     restore) do_restore ;;
     diff)    show_diff ;;
     hook)    do_hook ;;

@@ -1,0 +1,40 @@
+{
+  "name": "Security Scan",
+  "description": "Scan project for common security issues: secrets, dependencies, permissions",
+  "steps": [
+    {
+      "id": "secrets",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "rg -in '(api[_-]?key|secret|password|token|credential)\\s*[:=]\\s*[\"\\x27][^\"\\x27]{8,}' --glob '!*.lock' --glob '!node_modules' --glob '!.git' . 2>/dev/null | head -30 || echo 'No secrets found'"}
+    },
+    {
+      "id": "env_files",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "find . -name '.env*' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null | head -10; echo '---'; cat .gitignore 2>/dev/null | grep -i env || echo '.env not in gitignore!'"}
+    },
+    {
+      "id": "deps",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "if [ -f package-lock.json ]; then npm audit --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(f\"Vulnerabilities: {d.get(\"metadata\",{}).get(\"vulnerabilities\",{})}\")' 2>/dev/null || echo 'npm audit unavailable'; elif [ -f requirements.txt ]; then pip-audit -r requirements.txt 2>/dev/null || echo 'pip-audit not installed'; else echo 'No dependency file found'; fi"}
+    },
+    {
+      "id": "permissions",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "find . -perm -o+w -not -path '*/node_modules/*' -not -path '*/.git/*' -maxdepth 3 2>/dev/null | head -20 || echo 'No world-writable files'"}
+    },
+    {
+      "id": "analyze",
+      "type": "agent",
+      "prompt": "Summarize this security scan. List critical issues first:\n\nSecrets scan:\n{{secrets}}\n\nEnv files:\n{{env_files}}\n\nDependencies:\n{{deps}}\n\nPermissions:\n{{permissions}}"
+    },
+    {
+      "id": "done",
+      "type": "log",
+      "message": "Security scan complete"
+    }
+  ]
+}

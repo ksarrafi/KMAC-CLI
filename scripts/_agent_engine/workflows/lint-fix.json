@@ -1,0 +1,44 @@
+{
+  "name": "Lint & Fix",
+  "description": "Run linter, analyze errors, and auto-fix them",
+  "steps": [
+    {
+      "id": "detect",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "ls package.json 2>/dev/null && echo 'node' || (ls requirements.txt setup.py pyproject.toml 2>/dev/null && echo 'python' || echo 'unknown')"},
+      "on_error": "skip"
+    },
+    {
+      "id": "lint",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "if [ -f package.json ]; then npx eslint . --format compact 2>&1 | head -50; elif [ -f pyproject.toml ] || [ -f setup.py ]; then python3 -m flake8 . --max-line-length=120 --count 2>&1 | head -50; elif command -v shellcheck &>/dev/null; then find . -name '*.sh' -maxdepth 2 | head -10 | xargs shellcheck 2>&1 | head -50; else echo 'No linter detected'; fi"}
+    },
+    {
+      "id": "check_errors",
+      "type": "check",
+      "variable": "lint",
+      "operator": "contains",
+      "value": "error",
+      "then_goto": "fix",
+      "else_goto": "done"
+    },
+    {
+      "id": "fix",
+      "type": "agent",
+      "prompt": "Fix these lint errors. Only fix real issues, don't change logic:\n\n{{lint}}"
+    },
+    {
+      "id": "recheck",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "if [ -f package.json ]; then npx eslint . --format compact 2>&1 | tail -5; elif [ -f pyproject.toml ]; then python3 -m flake8 . --count 2>&1 | tail -5; else echo 'done'; fi"}
+    },
+    {
+      "id": "done",
+      "type": "log",
+      "message": "Lint workflow complete"
+    }
+  ]
+}

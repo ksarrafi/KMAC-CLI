@@ -1,0 +1,35 @@
+{
+  "name": "Performance Check",
+  "description": "Identify performance bottlenecks in the project",
+  "steps": [
+    {
+      "id": "large_files",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "find . -name '*.py' -o -name '*.js' -o -name '*.ts' -o -name '*.sh' | grep -v node_modules | grep -v .git | xargs wc -l 2>/dev/null | sort -rn | head -15"}
+    },
+    {
+      "id": "complexity",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "rg -c 'if |for |while |try |catch |except ' --type py --type js --type ts 2>/dev/null | sort -t: -k2 -rn | head -10 || echo 'No complex files found'"}
+    },
+    {
+      "id": "bundle_size",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "if [ -d dist ]; then du -sh dist; elif [ -d build ]; then du -sh build; elif [ -d .next ]; then du -sh .next; else echo 'No build output found'; fi"}
+    },
+    {
+      "id": "imports",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "rg '^import |^from .* import |^require\\(' --type py --type js --type ts 2>/dev/null | wc -l | xargs -I{} echo '{} total imports'; rg -c '^import |^from .* import ' --type py 2>/dev/null | sort -t: -k2 -rn | head -5 || true"}
+    },
+    {
+      "id": "analyze",
+      "type": "agent",
+      "prompt": "Identify performance concerns and optimization opportunities:\n\nLargest files:\n{{large_files}}\n\nMost complex:\n{{complexity}}\n\nBundle:\n{{bundle_size}}\n\nImports:\n{{imports}}"
+    }
+  ]
+}

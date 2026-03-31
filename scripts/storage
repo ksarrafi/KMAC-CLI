@@ -5,6 +5,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh"
 source "$SCRIPT_DIR/_auth-helper.sh" 2>/dev/null
+source "$SCRIPT_DIR/_agent-hook.sh" 2>/dev/null
 
 _KMAC_TMP="${HOME}/.cache/kmac"
 [[ -d "$_KMAC_TMP" ]] || { mkdir -p "$_KMAC_TMP" && chmod 700 "$_KMAC_TMP"; }
@@ -1117,6 +1118,12 @@ case "${1:-}" in
     move)       do_move "${2:?Usage: storage move <path>}" "${3:-}"; [[ -t 1 ]] && pause ;;
     node)       do_node_modules; [[ -t 1 ]] && pause ;;
     overview)   do_overview ;;
+    diagnose)
+        echo -e "\n  ${DIM}Analyzing disk usage...${NC}"
+        local context
+        context=$(df -h / 2>/dev/null && echo "---" && du -sh ~/Library/Caches ~/Library/Developer ~/.cache 2>/dev/null)
+        agent_diagnose "Analyze disk usage and suggest what to clean up:\n\n$context"
+        ;;
     help|-h|--help)
         echo "Usage: storage [command]"
         echo ""
@@ -1129,6 +1136,7 @@ case "${1:-}" in
         echo "  move PATH  Move a directory to iCloud with symlink"
         echo "  node       Scan and clean node_modules"
         echo "  overview   Quick disk usage summary"
+        echo "  diagnose   AI-assisted disk analysis (requires agent)"
         ;;
     "")         do_menu ;;
     *)          echo "Unknown: $1 — try 'storage help'"; exit 1 ;;

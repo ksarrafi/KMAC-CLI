@@ -151,7 +151,7 @@ Switch with:
     choice=$(echo "$choice" | tr '[:upper:]' '[:lower:]' | xargs)
 
     case "$choice" in
-        claude|cursor)
+        claude|cursor|kmac-agent)
             if [[ "$choice" == "$current" ]]; then
                 tg_send "$cid" "Already using *$(pilot_agent_label)*."
                 return
@@ -161,7 +161,7 @@ Switch with:
             log "Agent switched to: $choice"
             ;;
         *)
-            tg_send "$cid" "Unknown agent: \`$choice\`. Use \`claude\` or \`cursor\`."
+            tg_send "$cid" "Unknown agent: \`$choice\`. Use \`claude\`, \`cursor\`, or \`kmac-agent\`."
             ;;
     esac
 }
@@ -275,6 +275,10 @@ Task: _${task_desc}_"
         case "$(pilot_agent)" in
             cursor)
                 cursor agent "$task_desc" >> "$PILOT_AGENT_LOG" 2>&1
+                rc=$?
+                ;;
+            kmac-agent)
+                bash "$SCRIPT_DIR/agent" ask "$task_desc" >> "$PILOT_AGENT_LOG" 2>&1
                 rc=$?
                 ;;
             *)
@@ -517,6 +521,10 @@ Follow-up question: "
         case "$(pilot_agent)" in
             cursor)
                 cursor agent "$prompt" >> "$PILOT_AGENT_LOG" 2>&1
+                rc=$?
+                ;;
+            kmac-agent)
+                bash "$SCRIPT_DIR/agent" ask "$prompt" >> "$PILOT_AGENT_LOG" 2>&1
                 rc=$?
                 ;;
             *)

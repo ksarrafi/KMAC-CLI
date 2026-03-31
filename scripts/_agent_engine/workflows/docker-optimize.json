@@ -1,0 +1,35 @@
+{
+  "name": "Docker Optimize",
+  "description": "Analyze Docker setup and suggest optimizations",
+  "steps": [
+    {
+      "id": "dockerfile",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "cat Dockerfile 2>/dev/null || cat docker/Dockerfile 2>/dev/null || echo 'No Dockerfile found'"}
+    },
+    {
+      "id": "compose",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "cat docker-compose.yml 2>/dev/null || cat compose.yml 2>/dev/null || echo 'No compose file'"}
+    },
+    {
+      "id": "images",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "docker images --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}' 2>/dev/null | head -15 || echo 'Docker not running'"}
+    },
+    {
+      "id": "dangling",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "echo 'Dangling images:'; docker images -f 'dangling=true' --format '{{.ID}} {{.Size}}' 2>/dev/null | head -10; echo '---'; echo 'Volumes:'; docker volume ls --format '{{.Name}}' 2>/dev/null | wc -l | xargs -I{} echo '{} volumes'"}
+    },
+    {
+      "id": "optimize",
+      "type": "agent",
+      "prompt": "Analyze this Docker setup and suggest concrete optimizations for image size, build speed, and cleanup:\n\nDockerfile:\n{{dockerfile}}\n\nCompose:\n{{compose}}\n\nImages:\n{{images}}\n\nDangling:\n{{dangling}}"
+    }
+  ]
+}

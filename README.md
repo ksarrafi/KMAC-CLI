@@ -117,6 +117,38 @@ kmac ollama chat                # Chat with a local model
 kmac ollama status              # Check server + model status
 ```
 
+**KmacAgent** (`A` / `kmac agent`) — a persistent AI agent daemon with tool use, multi-agent profiles, long-term memory, background tasks, and scheduled jobs. Runs as a lightweight Unix-socket daemon, communicates with Claude (or OpenAI / local Ollama models), and gives every KMAC tool access to AI through a shared hook library.
+
+```bash
+kmac agent start                               # Start the daemon
+kmac agent ask "what's in this repo?"           # One-shot with tool use
+kmac agent chat                                 # Interactive session
+kmac agent chat -a devops -m opus               # Specific agent + model
+kmac agent create reviewer -m sonnet \
+  --context "You do strict code reviews"        # Named agent profile
+kmac agent task "scan Dockerfiles for issues"   # Background task
+kmac agent schedule "check disk" --cron "@daily" # Recurring task
+kmac agent memory                               # View memories
+kmac agent remember "deploy target: us-east-1"  # Teach it facts
+kmac agent usage                                # Token usage by model
+kmac agent export                               # Backup agent data
+```
+
+Core capabilities:
+
+- **Tool use** — reads/writes files, runs shell commands, grep searches, directory listings
+- **Dangerous command guardrails** — blocks `rm -rf /`, `mkfs`, `DROP DATABASE`, etc.
+- **Multi-model routing** — Anthropic (Claude), OpenAI (GPT-4o), Ollama (local) via same interface
+- **Conversation summarization** — auto-compresses context when conversations get long
+- **Auto-memory** — extracts key facts from conversations and persists them across sessions
+- **Background tasks** — queue work, daemon executes asynchronously, check results later
+- **Scheduled tasks** — `@hourly`, `@daily`, `@weekly`, or `every 30m` cron expressions
+- **Session management** — resume conversations, auto-prune stale sessions
+- **Token tracking** — per-model input/output token counts
+- **Export/import** — backup and restore agent profiles, memories, and schedules
+- **KMAC tool integration** — other scripts can `source _agent-hook.sh` for `agent_ask`, `agent_diagnose`, `agent_remember`, `agent_task`
+- **Pilot integration** — use KmacAgent as the AI backend for Telegram-based remote control
+
 **AI Self-Healing** — built into every tool. When a command fails, KMac catches the error output, sends it to Claude with context about what was attempted, and presents a suggested fix command. Handles shell environments like nvm and rvm automatically. You choose to apply the fix, retry, or skip.
 
 **KMac Assistant** (`A` / `kmac assistant`) — a personal AI gateway that runs as an always-on TypeScript service. Features a WebSocket control plane, Claude agent with tool use (bash, file ops, grep, web fetch, system info), persistent sessions, and multi-channel messaging. Message your AI from Telegram, Discord, or the CLI and get back tool-augmented responses.

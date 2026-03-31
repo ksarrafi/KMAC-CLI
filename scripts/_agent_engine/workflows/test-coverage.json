@@ -1,0 +1,30 @@
+{
+  "name": "Test Coverage Analysis",
+  "description": "Run tests with coverage and identify gaps",
+  "steps": [
+    {
+      "id": "detect_lang",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "[ -f package.json ] && echo 'node' || ([ -f pyproject.toml ] || [ -f setup.py ] || [ -f requirements.txt ]) && echo 'python' || echo 'unknown'"}
+    },
+    {
+      "id": "run_coverage",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "if [ -f package.json ]; then npx jest --coverage --coverageReporters=text 2>&1 | tail -40; elif [ -f pyproject.toml ] || [ -f setup.py ]; then python3 -m pytest --cov=. --cov-report=term-missing 2>&1 | tail -40; else echo 'No test framework detected'; fi"},
+      "on_error": "skip"
+    },
+    {
+      "id": "find_untested",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "if [ -f package.json ]; then find src -name '*.ts' -o -name '*.js' 2>/dev/null | while read f; do base=$(basename \"$f\" | sed 's/\\.[^.]*$//'); find . -path '*/test*' -name \"*${base}*\" 2>/dev/null | grep -q . || echo \"No test: $f\"; done | head -15; else find . -name '*.py' -not -path '*/test*' -not -name '__*' -maxdepth 3 2>/dev/null | while read f; do base=$(basename \"$f\" .py); find . -path '*/test*' -name \"*${base}*\" 2>/dev/null | grep -q . || echo \"No test: $f\"; done | head -15; fi"}
+    },
+    {
+      "id": "analyze",
+      "type": "agent",
+      "prompt": "Analyze this test coverage. List the most critical untested files and suggest what to test first:\n\nCoverage:\n{{run_coverage}}\n\nUntested files:\n{{find_untested}}"
+    }
+  ]
+}

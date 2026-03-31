@@ -1,7 +1,12 @@
 """Tool definitions and async execution for the Claude tool_use protocol."""
 
 import asyncio
+import logging
 import os
+
+from .config import DANGEROUS_PATTERNS, DANGEROUS_PREFIXES
+
+log = logging.getLogger("kmac-agent")
 
 TOOLS = [
     {
@@ -137,8 +142,24 @@ async def execute(name: str, inp: dict, timeout: int = 120):
         return msg, msg
 
 
+def _check_dangerous(cmd: str) -> str | None:
+    """Return a warning message if the command looks dangerous, else None."""
+    lower = cmd.lower().strip()
+    for pat in DANGEROUS_PATTERNS:
+        if pat.lower() in lower:
+            return f"BLOCKED: dangerous command detected ({pat})"
+    for prefix in DANGEROUS_PREFIXES:
+        if lower.startswith(prefix.lower()):
+            return f"BLOCKED: dangerous command prefix ({prefix})"
+    return None
+
+
 async def _bash(inp, timeout):
     cmd = inp["command"]
+    warning = _check_dangerous(cmd)
+    if warning:
+        log.warning("Blocked dangerous command: %s", cmd[:100])
+        return warning, warning
     try:
         proc = await asyncio.create_subprocess_shell(
             cmd,

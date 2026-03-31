@@ -85,6 +85,13 @@ def _display_tool_call(event):
         "edit_file": f"{D}\u270f\ufe0f  {inp.get('path', '')}{N}",
         "list_dir": f"{D}\U0001f4c2 {inp.get('path', '.')}/{N}",
         "grep_search": f"{D}\U0001f50d grep '{inp.get('pattern', '')}'{N}",
+        "delegate_agent": f"{D}\U0001f4e4 delegate -> {inp.get('agent', '?')}{N}",
+        "web_search": f"{D}\U0001f310 search: {inp.get('query', '')}{N}",
+        "web_fetch": f"{D}\U0001f310 fetch: {inp.get('url', '')[:60]}{N}",
+        "browser": f"{D}\U0001f5a5  browser {inp.get('action', '')} {inp.get('url', '')[:40]}{N}",
+        "image": f"{D}\U0001f5bc  analyze: {inp.get('path', '')}{N}",
+        "image_generate": f"{D}\U0001f3a8 generate: {inp.get('prompt', '')[:50]}{N}",
+        "apply_patch": f"{D}\U0001f4cb patch ({len(inp.get('patch', '').split(chr(10)))} lines){N}",
     }
     print(f"\n  {labels.get(tool, f'{D}{tool}{N}')}")
 
@@ -105,6 +112,27 @@ def _display_result(data):
         if ct:
             task_str += f", {ct} completed"
         print(f"  Tasks:    {task_str}")
+        tt = data.get("total_tokens", 0)
+        if tt:
+            if tt > 1_000_000:
+                print(f"  Tokens:   {tt / 1_000_000:.1f}M total")
+            elif tt > 1000:
+                print(f"  Tokens:   {tt / 1000:.1f}K total")
+            else:
+                print(f"  Tokens:   {tt}")
+        np = data.get("plugins", 0)
+        ms = data.get("mcp_servers", 0)
+        mt = data.get("mcp_tools", 0)
+        if np or ms:
+            ext_parts = []
+            if np:
+                ext_parts.append(f"{np} plugins")
+            if ms:
+                ext_parts.append(f"{ms} MCP servers ({mt} tools)")
+            print(f"  Ext:      {', '.join(ext_parts)}")
+        wp = data.get("web_port")
+        if wp:
+            print(f"  Web UI:   {C}http://127.0.0.1:{wp}{N}")
         print(f"  Socket:   {D}{data.get('socket', '?')}{N}")
         return
 
@@ -128,7 +156,7 @@ def _display_result(data):
             print(f"  {s['id']:<14} {s.get('agent', '?'):<12} "
                   f"{s.get('updated', '?')[:16]:<18} {s.get('message_count', 0)}")
 
-    elif "memories" in data:
+    elif "memories" in data and isinstance(data["memories"], list):
         mm = data["memories"]
         if not mm:
             print(f"  {D}No memories{N}"); return
@@ -168,6 +196,108 @@ def _display_result(data):
             print(f"  Prompt:   {a['system_prompt'][:60]}...")
         if a.get("context"):
             print(f"  Context:  {a['context'][:60]}...")
+
+    elif "usage" in data:
+        uu = data["usage"]
+        if not uu:
+            print(f"  {D}No token usage recorded{N}"); return
+        print(f"\n  {B}{'MODEL':<28} {'INPUT':<12} {'OUTPUT':<12} {'CALLS'}{N}")
+        print(f"  {D}{'─' * 60}{N}")
+        total_in = total_out = total_calls = 0
+        for u in uu:
+            inp = u.get("inp", 0)
+            out = u.get("out", 0)
+            calls = u.get("calls", 0)
+            total_in += inp; total_out += out; total_calls += calls
+            model = u.get("model", "?")
+            print(f"  {model:<28} {inp:>10,}  {out:>10,}  {calls:>5}")
+        print(f"  {D}{'─' * 60}{N}")
+        print(f"  {'TOTAL':<28} {total_in:>10,}  {total_out:>10,}  {total_calls:>5}")
+
+    elif "schedules" in data:
+        ss = data["schedules"]
+        if not ss:
+            print(f"  {D}No schedules{N}"); return
+        for s in ss:
+            enabled = f"{G}on{N}" if s.get("enabled") else f"{R}off{N}"
+            print(f"  [{enabled}] {s['description'][:50]} "
+                  f"{D}({s['cron']}) [{s['id']}]{N}")
+
+    elif "schedule" in data:
+        s = data["schedule"]
+        print(f"  {G}\u2713{N} Schedule created: {s['description']} ({s['cron']}) [ID: {s['id']}]")
+
+    elif "exported" in data:
+        print(f"  {G}\u2713{N} Exported to: {data['exported']}")
+        print(f"  {D}Agents: {data.get('agents', 0)}, "
+              f"Memories: {data.get('memories', 0)}{N}")
+
+    elif "imported" in data:
+        imp = data["imported"]
+        print(f"  {G}\u2713{N} Imported: {imp.get('agents', 0)} agents, "
+              f"{imp.get('memories', 0)} memories, "
+              f"{imp.get('schedules', 0)} schedules")
+
+    elif "pruned_sessions" in data:
+        n = data["pruned_sessions"]
+        print(f"  {G}\u2713{N} Pruned {n} stale session{'s' if n != 1 else ''}")
+
+    elif "forked" in data:
+        print(f"  {G}\u2713{N} Forked session {data['from']} -> {data['forked']} "
+              f"({data.get('messages', 0)} messages)")
+
+    elif "plugins" in data or "mcp_tools" in data:
+        ps = data.get("plugins", [])
+        mt = data.get("mcp_tools", [])
+        if ps:
+            print(f"\n  {B}Plugins:{N}")
+            for p in ps:
+                print(f"  {G}\u25b8{N} {p['name']}: {D}{p.get('description', '')[:60]}{N}")
+        else:
+            print(f"  {D}No plugins (add to ~/.cache/kmac/agent/plugins/){N}")
+        if mt:
+            print(f"\n  {B}MCP Tools:{N}")
+            for t in mt:
+                print(f"  {C}\u25b8{N} {t['name']}: {D}{t.get('description', '')[:60]}{N}")
+
+    elif "workflows" in data:
+        wfs = data["workflows"]
+        if not wfs:
+            print(f"  {D}No workflows available{N}"); return
+        print(f"\n  {B}{'ID':<20} {'NAME':<25} {'STEPS':<8} {'SOURCE'}{N}")
+        print(f"  {D}{'─' * 65}{N}")
+        for w in wfs:
+            print(f"  {w['id']:<20} {w['name']:<25} {w.get('steps', 0):<8} {D}{w.get('source', '')}{N}")
+
+    elif "skills" in data:
+        ss = data["skills"]
+        if not ss:
+            print(f"  {D}No skills loaded{N}"); return
+        print(f"\n  {B}Skills:{N}")
+        for s in ss:
+            print(f"  {G}\u25b8{N} {s['name']} {D}({s.get('lines', 0)} lines) — {s.get('description', '')[:60]}{N}")
+            print(f"    {D}{s.get('path', '')}{N}")
+
+    elif "profiles" in data:
+        ps = data["profiles"]
+        print(f"\n  {B}Tool Profiles:{N}")
+        for p in ps:
+            tool_list = ", ".join(p["tools"][:8])
+            if len(p["tools"]) > 8:
+                tool_list += f" ... (+{len(p['tools']) - 8})"
+            print(f"  {G}\u25b8{N} {p['name']}: {D}{tool_list}{N}")
+        gs = data.get("groups", [])
+        if gs:
+            print(f"\n  {B}Tool Groups:{N} {D}{', '.join(gs)}{N}")
+
+    elif "watches" in data:
+        ww = data.get("watches", [])
+        if not ww:
+            print(f"  {D}No file watches configured{N}"); return
+        for w in ww:
+            status = f"{G}on{N}" if w.get("enabled", True) else f"{R}off{N}"
+            paths = ", ".join(w.get("paths", []))
+            print(f"  [{status}] {w.get('task', '')[:45]} {D}({paths}){N}")
 
     elif "deleted" in data:
         print(f"  {G}\u2713{N} Deleted: {data['deleted']}")
@@ -269,6 +399,12 @@ def chat_interactive(agent="default", session="", model=""):
             print(f"  {G}sessions{N}       List sessions")
             print(f"  {G}memory{N}         Show memories")
             print(f"  {G}remember X{N}     Save a memory")
+            print(f"  {G}fork{N}           Fork current session")
+            print(f"  {G}plugins{N}        List plugins + MCP tools")
+            print(f"  {G}workflows{N}      List available workflows")
+            print(f"  {G}run <id>{N}       Run a workflow")
+            print(f"  {G}skills{N}         List loaded skills")
+            print(f"  {G}profiles{N}       List tool profiles")
             print()
             continue
         if low.startswith("model "):
@@ -293,6 +429,28 @@ def chat_interactive(agent="default", session="", model=""):
         if low.startswith("remember "):
             fact = stripped.split(None, 1)[1]
             send_request("memory-add", ["-a", agent, fact])
+            continue
+        if low == "fork":
+            if current_session:
+                send_request("session-fork", ["-a", agent, current_session])
+            else:
+                print(f"  {D}No active session to fork{N}")
+            continue
+        if low == "plugins":
+            send_request("plugins-list", [])
+            continue
+        if low == "workflows":
+            send_request("workflows-list", [])
+            continue
+        if low.startswith("run "):
+            wf_id = stripped.split(None, 1)[1]
+            send_request("workflow-run", ["-a", agent, wf_id])
+            continue
+        if low == "skills":
+            send_request("skills-list", ["-a", agent])
+            continue
+        if low == "profiles":
+            send_request("profiles-list", [])
             continue
 
         req = {"action": "ask", "agent": agent, "message": stripped}
@@ -324,42 +482,53 @@ def chat_interactive(agent="default", session="", model=""):
 
 def _build_request(action, args):
     req = {"action": action}
+
+    _FLAGS = {
+        "-a": "agent", "--agent": "agent",
+        "-m": "model", "--model": "model",
+        "-s": "session", "--session": "session",
+        "-n": "name", "--name": "name",
+        "--system-prompt": "system_prompt",
+        "--context": "context",
+        "--cron": "cron",
+        "-q": "query", "--query": "query",
+        "--id": "id",
+    }
+
+    # First pass: extract all flags
+    positional = []
     i = 0
     while i < len(args):
         a = args[i]
-        if a in ("-a", "--agent") and i + 1 < len(args):
-            req["agent"] = args[i + 1]; i += 2
-        elif a in ("-m", "--model") and i + 1 < len(args):
-            req["model"] = args[i + 1]; i += 2
-        elif a in ("-s", "--session") and i + 1 < len(args):
-            req["session"] = args[i + 1]; i += 2
-        elif a in ("-n", "--name") and i + 1 < len(args):
-            req["name"] = args[i + 1]; i += 2
-        elif a in ("--system-prompt",) and i + 1 < len(args):
-            req["system_prompt"] = args[i + 1]; i += 2
-        elif a in ("--context",) and i + 1 < len(args):
-            req["context"] = args[i + 1]; i += 2
-        elif a in ("-q", "--query") and i + 1 < len(args):
-            req["query"] = args[i + 1]; i += 2
-        elif a in ("--id",) and i + 1 < len(args):
-            req["id"] = args[i + 1]; i += 2
+        if a in _FLAGS and i + 1 < len(args):
+            req[_FLAGS[a]] = args[i + 1]
+            i += 2
         else:
-            single_arg_actions = {
-                "agent-create": "name", "agent-delete": "name",
-                "memory-delete": "id", "session-delete": "session_id",
-                "task-cancel": "task_id", "task-run": "task_id",
-                "task-result": "task_id",
-            }
-            multi_arg_actions = {
-                "ask": "message", "memory-add": "content",
-                "memory-search": "query", "task-create": "description",
-            }
-            if action in single_arg_actions:
-                req[single_arg_actions[action]] = args[i]
-                i += 1
-                continue
+            positional.append(args[i])
+            i += 1
+
+    # Second pass: assign positional args
+    single_arg_actions = {
+        "agent-create": "name", "agent-delete": "name",
+        "memory-delete": "id", "session-delete": "session_id",
+        "task-cancel": "task_id", "task-run": "task_id",
+        "task-result": "task_id",
+        "schedule-delete": "schedule_id",
+        "import": "path",
+        "session-fork": "session_id",
+        "workflow-run": "workflow_id",
+    }
+    multi_arg_actions = {
+        "ask": "message", "memory-add": "content",
+        "memory-search": "query", "task-create": "description",
+        "schedule-create": "description",
+    }
+
+    if positional:
+        if action in single_arg_actions:
+            req[single_arg_actions[action]] = positional[0]
+        else:
             field = multi_arg_actions.get(action, "message")
-            req[field] = " ".join(args[i:])
-            break
-        continue
+            req[field] = " ".join(positional)
+
     return req

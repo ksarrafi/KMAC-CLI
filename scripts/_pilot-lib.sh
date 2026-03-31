@@ -63,8 +63,9 @@ pilot_agent() {
 
 pilot_agent_label() {
     case "$(pilot_agent)" in
-        cursor) echo "Cursor Agent" ;;
-        *)      echo "Claude Code" ;;
+        cursor)     echo "Cursor Agent" ;;
+        kmac-agent) echo "KmacAgent" ;;
+        *)          echo "Claude Code" ;;
     esac
 }
 

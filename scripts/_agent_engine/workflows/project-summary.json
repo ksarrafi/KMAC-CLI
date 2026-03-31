@@ -1,0 +1,41 @@
+{
+  "name": "Project Summary",
+  "description": "Generate a comprehensive overview of the current project",
+  "steps": [
+    {
+      "id": "structure",
+      "type": "tool",
+      "tool": "list_dir",
+      "input": {"path": ".", "depth": 2}
+    },
+    {
+      "id": "readme",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "cat README.md 2>/dev/null | head -50 || echo 'No README'"}
+    },
+    {
+      "id": "deps",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "cat package.json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(\"Name:\",d.get(\"name\")); print(\"Deps:\",len(d.get(\"dependencies\",{}))); print(\"DevDeps:\",len(d.get(\"devDependencies\",{})))' 2>/dev/null || cat requirements.txt 2>/dev/null | wc -l | xargs -I{} echo '{} Python deps' || echo 'No deps file'"}
+    },
+    {
+      "id": "git_info",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "echo 'Commits:'; git rev-list --count HEAD 2>/dev/null || echo '?'; echo 'Contributors:'; git shortlog -sn --no-merges 2>/dev/null | head -5; echo 'Last 5 commits:'; git log --oneline -5 2>/dev/null"}
+    },
+    {
+      "id": "stats",
+      "type": "tool",
+      "tool": "bash",
+      "input": {"command": "echo 'Lines of code:'; find . -name '*.py' -o -name '*.js' -o -name '*.ts' -o -name '*.sh' -o -name '*.go' -o -name '*.rs' | grep -v node_modules | grep -v .git | xargs wc -l 2>/dev/null | tail -1"}
+    },
+    {
+      "id": "summarize",
+      "type": "agent",
+      "prompt": "Write a concise project summary (5-8 sentences) covering purpose, tech stack, size, and recent activity:\n\nStructure:\n{{structure}}\n\nREADME:\n{{readme}}\n\nDependencies:\n{{deps}}\n\nGit:\n{{git_info}}\n\nStats:\n{{stats}}"
+    }
+  ]
+}

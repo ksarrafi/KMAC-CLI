@@ -44,6 +44,25 @@ CREATE TABLE IF NOT EXISTS tasks (
     started     TEXT,
     completed   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS token_usage (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent       TEXT NOT NULL DEFAULT 'default',
+    model       TEXT NOT NULL,
+    input_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    created     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schedules (
+    id          TEXT PRIMARY KEY,
+    agent       TEXT NOT NULL DEFAULT 'default',
+    description TEXT NOT NULL,
+    cron        TEXT NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    last_run    TEXT,
+    created     TEXT NOT NULL
+);
 """
 
 
@@ -261,11 +280,157 @@ class MemoryDB:
         q += " ORDER BY created DESC LIMIT 50"
         return [dict(r) for r in self.conn.execute(q, p).fetchall()]
 
+    # ── Token Usage ──────────────────────────────────────────────────
+
+    def log_tokens(self, agent, model, input_tokens, output_tokens):
+        self.conn.execute(
+            "INSERT INTO token_usage (agent, model, input_tokens, output_tokens, created) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (agent, model, input_tokens, output_tokens, _now()),
+        )
+        self.conn.commit()
+
+    def get_token_usage(self, agent=None, days=30):
+        cutoff = time.strftime(
+            "%Y-%m-%dT%H:%M:%S",
+            time.localtime(time.time() - days * 86400),
+        )
+        if agent:
+            rows = self.conn.execute(
+                "SELECT model, SUM(input_tokens) as inp, SUM(output_tokens) as out, "
+                "COUNT(*) as calls FROM token_usage "
+                "WHERE agent = ? AND created > ? GROUP BY model",
+                (agent, cutoff),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT model, SUM(input_tokens) as inp, SUM(output_tokens) as out, "
+                "COUNT(*) as calls FROM token_usage "
+                "WHERE created > ? GROUP BY model",
+                (cutoff,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Schedules ───────────────────────────────────────────────────
+
+    def create_schedule(self, agent, description, cron):
+        sid = uuid.uuid4().hex[:8]
+        self.conn.execute(
+            "INSERT INTO schedules (id, agent, description, cron, created) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (sid, agent, description, cron, _now()),
+        )
+        self.conn.commit()
+        return {"id": sid, "agent": agent, "description": description,
+                "cron": cron, "enabled": 1}
+
+    def list_schedules(self, agent=None):
+        if agent:
+            rows = self.conn.execute(
+                "SELECT * FROM schedules WHERE agent = ? ORDER BY created",
+                (agent,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM schedules ORDER BY created"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_schedule(self, schedule_id, **kwargs):
+        allowed = {"enabled", "last_run", "cron", "description"}
+        parts, vals = [], []
+        for k, v in kwargs.items():
+            if k in allowed:
+                parts.append(f"{k} = ?")
+                vals.append(v)
+        if parts:
+            vals.append(schedule_id)
+            self.conn.execute(
+                f"UPDATE schedules SET {', '.join(parts)} WHERE id = ?", vals
+            )
+            self.conn.commit()
+
+    def delete_schedule(self, schedule_id):
+        self.conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+        self.conn.commit()
+
+    # ── Session Pruning ─────────────────────────────────────────────
+
+    def prune_sessions(self, max_age_days=14):
+        cutoff = time.strftime(
+            "%Y-%m-%dT%H:%M:%S",
+            time.localtime(time.time() - max_age_days * 86400),
+        )
+        cur = self.conn.execute(
+            "DELETE FROM sessions WHERE updated < ?", (cutoff,)
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    # ── Export / Import ─────────────────────────────────────────────
+
+    def export_data(self):
+        data = {
+            "agents": [dict(r) for r in self.conn.execute(
+                "SELECT * FROM agents").fetchall()],
+            "memories": [dict(r) for r in self.conn.execute(
+                "SELECT * FROM memories").fetchall()],
+            "sessions": [],
+            "schedules": [dict(r) for r in self.conn.execute(
+                "SELECT * FROM schedules").fetchall()],
+        }
+        for s in self.conn.execute("SELECT * FROM sessions").fetchall():
+            sd = dict(s)
+            sd.pop("messages", None)
+            data["sessions"].append(sd)
+        return data
+
+    def import_data(self, data):
+        imported = {"agents": 0, "memories": 0, "schedules": 0}
+        for a in data.get("agents", []):
+            try:
+                self.create_agent(
+                    a["name"], a.get("model", "claude-sonnet-4-6"),
+                    a.get("system_prompt", ""), a.get("context", ""),
+                )
+                imported["agents"] += 1
+            except Exception:
+                pass
+        for m in data.get("memories", []):
+            try:
+                self.add_memory(
+                    m.get("agent", "default"), m["content"],
+                    m.get("category", "fact"), m.get("source", "import"),
+                )
+                imported["memories"] += 1
+            except Exception:
+                pass
+        for s in data.get("schedules", []):
+            try:
+                self.create_schedule(
+                    s.get("agent", "default"),
+                    s["description"], s["cron"],
+                )
+                imported["schedules"] += 1
+            except Exception:
+                pass
+        return imported
+
     # ── Stats ────────────────────────────────────────────────────────
 
     def stats(self):
         def _count(sql):
             return self.conn.execute(sql).fetchone()[0]
+        total_input = 0
+        total_output = 0
+        try:
+            row = self.conn.execute(
+                "SELECT COALESCE(SUM(input_tokens),0), "
+                "COALESCE(SUM(output_tokens),0) FROM token_usage"
+            ).fetchone()
+            total_input, total_output = row[0], row[1]
+        except Exception:
+            pass
         return {
             "agents": _count("SELECT COUNT(*) FROM agents"),
             "sessions": _count("SELECT COUNT(*) FROM sessions"),
@@ -274,4 +439,6 @@ class MemoryDB:
                 "SELECT COUNT(*) FROM tasks "
                 "WHERE status IN ('queued','running')"
             ),
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
         }
