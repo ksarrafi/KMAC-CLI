@@ -4,7 +4,7 @@
 
 # ─── Resolve Toolkit Path ────────────────────────────────────────────────
 # Works whether installed via iCloud, git clone, or local copy
-_KMAC_ALIAS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+_KMAC_ALIAS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" 2>/dev/null && pwd)"
 _KMAC_SCRIPTS="${_KMAC_ALIAS_DIR}/scripts"
 
 # ─── KMac Shortcut ───────────────────────────────────────────────────────

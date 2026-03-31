@@ -480,7 +480,7 @@ class AgentDaemon:
                     self._last_schedule_check = now
                     self._check_schedules()
 
-                # Pick up pending tasks (sorted by priority)
+                # Pick up pending tasks (sorted by priority) and approved tasks awaiting run
                 if len(self._running_tasks) >= MAX_CONCURRENT_TASKS:
                     continue
                 for agent_dir in sorted(DB_DIR.iterdir()) if DB_DIR.exists() else []:
@@ -488,9 +488,11 @@ class AgentDaemon:
                         continue
                     db = self._get_db(agent_dir.name)
                     pending = db.list_tasks(agent_dir.name, status="pending")
-                    for task in pending:
-                        if task.get("approval_required") and task["status"] != "approved":
-                            continue
+                    approved = db.list_tasks(agent_dir.name, status="approved")
+                    runnable = (
+                        [t for t in pending if not t.get("approval_required")] + approved
+                    )
+                    for task in runnable:
                         if len(self._running_tasks) >= MAX_CONCURRENT_TASKS:
                             break
                         if task["id"] not in self._running_tasks:

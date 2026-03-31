@@ -70,7 +70,10 @@ def _stream(sock):
         while b"\n" in buf:
             line, buf = buf.split(b"\n", 1)
             if line:
-                yield json.loads(line)
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    pass
 
 
 # ── Display helpers ──────────────────────────────────────────────────
@@ -364,9 +367,11 @@ def send_request(action, args):
         print(f"  {R}Agent not running.{N}  Start with: {G}kmac agent start{N}",
               file=sys.stderr)
         sys.exit(1)
-    sock.sendall(json.dumps(req).encode() + b"\n")
-    _render_events(sock)
-    sock.close()
+    try:
+        sock.sendall(json.dumps(req).encode() + b"\n")
+        _render_events(sock)
+    finally:
+        sock.close()
 
 
 def chat_interactive(agent="default", session="", model=""):

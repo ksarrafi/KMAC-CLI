@@ -133,7 +133,7 @@ def _estimate_cost(model: str, est_input: int) -> float | None:
     return (est_input * inp_cost + est_output * out_cost) / 1_000_000
 
 
-def _call_api_sync(messages, system, model, api_key):
+def _call_api_sync(messages, system, model, api_key, agent_config=None):
     """Route API call with retry logic. Returns (response_dict, provider)."""
     # Rate limit check
     est_tokens = sum(len(str(m.get("content", ""))) // 4 for m in messages)
@@ -149,7 +149,9 @@ def _call_api_sync(messages, system, model, api_key):
         elif provider == "ollama":
             response = _call_ollama_sync(messages, system, model.replace("ollama/", ""))
         else:
-            response = _call_claude_sync(messages, system, model, api_key)
+            response = _call_claude_sync(
+                messages, system, model, api_key, agent_config,
+            )
 
         # Record the request for rate limiting
         usage = response.get("usage", {})
@@ -178,9 +180,9 @@ def _call_api_sync(messages, system, model, api_key):
     return response, provider
 
 
-def _call_claude_sync(messages, system, model, api_key):
+def _call_claude_sync(messages, system, model, api_key, agent_config=None):
     """Blocking Claude API call."""
-    all_tools = _get_all_tools(_current_agent_config)
+    all_tools = _get_all_tools(agent_config)
     body = json.dumps({
         "model": model,
         "max_tokens": MAX_TOKENS,
@@ -340,9 +342,6 @@ async def _summarize_messages(messages, api_key, model):
         return None
 
 
-_current_agent_config: dict = {}
-
-
 def _get_all_tools(agent_config: dict | None = None):
     """Combine built-in, extended, plugin, MCP tools and apply profile filter."""
     from . import plugins as plugins_mod
@@ -368,9 +367,8 @@ def _get_all_tools(agent_config: dict | None = None):
     if _mcp_manager:
         all_tools.extend(_mcp_manager.get_tool_schemas())
 
-    cfg = agent_config or _current_agent_config
-    if cfg:
-        all_tools = filter_tools(all_tools, cfg)
+    if agent_config:
+        all_tools = filter_tools(all_tools, agent_config)
 
     return all_tools
 
@@ -495,10 +493,6 @@ async def process_message(message, agent_config, session_messages,
     total_input = 0
     total_output = 0
 
-    global _current_agent_config
-    _current_agent_config = agent_config
-    all_tools = _get_all_tools(agent_config)
-
     for round_num in range(MAX_TOOL_ROUNDS):
         model_short = model.split("/")[-1].split("-")[1] if "-" in model else model.split("/")[-1]
         yield {
@@ -508,7 +502,13 @@ async def process_message(message, agent_config, session_messages,
         }
 
         response, _ = await loop.run_in_executor(
-            None, _call_api_sync, session_messages, system, model, api_key,
+            None,
+            _call_api_sync,
+            session_messages,
+            system,
+            model,
+            api_key,
+            agent_config,
         )
 
         # Track tokens
@@ -563,7 +563,11 @@ async def process_message(message, agent_config, session_messages,
         except Exception:
             pass
 
-    yield {"type": "done"}
+    yield {
+        "type": "done",
+        "input_tokens": total_input,
+        "output_tokens": total_output,
+    }
 
     if len(session_messages) >= 4 and memory_db:
         try:

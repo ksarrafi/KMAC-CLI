@@ -340,21 +340,38 @@ print_menu() {
     echo -e "  ${DIM}│${NC}  Disk ${_disk_used}/${_disk_total} ${_disk_color}${_disk_pct}${NC}  ${DIM}·${NC}  Load ${_load}  ${DIM}·${NC}  Up ${_uptime}${_bat_str}${_spad}${DIM}│${NC}"
     echo -e "  ${DIM}└────────────────────────────────────────────────────┘${NC}"
 
-    # ─── Commands — 3-column layout ───
+    # ─── Commands — 3-column layout (absolute column positioning for ANSI-safe alignment) ───
     echo ""
-    echo -e "   ${C_CYAN}${BOLD}AI & Research${NC}              ${C_TEAL}${BOLD}Dev${NC}                       ${C_GREEN}${BOLD}Infra${NC}"
-    echo -e "   ${DIM}─────────────${NC}              ${DIM}───${NC}                       ${DIM}─────${NC}"
-    echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}p${NC}  Project Launcher       ${GREEN}d${NC}  Docker Manager"
-    echo -e "   ${GREEN}A${NC}  KmacAgent ${DIM}(tools)${NC}     ${GREEN}e${NC}  Claude Code            ${GREEN}r${NC}  Remote Terminal"
-    echo -e "   ${GREEN}o${NC}  Ollama (Local AI)      ${GREEN}x${NC}  Cursor Agent           ${GREEN}P${NC}  Pilot ${DIM}(remote)${NC}"
-    echo -e "   ${GREEN}+${NC}  AI Toolmaker           ${GREEN}v${NC}  Code Review            ${GREEN}n${NC}  Network Info"
-    echo -e "   ${GREEN}R${NC}  Research ${DIM}(autorun)${NC}    ${GREEN}c${NC}  Smart Commit           ${GREEN}k${NC}  Kill Port"
+    local C1=4 C2=30 C3=56
+
+    _mc() {
+        printf "   ${GREEN}%s${NC}  %b" "$1" "$2"
+        printf "\033[${C2}G${GREEN}%s${NC}  %b" "$3" "$4"
+        if [[ -n "$5" ]]; then
+            printf "\033[${C3}G${GREEN}%s${NC}  %b" "$5" "$6"
+        fi
+        printf '\n'
+    }
+
+    printf "   ${C_CYAN}${BOLD}AI & Research${NC}"
+    printf "\033[${C2}G${C_TEAL}${BOLD}Dev${NC}"
+    printf "\033[${C3}G${C_GREEN}${BOLD}Infra${NC}\n"
+
+    printf "   ${DIM}─────────────${NC}"
+    printf "\033[${C2}G${DIM}───${NC}"
+    printf "\033[${C3}G${DIM}─────${NC}\n"
+
+    _mc "a" "Ask Claude"             "p" "Project Launcher"     "d" "Docker Manager"
+    _mc "A" "KmacAgent ${DIM}(tools)${NC}" "e" "Claude Code"          "r" "Remote Terminal"
+    _mc "o" "Ollama (Local AI)"      "x" "Cursor Agent"         "P" "Pilot ${DIM}(remote)${NC}"
+    _mc "+" "AI Toolmaker"           "v" "Code Review"          "n" "Network Info"
+    _mc "R" "Research ${DIM}(autorun)${NC}" "c" "Smart Commit"        "k" "Kill Port"
     echo ""
     echo -e "   ${YELLOW}${BOLD}System${NC}"
     echo -e "   ${DIM}──────${NC}"
-    echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}u${NC}  Check Updates          ${GREEN}b${NC}  Backup Dotfiles"
-    echo -e "   ${GREEN}.${NC}  Secrets & Keys         ${GREEN}i${NC}  Install / Bootstrap    ${GREEN}I${NC}  Software Manager"
-    echo -e "   ${GREEN}?${NC}  Health Check           ${GREEN}/${NC}  Aliases"
+    _mc "S" "Storage Manager"     "u" "Check Updates"       "b" "Backup Dotfiles"
+    _mc "." "Secrets & Keys"      "i" "Install / Bootstrap" "I" "Software Manager"
+    _mc "?" "Health Check"        "/" "Aliases"             "" ""
 
     # ─── Plugins (sorted by key, 3-column grid) ───
     if (( ${#PLUGIN_NAMES[@]} > 0 )); then
@@ -370,11 +387,12 @@ print_menu() {
         local _pcol=0
         for _si in "${_sorted_pi[@]}"; do
             local _pk="${PLUGIN_KEYS[$_si]:-$((_si+1))}"
-            printf "   ${GREEN}%s${NC})  %-22s" "$_pk" "${PLUGIN_NAMES[$_si]}"
+            local _col=$(( C1 + (_pcol % 3) * 26 ))
+            if (( _pcol % 3 == 0 )) && (( _pcol > 0 )); then printf '\n'; fi
+            printf "\033[${_col}G${GREEN}%s${NC})  %s" "$_pk" "${PLUGIN_NAMES[$_si]}"
             ((_pcol++))
-            if (( _pcol % 3 == 0 )); then echo ""; fi
         done
-        (( _pcol % 3 != 0 )) && echo ""
+        echo ""
     fi
 
     # ─── Footer ───
