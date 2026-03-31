@@ -71,6 +71,8 @@ _SPIN_N=4
 
 do_dashboard() {
     title_box "Docker Health Dashboard"
+    echo -e "  ${DIM}Live container stats: CPU, memory, network, and status from the Docker Engine API.${NC}"
+    echo ""
     _docker_ok || return
 
     # System overview via /info — parse all fields in one python call
@@ -201,6 +203,8 @@ for c in cs:
 
 do_crashes() {
     title_box "Crash Detective"
+    echo -e "  ${DIM}Find crashed or OOM-killed containers and view their last logs.${NC}"
+    echo ""
     _docker_ok || return
 
     local exited
@@ -314,6 +318,8 @@ print(f'{name} {ec} {oom} {img} {fin}')")
 
 do_disk() {
     title_box "Docker Disk Monitor"
+    echo -e "  ${DIM}See how much disk Docker uses for images, containers, volumes, and build cache.${NC}"
+    echo ""
     _docker_ok || return
 
     # Host disk context
@@ -396,6 +402,8 @@ CLEANUP_LOG="$HOME/.docker-cleanup.log"
 
 do_scheduler() {
     title_box "Auto-Cleanup Scheduler"
+    echo -e "  ${DIM}Schedule automatic Docker cleanup, run it once, or read the log from past runs.${NC}"
+    echo ""
 
     local script_exists=false cron_exists=false cron_schedule=""
     [[ -f "$CLEANUP_SCRIPT" ]] && script_exists=true
@@ -497,6 +505,8 @@ _set_cron() {
 
 do_compose() {
     title_box "Compose Deployments"
+    echo -e "  ${DIM}Manage docker-compose projects: start, stop, restart, view logs.${NC}"
+    echo ""
     _docker_ok || return
 
     # Find running compose projects
@@ -567,6 +577,8 @@ for i,p in enumerate(ps,1):
 
 do_mcp() {
     title_box "Docker MCP Toolkit"
+    echo -e "  ${DIM}Browse and manage Docker MCP server catalog and client profiles.${NC}"
+    echo ""
 
     if ! $_HAS_MCP; then
         echo -e "  ${YELLOW}Docker MCP is not installed.${NC}"
@@ -781,6 +793,8 @@ Be concise and actionable. Format with clear headers."
 
 do_quick_clean() {
     title_box "Quick Cleanup"
+    echo -e "  ${DIM}Free disk space by pruning containers, images, volumes, and build cache.${NC}"
+    echo ""
     _docker_ok || return
 
     echo -e "  ${BOLD}What to clean?${NC}"
@@ -834,6 +848,8 @@ do_quick_clean() {
 
 do_restart() {
     title_box "Restart Docker Desktop"
+    echo -e "  ${DIM}Restart Docker Desktop when things get stuck.${NC}"
+    echo ""
 
     echo -e "  ${YELLOW}This will stop all running containers temporarily.${NC}"
     read -r -p "  Continue? (y/N) " yn
@@ -925,8 +941,10 @@ PYEOF
 do_menu() {
     while true; do
         clear
+        title_box "Docker Manager"
+        echo -e "  ${DIM}Docker control panel. Manage containers, images, volumes, and compose projects.${NC}"
         echo ""
-        echo -e "  ${BOLD}${CYAN}Docker Manager${NC}  ${DIM}v3.0 — Engine API + MCP${NC}"
+        echo -e "  ${DIM}v3.0 — Engine API + MCP${NC}"
         echo ""
 
         # Quick status line

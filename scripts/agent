@@ -133,6 +133,8 @@ cmd_stop() {
 
 cmd_status() {
     title_box "KmacAgent"
+    echo -e "  ${DIM}AI agent daemon with tool use: files, commands, tasks, memory. Runs locally via Unix socket.${NC}"
+    echo ""
     if _is_running; then
         _engine status
     else

@@ -417,6 +417,8 @@ do_remote_terminal() {
     local status
     status=$(check_rt)
     title_box "Remote Terminal"
+    echo -e "  ${DIM}Browser-accessible shell via tmux + ttyd + ngrok. Share a URL to your terminal.${NC}"
+    echo ""
     if [[ "$status" == "up" ]]; then
         local url
         url=$(curl -sf http://localhost:4040/api/tunnels 2>/dev/null \
@@ -491,7 +493,8 @@ do_show_qr() {
 
 do_ask() {
     title_box "Ask Claude"
-    echo -e "  ${DIM}kmac ask -i  interactive  |  kmac ask -m opus  hard questions${NC}"
+    echo -e "  ${DIM}Send a one-off question to Claude via the Anthropic API.${NC}"
+    echo -e "  ${DIM}CLI: kmac ask -i (interactive) | kmac ask -m opus (hard questions)${NC}"
     echo -e "  ${DIM}Enter = back to menu${NC}"
     echo ""
     read -r -p "  Question: " q
@@ -503,6 +506,8 @@ do_ask() {
 
 do_network() {
     title_box "Network Info"
+    echo -e "  ${DIM}Quick snapshot of your network: IPs, Wi-Fi, gateway, and listening ports.${NC}"
+    echo ""
     local lip pip wifi gw
     lip=$(ipconfig getifaddr en0 2>/dev/null || echo "Not connected")
     pip=$(curl -sf --max-time 3 https://ifconfig.me 2>/dev/null || echo "Unavailable")
@@ -522,6 +527,8 @@ do_network() {
 
 do_health() {
     title_box "Health Check"
+    echo -e "  ${DIM}Verify that tools, secrets, and paths are configured correctly.${NC}"
+    echo ""
     local issues=0
     echo -e "  ${BOLD}Dependencies:${NC}"
     for dep in ttyd ngrok caddy qrencode tmux bat fzf git docker brew claude cursor; do
@@ -597,6 +604,8 @@ do_health() {
 do_aliases() {
     clear
     title_box "Aliases"
+    echo -e "  ${DIM}Shell shortcuts defined in aliases.sh. Loaded when you source the toolkit.${NC}"
+    echo ""
     if [[ -f "$TOOLKIT_DIR/aliases.sh" ]]; then
         grep "^alias\|^[a-z_]*() " "$TOOLKIT_DIR/aliases.sh" | while IFS= read -r line; do
             if [[ "$line" == alias* ]]; then
@@ -621,6 +630,8 @@ do_secrets() {
 
 do_install_bootstrap() {
     title_box "Install / Bootstrap"
+    echo -e "  ${DIM}Set up this Mac: install the toolkit, apply Brewfile, set macOS defaults.${NC}"
+    echo ""
     echo -e "  ${GREEN}i${NC}) Install/Update Toolkit"
     echo -e "  ${GREEN}b${NC}) Export Brewfile ${DIM}(save current)${NC}"
     echo -e "  ${GREEN}B${NC}) Install from Brewfile"

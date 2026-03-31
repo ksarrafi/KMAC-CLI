@@ -56,6 +56,8 @@ fi
 # Interactive conversation mode
 if $INTERACTIVE; then
     title_box "Ask Claude"
+    echo -e "  ${DIM}Send a question to Claude via the Anthropic API. Pipe text in or use -i for interactive mode.${NC}"
+    echo ""
     echo -e "  ${BOLD}Model:${NC} ${CYAN}${MODEL}${NC}"
     echo -e "  ${DIM}Type 'exit' to quit, 'model X' to switch (opus/sonnet/haiku)${NC}"
     echo ""

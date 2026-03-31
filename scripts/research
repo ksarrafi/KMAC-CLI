@@ -78,6 +78,8 @@ _notify_telegram() {
 
 cmd_init() {
     title_box "Research — Init"
+    echo -e "  ${DIM}Set up a new research project: target file, eval command, and experiment plan.${NC}"
+    echo ""
 
     if _find_program . &>/dev/null; then
         local existing
@@ -260,6 +262,8 @@ PROGRAM_EOF
 
 cmd_run() {
     title_box "Research — Run"
+    echo -e "  ${DIM}Start the experiment loop. Claude iterates on your code automatically.${NC}"
+    echo ""
 
     if _research_running; then
         ui_warn "A research loop is already running (PID $(cat "$RESEARCH_PID_FILE"))"
@@ -591,6 +595,8 @@ Best metric: \`${best}\`"
 
 cmd_status() {
     title_box "Research — Status"
+    echo -e "  ${DIM}Check progress, scores, and experiment count for the current project.${NC}"
+    echo ""
 
     if _research_running; then
         local pid
@@ -651,6 +657,8 @@ cmd_status() {
 
 cmd_review() {
     title_box "Research — Review"
+    echo -e "  ${DIM}Review results and pick the best-scoring experiment to keep.${NC}"
+    echo ""
 
     _ensure_claude_auth || return 1
 
@@ -696,6 +704,8 @@ Be concise and data-driven. Reference specific experiments by commit hash."
 
 cmd_stop() {
     title_box "Research — Stop"
+    echo -e "  ${DIM}Stop the running experiment loop when you want a clean break.${NC}"
+    echo ""
 
     if ! _research_running; then
         ui_dim "No research loop is currently running."
@@ -737,6 +747,8 @@ cmd_interactive() {
     while true; do
         clear
         title_box "Research"
+        echo -e "  ${DIM}Autonomous AI experiment loop: Claude proposes changes, your command scores them.${NC}"
+        echo ""
 
         if _research_running; then
             local pid

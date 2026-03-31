@@ -17,6 +17,8 @@ pilot_ensure_dirs
 
 do_setup() {
     title_box "KMac Pilot Setup"
+    echo -e "  ${DIM}Configure Telegram bot token and chat ID for remote AI control.${NC}"
+    echo ""
     echo -e "  ${BOLD}Step 1: Create a Telegram Bot${NC}"
     echo -e "  ${DIM}Open Telegram on your phone and message @BotFather:${NC}"
     echo ""
@@ -173,6 +175,8 @@ do_stop() {
 
 do_status() {
     title_box "KMac Pilot"
+    echo -e "  ${DIM}Telegram bot that controls AI agents on your Mac remotely.${NC}"
+    echo ""
 
     # Bot status
     if pilot_bot_running; then

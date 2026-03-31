@@ -61,6 +61,8 @@ PROJECT_PATH="$PROJECTS_DIR/$PROJECT_NAME"
 # Show project dashboard
 if [[ -z "$ACTION" ]]; then
     title_box "$PROJECT_NAME" "📁"
+    echo -e "  ${DIM}Project dashboard: branch, dirty files, running dev servers, and quick-launch actions.${NC}"
+    echo ""
 
     # Git info
     if [[ -d "$PROJECT_PATH/.git" ]]; then

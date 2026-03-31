@@ -70,6 +70,8 @@ spinner() {
 
 do_overview() {
     title_box "Disk Usage Overview"
+    echo -e "  ${DIM}Boot volume usage at a glance.${NC}"
+    echo ""
 
     local disk_info
     disk_info=$(df -H / 2>/dev/null | awk 'NR==2')
@@ -108,6 +110,8 @@ do_overview() {
 
 do_scan() {
     title_box "Top Space Consumers"
+    echo -e "  ${DIM}Scan your home directory for the largest folders.${NC}"
+    echo ""
 
     local tmpdir="$_KMAC_TMP/storage-$$"
     mkdir -p "$tmpdir"
@@ -214,6 +218,8 @@ do_scan() {
 
 do_big_files() {
     title_box "Largest Files"
+    echo -e "  ${DIM}Find individual files over 100MB you might want to delete or move.${NC}"
+    echo ""
 
     local min_mb=${1:-100}
     local tmpfile="$_KMAC_TMP/bigfiles-$$"
@@ -588,6 +594,8 @@ _act_on_files() {
 
 do_clean() {
     title_box "Cleanable Space"
+    echo -e "  ${DIM}Caches, logs, and build artifacts that can be safely removed.${NC}"
+    echo ""
 
     local total_reclaimable=0
 
@@ -743,6 +751,8 @@ do_clean() {
 
 do_icloud() {
     title_box "iCloud Storage Analysis"
+    echo -e "  ${DIM}See what's in iCloud Drive and migrate local folders to free disk.${NC}"
+    echo ""
 
     if ! $ICLOUD_AVAIL; then
         echo -e "  ${RED}✗ iCloud Drive not found${NC}"
@@ -969,6 +979,8 @@ do_move() {
 
 do_node_modules() {
     title_box "node_modules Cleanup"
+    echo -e "  ${DIM}Find and remove stale node_modules directories from old projects.${NC}"
+    echo ""
 
     # Find node_modules with live count
     local tmpfile="$_KMAC_TMP/nm-$$"
@@ -1087,6 +1099,8 @@ do_menu() {
     while true; do
         clear
         title_box "Storage Manager"
+        echo -e "  ${DIM}Find what's eating your disk and clean it up.${NC}"
+        echo ""
 
         do_overview
 

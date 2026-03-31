@@ -154,6 +154,8 @@ run_update() {
 
 show_full_report() {
     title_box "Update Check"
+    echo -e "  ${DIM}Scan for outdated tools: Claude CLI, Homebrew packages, and dotfile freshness.${NC}"
+    echo ""
     run_checks >/dev/null 2>&1 &
     spin $!
 

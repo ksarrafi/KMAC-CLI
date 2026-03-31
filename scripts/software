@@ -388,6 +388,8 @@ _cat_icon() {
 
 do_list() {
     title_box "Software Catalog"
+    echo -e "  ${DIM}Curated list of dev, AI, and infrastructure tools with install status.${NC}"
+    echo ""
 
     local current_cat=""
     local installed=0 total=0
@@ -429,6 +431,9 @@ do_category_menu() {
     while true; do
         clear
         title_box "$cat_label"
+        echo -e "  ${DIM}See which tools in this group are already on your Mac.${NC}"
+        echo -e "  ${DIM}Pick a number to install one, or \"a\" to install everything here that's still missing.${NC}"
+        echo ""
 
         local -a names=() checks=() installs=() descs=() urls=()
         local idx=1
@@ -486,6 +491,8 @@ do_category_menu() {
 
 do_install_all() {
     title_box "Install All Missing"
+    echo -e "  ${DIM}Install every tool in the catalog that isn't already on your system.${NC}"
+    echo ""
 
     local missing=0
     for entry in "${REGISTRY[@]}"; do
@@ -520,6 +527,8 @@ do_install_all() {
 
 do_update() {
     title_box "Update Installed Tools"
+    echo -e "  ${DIM}Update all installed tools to their latest versions.${NC}"
+    echo ""
 
     if [[ "${KMAC_OS:-}" == macos ]] && command -v brew &>/dev/null; then
         ui_info "Updating Homebrew packages..."
@@ -672,6 +681,8 @@ do_menu() {
     while true; do
         clear
         title_box "Software Manager"
+        echo -e "  ${DIM}Browse and install developer tools by category.${NC}"
+        echo ""
 
         local installed=0 total=${#REGISTRY[@]}
         for entry in "${REGISTRY[@]}"; do
@@ -703,7 +714,11 @@ do_menu() {
             l|L) clear; do_list; pause ;;
             a|A) clear; do_install_all ;;
             u|U) clear; do_update ;;
-            s|S) clear; title_box "Search"; do_search; pause ;;
+            s|S) clear; title_box "Search"
+                echo -e "  ${DIM}Search the catalog by tool name, short description, or category.${NC}"
+                echo -e "  ${DIM}Use the category menus from the main screen to install anything that is not installed yet.${NC}"
+                echo ""
+                do_search; pause ;;
             m|M|"") return ;;
             *) ui_fail "Unknown: '$choice'"; sleep 0.5 ;;
         esac

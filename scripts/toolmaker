@@ -25,6 +25,8 @@ TOOL_KEY=""
 gather_spec() {
     echo ""
     title_box "Tool Maker"
+    echo -e "  ${DIM}Describe a tool in English. Claude writes a bash script. Review, test, and install it.${NC}"
+    echo ""
     echo -e "${D}Describe what you want and AI will build it for you.${NC}"
     echo ""
 

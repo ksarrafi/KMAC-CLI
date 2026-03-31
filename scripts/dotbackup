@@ -51,6 +51,8 @@ _scrub_secrets() {
 
 show_diff() {
     title_box "Dotfile Changes"
+    echo -e "  ${DIM}Compare your current dotfiles against the last backup.${NC}"
+    echo ""
     local changes=0
     for f in "${DOTFILES[@]}"; do
         local name
@@ -74,6 +76,8 @@ show_diff() {
 do_backup() {
     mkdir -p "$BACKUP_DIR"
     title_box "Dotfile Backup"
+    echo -e "  ${DIM}Copy dotfiles and Claude config into the toolkit repo. Secrets are scrubbed.${NC}"
+    echo ""
     for f in "${DOTFILES[@]}"; do
         [[ -f "$f" ]] || continue
         local name
@@ -121,6 +125,8 @@ do_restore() {
     local ts
     ts=$(date +%Y%m%d-%H%M%S)
     title_box "Dotfile Restore"
+    echo -e "  ${DIM}Restore dotfiles from the backup to your home directory.${NC}"
+    echo ""
     ui_warn "Current files will be saved as .bak-$ts"
     echo ""
     for f in "${DOTFILES[@]}"; do

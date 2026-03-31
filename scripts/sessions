@@ -14,6 +14,8 @@ SEARCH_TERM="${2:-}"
 case "$ACTION" in
     list|ls)
         title_box "Claude Sessions"
+        echo -e "  ${DIM}Browse and search your Claude Code session history.${NC}"
+        echo ""
         if [[ -d "$HOME/.claude/todos" ]]; then
             local_count=0
             find "$HOME/.claude/todos" -maxdepth 1 -type f -exec stat -f '%m	%N' {} \; 2>/dev/null \

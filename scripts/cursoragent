@@ -11,6 +11,8 @@ PROMPT="$*"
 if [[ -z "$PROMPT" ]]; then
     if [[ -t 0 ]]; then
         title_box "Cursor Agent"
+        echo -e "  ${DIM}Run a task with Cursor's AI agent. Describe what you want in natural language.${NC}"
+        echo ""
         read -r -p "  Task: " PROMPT
         echo ""
     else

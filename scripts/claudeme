@@ -102,6 +102,8 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
 fi
 
 title_box "Claude Code Session"
+echo -e "  ${DIM}Launch a Claude coding session with your chosen model in the current directory.${NC}"
+echo ""
 echo -e "  ${BOLD}Model:${NC}   ${CYAN}$MODEL${NC}"
 echo -e "  ${BOLD}Session:${NC} $SESSION_NAME"
 echo -e "  ${BOLD}Dir:${NC}     ${DIM}$WORKDIR${NC}"
