@@ -1,11 +1,12 @@
 #!/bin/bash
-# _vault.sh — unified secret management with triple backends
+# _vault.sh — unified secret management with multiple backends
 # Source this in any script: source "$SCRIPT_DIR/_vault.sh"
 #
 # Backends:
 #   1. macOS Keychain (primary) — hardware-backed, OS-managed
 #   2. Encrypted file vault     — AES-256, portable, syncable
 #   3. Docker vault             — containerized, isolated, portable volume
+#   4. Remote vault             — hosted on Railway/cloud, shared across machines
 #
 # API:
 #   vault_get  <service>              → prints secret value
@@ -23,7 +24,7 @@ _VAULT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VAULT_DIR="${KMAC_VAULT_DIR:-$HOME/.config/kmac}"
 VAULT_FILE="$VAULT_DIR/vault.enc"
 VAULT_REGISTRY="$VAULT_DIR/integrations.json"
-VAULT_BACKEND="${KMAC_VAULT_BACKEND:-auto}"  # auto | keychain | file | docker
+VAULT_BACKEND="${KMAC_VAULT_BACKEND:-auto}"  # auto | keychain | file | docker | remote
 
 # ─── Backend Detection ───────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ _vault_backend() {
         keychain) echo "keychain" ;;
         file)     echo "file" ;;
         docker)   echo "docker" ;;
+        remote)   echo "remote" ;;
         auto)
             case "${KMAC_OS:-}" in
                 macos)
@@ -372,6 +374,200 @@ for k in json.load(sys.stdin).get('keys',[]):
 " 2>/dev/null
 }
 
+# ─── Remote Vault Backend ─────────────────────────────────────────────────
+# Talks to a hosted KMac Vault Server (Railway, fly.io, VPS, etc.) via HTTPS.
+# Config stored at ~/.config/kmac/remote-vault.json:
+#   {"url": "https://vault-production-xxxx.up.railway.app", "token": "..."}
+# Or via env vars: KMAC_VAULT_REMOTE_URL and KMAC_VAULT_REMOTE_TOKEN
+
+VAULT_REMOTE_CONFIG="$VAULT_DIR/remote-vault.json"
+
+_remote_vault_cfg() {
+    local url="" token=""
+    url="${KMAC_VAULT_REMOTE_URL:-}"
+    token="${KMAC_VAULT_REMOTE_TOKEN:-}"
+    if [[ -z "$url" && -f "$VAULT_REMOTE_CONFIG" ]]; then
+        url=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('url',''))" "$VAULT_REMOTE_CONFIG" 2>/dev/null)
+        token=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('token',''))" "$VAULT_REMOTE_CONFIG" 2>/dev/null)
+    fi
+    echo "${url}|${token}"
+}
+
+_remote_vault_url() {
+    local cfg
+    cfg=$(_remote_vault_cfg)
+    echo "${cfg%%|*}"
+}
+
+_remote_vault_token() {
+    local cfg
+    cfg=$(_remote_vault_cfg)
+    echo "${cfg#*|}"
+}
+
+_remote_vault_configured() {
+    local url token
+    url=$(_remote_vault_url)
+    token=$(_remote_vault_token)
+    [[ -n "$url" && -n "$token" ]]
+}
+
+_remote_get() {
+    local url token
+    url=$(_remote_vault_url)
+    token=$(_remote_vault_token)
+    local resp
+    resp=$(curl -sf --max-time 10 "${url}/get/$1" \
+        -H "Authorization: Bearer ${token}" 2>/dev/null) || return 1
+    echo "$resp" | python3 -c "import sys,json; v=json.load(sys.stdin).get('value',''); print(v) if v else sys.exit(1)" 2>/dev/null
+}
+
+_remote_set() {
+    local url token
+    url=$(_remote_vault_url)
+    token=$(_remote_vault_token)
+    local json
+    json=$(python3 -c "import json,sys; print(json.dumps({'key':sys.argv[1],'value':sys.argv[2]}))" "$1" "$2")
+    curl -sf --max-time 10 -X POST "${url}/set" \
+        -H "Authorization: Bearer ${token}" \
+        -H "Content-Type: application/json" \
+        -d "$json" >/dev/null 2>&1
+}
+
+_remote_del() {
+    local url token
+    url=$(_remote_vault_url)
+    token=$(_remote_vault_token)
+    curl -sf --max-time 10 -X POST "${url}/delete/$1" \
+        -H "Authorization: Bearer ${token}" >/dev/null 2>&1
+}
+
+_remote_has() {
+    local url token
+    url=$(_remote_vault_url)
+    token=$(_remote_vault_token)
+    local resp
+    resp=$(curl -sf --max-time 10 "${url}/has/$1" \
+        -H "Authorization: Bearer ${token}" 2>/dev/null) || return 1
+    echo "$resp" | python3 -c "import sys,json; sys.exit(0 if json.load(sys.stdin).get('exists') else 1)" 2>/dev/null
+}
+
+_remote_list() {
+    local url token
+    url=$(_remote_vault_url)
+    token=$(_remote_vault_token)
+    local resp
+    resp=$(curl -sf --max-time 10 "${url}/list" \
+        -H "Authorization: Bearer ${token}" 2>/dev/null) || return 0
+    echo "$resp" | python3 -c "import sys,json
+for k in json.load(sys.stdin).get('keys',[]):
+    print(k)" 2>/dev/null
+}
+
+_remote_health() {
+    local url token
+    url=$(_remote_vault_url)
+    token=$(_remote_vault_token)
+    curl -sf --max-time 5 "${url}/health" >/dev/null 2>&1
+}
+
+remote_vault_setup() {
+    echo ""
+    echo -e "  ${BOLD}Remote Vault Setup${NC}"
+    echo -e "  ${DIM}Connect to a hosted KMac Vault Server (Railway, fly.io, VPS, etc.)${NC}"
+    echo ""
+    echo -e "  ${BOLD}Deploy in 2 minutes:${NC}"
+    echo -e "  ${DIM}1. Push server/vault/ to a Railway project${NC}"
+    echo -e "  ${DIM}2. Set VAULT_TOKEN env var in Railway dashboard${NC}"
+    echo -e "  ${DIM}3. Add a Railway volume mounted at /vault/data${NC}"
+    echo -e "  ${DIM}4. Paste the Railway URL below${NC}"
+    echo ""
+    local existing_url
+    existing_url=$(_remote_vault_url)
+    if [[ -n "$existing_url" ]]; then
+        echo -e "  ${DIM}Current: ${existing_url}${NC}"
+        echo ""
+    fi
+    read -r -p "  Vault URL (e.g. https://vault-xxx.up.railway.app): " vault_url
+    [[ -z "$vault_url" ]] && return 1
+    vault_url="${vault_url%/}"
+
+    read -r -s -p "  Vault token: " vault_token; echo ""
+    [[ -z "$vault_token" ]] && return 1
+
+    echo ""
+    printf '  %s...%s Testing connection' "$CYAN" "$NC"
+    if curl -sf --max-time 10 "${vault_url}/health" \
+        -H "Authorization: Bearer ${vault_token}" >/dev/null 2>&1; then
+        printf '\r  %s✓%s Connection successful     \n' "$GREEN" "$NC"
+    else
+        printf '\r  %s✗%s Could not reach vault     \n' "$RED" "$NC"
+        echo -e "  ${DIM}Check the URL and token. The vault server must be running.${NC}"
+        read -r -n1 -p "  Save anyway? (y/N) > " yn; echo ""
+        [[ "$yn" != [yY] ]] && return 1
+    fi
+
+    mkdir -p "$VAULT_DIR"
+    python3 -c "
+import json,sys
+with open(sys.argv[1],'w') as f:
+    json.dump({'url':sys.argv[2],'token':sys.argv[3]},f,indent=2)
+" "$VAULT_REMOTE_CONFIG" "$vault_url" "$vault_token"
+    chmod 600 "$VAULT_REMOTE_CONFIG"
+    echo -e "  ${GREEN}✓ Remote vault configured${NC}"
+    echo -e "  ${DIM}Config: ${VAULT_REMOTE_CONFIG}${NC}"
+}
+
+# ── Vault Sync (push/pull between local and remote) ─────────────────────
+
+vault_sync_push() {
+    if ! _remote_vault_configured; then
+        echo -e "  ${RED}Remote vault not configured. Run: kmac secrets backend → Remote${NC}" >&2
+        return 1
+    fi
+    _vault_load_registry
+    local pushed=0 skipped=0
+    for (( i=0; i<${#_REG_SERVICES[@]}; i++ )); do
+        local svc="${_REG_SERVICES[$i]}"
+        local val
+        val=$(vault_get "$svc" 2>/dev/null) || continue
+        [[ -z "$val" ]] && continue
+        if _remote_set "$svc" "$val" 2>/dev/null; then
+            echo -e "  ${GREEN}↑${NC} ${svc}"
+            ((pushed++))
+        else
+            echo -e "  ${RED}✗${NC} ${svc}"
+            ((skipped++))
+        fi
+    done
+    echo ""
+    echo -e "  ${BOLD}Pushed ${pushed} secret(s)${NC}$( (( skipped > 0 )) && echo " ${RED}(${skipped} failed)${NC}" )"
+}
+
+vault_sync_pull() {
+    if ! _remote_vault_configured; then
+        echo -e "  ${RED}Remote vault not configured. Run: kmac secrets backend → Remote${NC}" >&2
+        return 1
+    fi
+    _vault_load_registry
+    local pulled=0 skipped=0
+    for (( i=0; i<${#_REG_SERVICES[@]}; i++ )); do
+        local svc="${_REG_SERVICES[$i]}"
+        local val
+        val=$(_remote_get "$svc" 2>/dev/null) || continue
+        [[ -z "$val" ]] && continue
+        if vault_set "$svc" "$val" 2>/dev/null; then
+            echo -e "  ${GREEN}↓${NC} ${svc}"
+            ((pulled++))
+        else
+            echo -e "  ${RED}✗${NC} ${svc}"
+            ((skipped++))
+        fi
+    done
+    echo ""
+    echo -e "  ${BOLD}Pulled ${pulled} secret(s)${NC}$( (( skipped > 0 )) && echo " ${RED}(${skipped} failed)${NC}" )"
+}
+
 # ─── Unified API ─────────────────────────────────────────────────────────
 
 vault_get() {
@@ -381,6 +577,7 @@ vault_get() {
         keychain) _kc_get "$1" ;;
         file)     _file_get "$1" ;;
         docker)   _docker_get "$1" ;;
+        remote)   _remote_get "$1" ;;
     esac
 }
 
@@ -391,6 +588,7 @@ vault_set() {
         keychain) _kc_set "$1" "$2" ;;
         file)     _file_set "$1" "$2" ;;
         docker)   _docker_set "$1" "$2" ;;
+        remote)   _remote_set "$1" "$2" ;;
     esac
 }
 
@@ -401,6 +599,7 @@ vault_del() {
         keychain) _kc_del "$1" ;;
         file)     _file_del "$1" ;;
         docker)   _docker_del "$1" ;;
+        remote)   _remote_del "$1" ;;
     esac
 }
 
@@ -411,6 +610,7 @@ vault_has() {
         keychain) _kc_has "$1" ;;
         file)     _file_has "$1" ;;
         docker)   _docker_has "$1" ;;
+        remote)   _remote_has "$1" ;;
     esac
 }
 
@@ -421,6 +621,7 @@ vault_list() {
         keychain) _kc_list ;;
         file)     _file_list ;;
         docker)   _docker_list ;;
+        remote)   _remote_list ;;
     esac
 }
 

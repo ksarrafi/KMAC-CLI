@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
-"""KMac Docker Vault — encrypted key-value store for secrets.
+"""KMac Vault Server — encrypted key-value store for secrets.
 
-Runs inside a Docker container. Values are encrypted at rest with Fernet
-(AES-128-CBC + HMAC-SHA256) in a SQLite database stored on a Docker volume.
-Listens only on 127.0.0.1 inside the container — expose to host via port
-mapping on 127.0.0.1 if needed.
+Deployment modes:
+  1. Docker:  runs in a container with volume mount and token file
+  2. Railway: reads config from env vars, binds to 0.0.0.0:$PORT
+  3. Local:   runs standalone for development
 
-Auth: Bearer token read from /vault/token (mounted from host).
+Values are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256)
+in a SQLite database. Auth via Bearer token.
+
+Env vars (all optional, with sensible defaults):
+  VAULT_DB_PATH     — SQLite path        (default: /vault/data/secrets.db)
+  VAULT_TOKEN       — Bearer auth token  (default: read from /vault/token or auto-generated)
+  VAULT_PORT        — Listen port        (default: 9999, Railway sets PORT)
+  VAULT_BIND        — Bind address       (default: 127.0.0.1, 0.0.0.0 on Railway)
+  RAILWAY_ENVIRONMENT — set by Railway automatically
 """
 
 import base64
@@ -31,9 +39,12 @@ except ImportError as exc:
     )
     raise SystemExit(1) from exc
 
-DB_PATH = "/vault/data/secrets.db"
+IS_RAILWAY = bool(os.environ.get("RAILWAY_ENVIRONMENT"))
+
+DB_PATH = os.environ.get("VAULT_DB_PATH", "/vault/data/secrets.db")
 TOKEN_PATH = "/vault/token"
-PORT = 9999
+PORT = int(os.environ.get("VAULT_PORT", os.environ.get("PORT", "9999")))
+BIND = os.environ.get("VAULT_BIND", "0.0.0.0" if IS_RAILWAY else "127.0.0.1")
 MAX_BODY_BYTES = 64 * 1024
 RATE_WINDOW_SEC = 60.0
 RATE_MAX_PER_WINDOW = 100
@@ -94,15 +105,21 @@ def _load_token() -> str:
     global _token_cache
     if _token_cache is not None:
         return _token_cache
-    if os.path.exists(TOKEN_PATH):
+    env_token = os.environ.get("VAULT_TOKEN", "").strip()
+    if env_token:
+        _token_cache = env_token
+    elif os.path.exists(TOKEN_PATH):
         with open(TOKEN_PATH) as f:
             _token_cache = f.read().strip()
     else:
         _token_cache = secrets.token_urlsafe(32)
-        os.makedirs(os.path.dirname(TOKEN_PATH), exist_ok=True)
-        with open(TOKEN_PATH, "w") as f:
-            f.write(_token_cache)
-        os.chmod(TOKEN_PATH, 0o600)
+        try:
+            os.makedirs(os.path.dirname(TOKEN_PATH), exist_ok=True)
+            with open(TOKEN_PATH, "w") as f:
+                f.write(_token_cache)
+            os.chmod(TOKEN_PATH, 0o600)
+        except OSError:
+            pass
     return _token_cache
 
 
@@ -193,7 +210,8 @@ class VaultHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/health":
-            self._json_response({"ok": True, "backend": "docker"})
+            mode = "railway" if IS_RAILWAY else "docker"
+            self._json_response({"ok": True, "backend": mode})
             return
 
         if not self._auth_ok():
@@ -265,13 +283,14 @@ class VaultHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     token = _load_token()
-    print(f"KMac Docker Vault")
-    print(f"  Port:  {PORT}")
+    mode = "Railway" if IS_RAILWAY else "Docker/Local"
+    print(f"KMac Vault Server ({mode})")
+    print(f"  Bind:  {BIND}:{PORT}")
     print(f"  DB:    {DB_PATH}")
-    print("  Token: loaded")
+    print(f"  Token: {'env' if os.environ.get('VAULT_TOKEN') else 'file'}")
     print(f"  Crypto: Fernet (AES-128-CBC + HMAC-SHA256)")
     print()
-    server = HTTPServer(("127.0.0.1", PORT), VaultHandler)
+    server = HTTPServer((BIND, PORT), VaultHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
