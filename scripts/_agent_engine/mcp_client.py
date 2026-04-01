@@ -40,10 +40,12 @@ def _next_id() -> int:
 class MCPServer:
     """A single MCP server process connection."""
 
-    def __init__(self, name: str, command: str, args: list[str]):
+    def __init__(self, name: str, command: str, args: list[str],
+                 extra_env: dict[str, str] | None = None):
         self.name = name
         self.command = command
         self.args = args
+        self._extra_env = extra_env or {}
         self.process: asyncio.subprocess.Process | None = None
         self.tools: list[dict] = []
         self._reader_task: asyncio.Task | None = None
@@ -52,11 +54,15 @@ class MCPServer:
 
     async def start(self) -> bool:
         try:
+            env = None
+            if self._extra_env:
+                env = {**os.environ, **self._extra_env}
             self.process = await asyncio.create_subprocess_exec(
                 self.command, *self.args,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
+                env=env,
             )
             self._reader_task = asyncio.ensure_future(self._read_loop())
 
@@ -187,15 +193,11 @@ class MCPManager:
                 continue
             command = cfg.get("command", "")
             args = cfg.get("args", [])
-            env = cfg.get("env", {})
+            extra_env = cfg.get("env", {})
             if not command:
                 continue
 
-            if env:
-                for k, v in env.items():
-                    os.environ[k] = v
-
-            server = MCPServer(name, command, args)
+            server = MCPServer(name, command, args, extra_env=extra_env)
             if await server.start():
                 self.servers[name] = server
                 for tool in server.tools:

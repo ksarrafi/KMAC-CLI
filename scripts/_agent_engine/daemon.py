@@ -307,12 +307,16 @@ class AgentDaemon:
 
     def _agent_delete(self, req):
         name = req.get("name", "")
+        if not name or not name.replace("-", "").replace("_", "").isalnum():
+            return {"type": "error", "message": "Invalid agent name (alphanumeric, -, _)"}
         if name == "default":
             return {"type": "error", "message": "Cannot delete default agent"}
+        d = (DB_DIR / name).resolve()
+        if not d.is_relative_to(DB_DIR.resolve()):
+            return {"type": "error", "message": "Invalid agent path"}
         if name in self.dbs:
             self.dbs[name].close()
             del self.dbs[name]
-        d = DB_DIR / name
         if d.exists():
             shutil.rmtree(d)
         return {"type": "result", "data": {"deleted": name}}
@@ -666,8 +670,12 @@ class AgentDaemon:
         path = req.get("path", "")
         if not path:
             return {"type": "error", "message": "No import file path"}
+        resolved = Path(path).resolve()
+        allowed = AGENT_HOME.resolve()
+        if not resolved.is_relative_to(allowed):
+            return {"type": "error", "message": f"Import restricted to {AGENT_HOME}"}
         try:
-            with open(path) as f:
+            with open(resolved) as f:
                 data = json.load(f)
         except Exception as e:
             return {"type": "error", "message": f"Cannot read file: {e}"}
@@ -842,10 +850,12 @@ class AgentDaemon:
     def _notify(self, title: str, body: str):
         """Send a notification via macOS notification center and/or Telegram."""
         import subprocess as sp
+        safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
+        safe_body = body.replace("\\", "\\\\").replace('"', '\\"')
         try:
             sp.run([
                 "osascript", "-e",
-                f'display notification "{body}" with title "{title}"'
+                f'display notification "{safe_body}" with title "{safe_title}"'
             ], timeout=5, capture_output=True)
         except Exception:
             pass

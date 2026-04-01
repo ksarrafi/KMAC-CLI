@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import urllib.parse
 import urllib.request
 import urllib.error
 from html.parser import HTMLParser
@@ -281,8 +282,22 @@ async def _web_search(inp) -> tuple[str, str]:
     return full, preview
 
 
+def _validate_url(url: str) -> str | None:
+    """Return error string if URL is unsafe, else None."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return "Malformed URL"
+    if parsed.scheme not in ("http", "https"):
+        return f"Blocked URL scheme: {parsed.scheme or '(empty)'} — only http/https allowed"
+    return None
+
+
 async def _web_fetch(inp) -> tuple[str, str]:
     url = inp["url"]
+    err = _validate_url(url)
+    if err:
+        return err, err
     max_chars = inp.get("max_chars", 20000)
     loop = asyncio.get_event_loop()
 
@@ -320,6 +335,9 @@ async def _browser(inp) -> tuple[str, str]:
     if action == "navigate":
         if not url:
             return "No URL provided", "no url"
+        url_err = _validate_url(url)
+        if url_err:
+            return url_err, url_err
         if chrome:
             return await _chrome_navigate(chrome, url)
         return await _osascript_navigate(url)
@@ -356,9 +374,12 @@ async def _find_chrome() -> str | None:
 
 
 async def _chrome_navigate(chrome: str, url: str) -> tuple[str, str]:
-    cmd = f'"{chrome}" --headless --disable-gpu --dump-dom "{url}" 2>/dev/null'
-    proc = await asyncio.create_subprocess_shell(
-        cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    err = _validate_url(url)
+    if err:
+        return err, err
+    proc = await asyncio.create_subprocess_exec(
+        chrome, "--headless", "--disable-gpu", "--dump-dom", url,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
     )
     stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
     html = stdout.decode("utf-8", errors="replace")
@@ -370,13 +391,14 @@ async def _chrome_navigate(chrome: str, url: str) -> tuple[str, str]:
 
 
 async def _chrome_screenshot(chrome: str, url: str, path: str) -> tuple[str, str]:
+    err = _validate_url(url)
+    if err:
+        return err, err
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    cmd = (
-        f'"{chrome}" --headless --disable-gpu --screenshot="{path}" '
-        f'--window-size=1280,900 "{url}" 2>/dev/null'
-    )
-    proc = await asyncio.create_subprocess_shell(
-        cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    proc = await asyncio.create_subprocess_exec(
+        chrome, "--headless", "--disable-gpu",
+        f"--screenshot={path}", "--window-size=1280,900", url,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
     )
     await asyncio.wait_for(proc.communicate(), timeout=30)
     if os.path.exists(path):
@@ -386,14 +408,18 @@ async def _chrome_screenshot(chrome: str, url: str, path: str) -> tuple[str, str
 
 
 async def _osascript_navigate(url: str) -> tuple[str, str]:
-    script = f'''
-    tell application "Safari"
-        open location "{url}"
-        delay 2
-        set pageText to do JavaScript "document.body.innerText" in current tab of window 1
-        return pageText
-    end tell
-    '''
+    err = _validate_url(url)
+    if err:
+        return err, err
+    safe_url = url.replace("\\", "\\\\").replace('"', '\\"')
+    script = (
+        'tell application "Safari"\n'
+        f'    open location "{safe_url}"\n'
+        '    delay 2\n'
+        '    set pageText to do JavaScript "document.body.innerText" in current tab of window 1\n'
+        '    return pageText\n'
+        'end tell'
+    )
     proc = await asyncio.create_subprocess_exec(
         "osascript", "-e", script,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -404,8 +430,8 @@ async def _osascript_navigate(url: str) -> tuple[str, str]:
         if len(text) > 20000:
             text = text[:20000] + "\n... (truncated)"
         return text, text[:500]
-    err = stderr.decode().strip()
-    return f"Safari navigation failed: {err or 'no output'}", "failed"
+    err_msg = stderr.decode().strip()
+    return f"Safari navigation failed: {err_msg or 'no output'}", "failed"
 
 
 async def _image(inp, api_key: str) -> tuple[str, str]:

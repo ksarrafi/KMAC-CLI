@@ -238,47 +238,48 @@ def _edit_file(inp):
 async def _list_dir(inp):
     path = inp.get("path", ".")
     depth = inp.get("depth", 2)
-    cmd = (
-        f"find '{path}' -maxdepth {depth} -not -path '*/.*' "
-        "2>/dev/null | sort | head -100"
-    )
-    proc = await asyncio.create_subprocess_shell(
-        cmd,
+    args = ["find", path, "-maxdepth", str(int(depth)), "-not", "-path", "*/.*"]
+    proc = await asyncio.create_subprocess_exec(
+        *args,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
     )
     stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-    out = stdout.decode().strip()
+    lines = sorted(stdout.decode(errors="replace").strip().splitlines())
+    out = "\n".join(lines[:100])
     return out or "(empty)", out[:500] if out else "(empty)"
 
 
 async def _grep(inp):
     pattern, path = inp["pattern"], inp.get("path", ".")
     include = inp.get("include", "")
-    rg_check = await asyncio.create_subprocess_shell(
-        "command -v rg",
+    rg_check = await asyncio.create_subprocess_exec(
+        "which", "rg",
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
     )
     await rg_check.communicate()
     if rg_check.returncode == 0:
-        cmd = f"rg -n --max-count 50 --no-heading"
+        args = ["rg", "-n", "--max-count", "50", "--no-heading"]
         if include:
-            cmd += f" -g '{include}'"
-        cmd += f" '{pattern}' '{path}'"
+            args += ["-g", include]
+        args += [pattern, path]
     else:
-        cmd = f"grep -rn"
+        args = ["grep", "-rn"]
         if include:
-            cmd += f" --include='{include}'"
-        cmd += f" '{pattern}' '{path}' | head -50"
-    proc = await asyncio.create_subprocess_shell(
-        cmd,
+            args += [f"--include={include}"]
+        args += [pattern, path]
+    proc = await asyncio.create_subprocess_exec(
+        *args,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
     )
     stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-    out = stdout.decode().strip()
+    out = stdout.decode(errors="replace").strip()
     lines = out.split("\n") if out else []
+    if len(lines) > 50:
+        lines = lines[:50]
+        out = "\n".join(lines)
     preview = "\n".join(lines[:20])
     if len(lines) > 20:
         preview += f"\n... ({len(lines) - 20} more)"

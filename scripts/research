@@ -60,18 +60,26 @@ _git_is_clean() {
 # Ensure target_file resolves under the current git repo (defense against ../ or absolute paths outside the tree).
 _research_assert_target_in_repo() {
     local target_file="$1"
-    local repo_root resolved parent
-    repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    local repo_root resolved
+    repo_root=$(cd "$(git rev-parse --show-toplevel 2>/dev/null)" && pwd -P) || {
         ui_fail "Not a git repository — cannot validate target path"
         return 1
     }
-    parent=$(dirname -- "$target_file")
-    resolved=$(cd "$parent" 2>/dev/null && pwd) || {
-        ui_fail "Target file path invalid: ${target_file}"
-        return 1
-    }
-    resolved="${resolved}/$(basename -- "$target_file")"
-    if [[ "$resolved" != "$repo_root" && "$resolved" != "$repo_root"/* ]]; then
+    if [[ -e "$target_file" ]]; then
+        resolved=$(cd "$(dirname -- "$target_file")" && pwd -P)/$(basename -- "$target_file")
+        # Follow symlinks to canonical path
+        if [[ -L "$target_file" ]]; then
+            resolved=$(python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$target_file" 2>/dev/null) || resolved=""
+        fi
+    else
+        local parent
+        parent=$(cd "$(dirname -- "$target_file")" 2>/dev/null && pwd -P) || {
+            ui_fail "Target file path invalid: ${target_file}"
+            return 1
+        }
+        resolved="${parent}/$(basename -- "$target_file")"
+    fi
+    if [[ -z "$resolved" || ("$resolved" != "$repo_root" && "$resolved" != "$repo_root"/*) ]]; then
         ui_fail "Target file resolves outside repository: ${target_file}"
         return 1
     fi
@@ -525,9 +533,9 @@ except:
         # Compare metrics
         local improved=false
         if [[ "$direction" == "lower" ]]; then
-            improved=$(python3 -c "print('true' if float('${experiment_metric}') < float('${best_metric}') else 'false')" 2>/dev/null)
+            improved=$(python3 -c "import sys; print('true' if float(sys.argv[1]) < float(sys.argv[2]) else 'false')" "$experiment_metric" "$best_metric" 2>/dev/null)
         else
-            improved=$(python3 -c "print('true' if float('${experiment_metric}') > float('${best_metric}') else 'false')" 2>/dev/null)
+            improved=$(python3 -c "import sys; print('true' if float(sys.argv[1]) > float(sys.argv[2]) else 'false')" "$experiment_metric" "$best_metric" 2>/dev/null)
         fi
 
         if [[ "$improved" == "true" ]]; then
