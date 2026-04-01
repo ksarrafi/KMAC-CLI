@@ -24,7 +24,7 @@ Type `kmac` and you get this:
     ██╔═██╗  ██║╚██╔╝██║ ██╔══██║ ██║
     ██║  ██╗ ██║ ╚═╝ ██║ ██║  ██║ ╚██████╗
     ╚═╝  ╚═╝ ╚═╝     ╚═╝ ╚═╝  ╚═╝  ╚═════╝
-        portable macOS toolkit                       v2.9.0
+        portable macOS toolkit                       v3.0.0
 
   ┌ services ──────────────────────────────────────────┐
   │  ● Remote Terminal   ● Docker (8)   ○ ngrok        │
