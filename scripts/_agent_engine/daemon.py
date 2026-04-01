@@ -28,6 +28,7 @@ log = logging.getLogger("kmac-agent")
 
 TASK_POLL_INTERVAL = 5
 MAX_CONCURRENT_TASKS = 2
+MAX_REQUEST_SIZE = 4 * 1024 * 1024  # 4 MB
 
 
 class AgentDaemon:
@@ -71,8 +72,13 @@ class AgentDaemon:
     async def handle_connection(self, reader: asyncio.StreamReader,
                                 writer: asyncio.StreamWriter):
         try:
-            data = await asyncio.wait_for(reader.readline(), timeout=10)
+            data = await asyncio.wait_for(
+                reader.readuntil(b"\n"), timeout=10
+            )
             if not data:
+                return
+            if len(data) > MAX_REQUEST_SIZE:
+                self._write_err(writer, "Request too large")
                 return
             request = json.loads(data.decode())
             action = request.get("action", "")
@@ -82,6 +88,8 @@ class AgentDaemon:
                 await writer.drain()
         except asyncio.TimeoutError:
             self._write_err(writer, "Request timeout")
+        except (asyncio.LimitOverrunError, asyncio.IncompleteReadError):
+            self._write_err(writer, "Request too large")
         except json.JSONDecodeError:
             self._write_err(writer, "Invalid JSON")
         except ConnectionResetError:
@@ -378,8 +386,12 @@ class AgentDaemon:
         mid = req.get("id")
         if not mid:
             return {"type": "error", "message": "No memory ID"}
+        try:
+            mid_int = int(mid)
+        except (ValueError, TypeError):
+            return {"type": "error", "message": "Invalid memory ID (must be numeric)"}
         agent = req.get("agent", "default")
-        self._get_db(agent).delete_memory(int(mid))
+        self._get_db(agent).delete_memory(mid_int)
         return {"type": "result", "data": {"deleted": mid}}
 
     # ── tasks ────────────────────────────────────────────────────────
@@ -850,8 +862,8 @@ class AgentDaemon:
     def _notify(self, title: str, body: str):
         """Send a notification via macOS notification center and/or Telegram."""
         import subprocess as sp
-        safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
-        safe_body = body.replace("\\", "\\\\").replace('"', '\\"')
+        safe_title = title.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").replace("\r", "")
+        safe_body = body.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").replace("\r", "")
         try:
             sp.run([
                 "osascript", "-e",

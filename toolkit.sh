@@ -856,7 +856,9 @@ _VAULT_EXPORT_FILE=""
 _VAULT_BG_PID=""
 
 _start_vault_export_bg() {
-    _VAULT_EXPORT_FILE="$KMAC_CACHE_DIR/.vault-env.$$"
+    local _vault_dir
+    _vault_dir=$(mktemp -d "${TMPDIR:-/tmp}/kmac-vault.XXXXXX") && chmod 700 "$_vault_dir"
+    _VAULT_EXPORT_FILE="$_vault_dir/env"
     (
         _vault_load_registry 2>/dev/null
         for (( _vi=0; _vi<${#_REG_SERVICES[@]}; _vi++ )); do
@@ -877,7 +879,9 @@ _finish_vault_export() {
     fi
     if [[ -f "${_VAULT_EXPORT_FILE:-}" ]]; then
         source "$_VAULT_EXPORT_FILE" 2>/dev/null
-        rm -f "$_VAULT_EXPORT_FILE"
+        local _vault_dir
+        _vault_dir=$(dirname "$_VAULT_EXPORT_FILE")
+        rm -rf "$_vault_dir"
         _VAULT_EXPORT_FILE=""
     fi
 }

@@ -199,17 +199,13 @@ cmd_init() {
     time_budget="${user_budget:-$time_budget}"
 
     echo ""
-    echo -e "  ${BOLD}Research goal / context${NC} ${DIM}(optional, press Enter twice to skip)${NC}"
+    echo -e "  ${BOLD}Research goal / context${NC} ${DIM}(optional, press Enter to skip)${NC}"
     local goal=""
-    local empty_count=0
     while IFS= read -r line; do
         if [[ -z "$line" ]]; then
-            ((empty_count++))
-            (( empty_count >= 1 )) && break
-        else
-            empty_count=0
-            goal+="$line"$'\n'
+            break
         fi
+        goal+="$line"$'\n'
     done
 
     # Create program.md from template

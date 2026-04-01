@@ -16,13 +16,30 @@ from pathlib import Path
 log = logging.getLogger("kmac-agent")
 
 WEB_PORT = int(os.environ.get("KMAC_AGENT_WEB_PORT", "7891"))
+MAX_BODY_SIZE = 65536
 
 _DAEMON_REF = None
+_WEB_TOKEN = None
 
 
 def set_daemon(daemon):
     global _DAEMON_REF
     _DAEMON_REF = daemon
+
+
+def _init_web_token():
+    """Generate and persist a bearer token for the dashboard API."""
+    global _WEB_TOKEN
+    from .config import AGENT_HOME
+    import secrets
+    token_file = AGENT_HOME / "web-token"
+    if token_file.exists():
+        _WEB_TOKEN = token_file.read_text().strip()
+    if not _WEB_TOKEN:
+        _WEB_TOKEN = secrets.token_urlsafe(32)
+        token_file.write_text(_WEB_TOKEN)
+        os.chmod(str(token_file), 0o600)
+    return _WEB_TOKEN
 
 
 _HTML = """\
@@ -71,10 +88,13 @@ td{color:#c9d1d9}
 <div class="footer">KmacAgent · auto-refreshes every 10s</div>
 <script>
 const API = '';
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
 async function fetchJSON(action, params={}) {
+  const headers = {'Content-Type': 'application/json'};
+  if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
   const r = await fetch('/api', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers,
     body: JSON.stringify({action, ...params})
   });
   return r.json();
@@ -155,13 +175,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(_HTML.encode())
 
+    def _check_auth(self) -> bool:
+        if not _WEB_TOKEN:
+            return True
+        auth = self.headers.get("Authorization", "")
+        if auth == f"Bearer {_WEB_TOKEN}":
+            return True
+        token_param = ""
+        if "?" in self.path:
+            from urllib.parse import parse_qs, urlparse
+            token_param = parse_qs(urlparse(self.path).query).get("token", [""])[0]
+        if token_param == _WEB_TOKEN:
+            return True
+        return False
+
     def do_POST(self):
         if self.path != "/api":
             self.send_response(404)
             self.end_headers()
             return
 
-        length = int(self.headers.get("Content-Length", 0))
+        if not self._check_auth():
+            self._json_response({"error": "Unauthorized"}, 401)
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            self._json_response({"error": "Bad Content-Length"}, 400)
+            return
+        if length > MAX_BODY_SIZE:
+            self._json_response({"error": "Request too large"}, 413)
+            return
+
         body = self.rfile.read(length)
         try:
             req = json.loads(body)
@@ -213,12 +259,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
 def start_web_server(daemon, port=None):
     """Start the web dashboard in a background thread."""
     set_daemon(daemon)
+    token = _init_web_token()
     actual_port = port or WEB_PORT
     try:
         server = HTTPServer(("127.0.0.1", actual_port), DashboardHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        log.info("Web dashboard started at http://127.0.0.1:%d", actual_port)
+        log.info("Web dashboard started at http://127.0.0.1:%d?token=%s", actual_port, token[:8] + "...")
         return server
     except OSError as e:
         log.warning("Web dashboard failed to start on port %d: %s", actual_port, e)

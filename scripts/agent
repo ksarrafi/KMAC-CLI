@@ -77,12 +77,19 @@ cmd_start() {
         return 0
     fi
     mkdir -p "$AGENT_HOME"
+    chmod 700 "$AGENT_HOME"
     _ensure_claude_auth || exit 1
 
-    nohup env \
+    local _env_file="$AGENT_HOME/.daemon-env"
+    printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" > "$_env_file"
+    chmod 600 "$_env_file"
+
+    nohup env -i \
+        PATH="$PATH" \
+        HOME="$HOME" \
         PYTHONPATH="$SCRIPT_DIR" \
-        ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-        python3 -m _agent_engine daemon \
+        KMAC_AGENT_HOME="$AGENT_HOME" \
+        bash -c 'set -a; source "$1"; set +a; exec python3 -m _agent_engine daemon' _ "$_env_file" \
         >> "$AGENT_LOG" 2>&1 &
     local pid=$!
     echo "$pid" > "$AGENT_PID"
@@ -314,12 +321,16 @@ case "$subcmd" in
     profiles)    _auto_start && _engine profiles-list "$@" ;;
     web)
         _auto_start
-        local port
+        local port token
         port=$(_engine status 2>/dev/null | grep -o '"web_port": *[0-9]*' | grep -o '[0-9]*' || echo "7891")
+        token=""
+        [[ -f "$AGENT_HOME/web-token" ]] && token=$(cat "$AGENT_HOME/web-token" 2>/dev/null)
+        local url="http://127.0.0.1:${port:-7891}"
+        [[ -n "$token" ]] && url="${url}?token=${token}"
         if command -v open &>/dev/null; then
-            open "http://127.0.0.1:${port:-7891}"
+            open "$url"
         else
-            echo "  Open http://127.0.0.1:${port:-7891} in your browser"
+            echo "  Open $url in your browser"
         fi ;;
     logs)        tail -f "$AGENT_LOG" ;;
     -h|--help|help) show_help ;;

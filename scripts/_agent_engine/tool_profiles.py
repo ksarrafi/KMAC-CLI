@@ -88,8 +88,11 @@ def filter_tools(all_tools: list[dict], agent_config: dict) -> list[dict]:
     allow_list = tools_cfg.get("allow", [])
     deny_list = tools_cfg.get("deny", [])
 
-    # Start with profile base set
-    profile = PROFILES.get(profile_name, None)
+    if profile_name not in PROFILES:
+        log.warning("Unknown tool profile '%s' — falling back to 'safe'", profile_name)
+        profile_name = "safe"
+
+    profile = PROFILES[profile_name]
 
     if profile is None:
         allowed = None  # all tools

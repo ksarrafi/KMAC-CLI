@@ -196,6 +196,9 @@ class MCPManager:
             extra_env = cfg.get("env", {})
             if not command:
                 continue
+            if not isinstance(extra_env, dict):
+                log.warning("MCP %s: 'env' must be a dict, ignoring", name)
+                extra_env = {}
 
             server = MCPServer(name, command, args, extra_env=extra_env)
             if await server.start():

@@ -65,7 +65,10 @@ def load_workflow(workflow_id: str, workspace: str = ".") -> dict | None:
         USER_DIR,
         BUILTIN_DIR,
     ]:
-        fp = directory / f"{workflow_id}.json"
+        fp = (directory / f"{workflow_id}.json").resolve()
+        if not fp.is_relative_to(directory.resolve()):
+            log.warning("Blocked workflow path traversal: %s", workflow_id)
+            continue
         if fp.exists():
             return json.loads(fp.read_text())
     return None
