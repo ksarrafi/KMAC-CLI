@@ -1140,7 +1140,6 @@ case "${1:-}" in
     overview)   do_overview ;;
     diagnose)
         echo -e "\n  ${DIM}Analyzing disk usage...${NC}"
-        local context
         context=$(df -h / 2>/dev/null && echo "---" && du -sh ~/Library/Caches ~/Library/Developer ~/.cache 2>/dev/null)
         agent_diagnose "Analyze disk usage and suggest what to clean up:\n\n$context"
         ;;

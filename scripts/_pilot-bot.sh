@@ -274,15 +274,15 @@ Task: _${task_desc}_"
         local rc=0
         case "$(pilot_agent)" in
             cursor)
-                cursor agent "$task_desc" >> "$PILOT_AGENT_LOG" 2>&1
+                printf '%s\0' "$task_desc" | xargs -0 cursor agent >> "$PILOT_AGENT_LOG" 2>&1
                 rc=$?
                 ;;
             kmac-agent)
-                bash "$SCRIPT_DIR/agent" ask "$task_desc" >> "$PILOT_AGENT_LOG" 2>&1
+                printf '%s\0' "$task_desc" | xargs -0 bash "$SCRIPT_DIR/agent" ask >> "$PILOT_AGENT_LOG" 2>&1
                 rc=$?
                 ;;
             *)
-                claude --print "$task_desc" >> "$PILOT_AGENT_LOG" 2>&1
+                printf '%s' "$task_desc" | claude --print - >> "$PILOT_AGENT_LOG" 2>&1
                 rc=$?
                 ;;
         esac
@@ -438,7 +438,7 @@ cmd_approve() {
 
     git -C "$project_dir" add -A 2>/dev/null
     local commit_output
-    commit_output=$(git -C "$project_dir" commit -m "$message" 2>&1)
+    commit_output=$(printf '%s' "$message" | git -C "$project_dir" commit -F - 2>&1)
     local rc=$?
 
     if (( rc == 0 )); then
@@ -520,15 +520,15 @@ Follow-up question: "
 
         case "$(pilot_agent)" in
             cursor)
-                cursor agent "$prompt" >> "$PILOT_AGENT_LOG" 2>&1
+                printf '%s\0' "$prompt" | xargs -0 cursor agent >> "$PILOT_AGENT_LOG" 2>&1
                 rc=$?
                 ;;
             kmac-agent)
-                bash "$SCRIPT_DIR/agent" ask "$prompt" >> "$PILOT_AGENT_LOG" 2>&1
+                printf '%s\0' "$prompt" | xargs -0 bash "$SCRIPT_DIR/agent" ask >> "$PILOT_AGENT_LOG" 2>&1
                 rc=$?
                 ;;
             *)
-                claude --print "$prompt" >> "$PILOT_AGENT_LOG" 2>&1
+                printf '%s' "$prompt" | claude --print - >> "$PILOT_AGENT_LOG" 2>&1
                 rc=$?
                 ;;
         esac

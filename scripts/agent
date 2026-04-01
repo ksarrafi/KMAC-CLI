@@ -315,11 +315,11 @@ case "$subcmd" in
     web)
         _auto_start
         local port
-        port=$(_engine status 2>/dev/null | grep -o '"web_port": *[0-9]*' | grep -o '[0-9]*' || echo "7890")
+        port=$(_engine status 2>/dev/null | grep -o '"web_port": *[0-9]*' | grep -o '[0-9]*' || echo "7891")
         if command -v open &>/dev/null; then
-            open "http://127.0.0.1:${port:-7890}"
+            open "http://127.0.0.1:${port:-7891}"
         else
-            echo "  Open http://127.0.0.1:${port:-7890} in your browser"
+            echo "  Open http://127.0.0.1:${port:-7891} in your browser"
         fi ;;
     logs)        tail -f "$AGENT_LOG" ;;
     -h|--help|help) show_help ;;

@@ -103,7 +103,7 @@ class FileWatcher:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
             )
             self._processes.append(proc)
             log.info("Watch %s started: %s", wid, " ".join(abs_paths))

@@ -57,6 +57,42 @@ _git_is_clean() {
     [[ -z "$(git status --porcelain 2>/dev/null)" ]]
 }
 
+# Ensure target_file resolves under the current git repo (defense against ../ or absolute paths outside the tree).
+_research_assert_target_in_repo() {
+    local target_file="$1"
+    local repo_root resolved parent
+    repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+        ui_fail "Not a git repository — cannot validate target path"
+        return 1
+    }
+    parent=$(dirname -- "$target_file")
+    resolved=$(cd "$parent" 2>/dev/null && pwd) || {
+        ui_fail "Target file path invalid: ${target_file}"
+        return 1
+    }
+    resolved="${resolved}/$(basename -- "$target_file")"
+    if [[ "$resolved" != "$repo_root" && "$resolved" != "$repo_root"/* ]]; then
+        ui_fail "Target file resolves outside repository: ${target_file}"
+        return 1
+    fi
+    return 0
+}
+
+# eval_cmd is a shell pipeline by design (from program.md, set at init by the user — not from AI output).
+# Reject nested command substitution and pipe-to-shell patterns to limit injection if program.md were ever tainted.
+_research_validate_eval_cmd() {
+    local cmd="$1"
+    if [[ "$cmd" == *'$('* || "$cmd" == *'`'* ]]; then
+        ui_fail "Eval command rejected: must not use \$(...) or backticks"
+        return 1
+    fi
+    if [[ "$cmd" =~ \|[^|]*[[:space:]]*(ba)?sh([[:space:]]|$) ]]; then
+        ui_fail "Eval command rejected: piping to sh/bash is not allowed"
+        return 1
+    fi
+    return 0
+}
+
 _notify_telegram() {
     local msg="$1"
     if [[ -f "$SCRIPT_DIR/_pilot-lib.sh" ]]; then
@@ -66,10 +102,10 @@ _notify_telegram() {
         chat_id=$(pilot_chat_id 2>/dev/null)
         if [[ -n "$token" && -n "$chat_id" ]]; then
             curl -sf --max-time 5 \
-                "https://api.telegram.org/bot${token}/sendMessage" \
-                -d "chat_id=${chat_id}" \
-                -d "text=${msg}" \
-                -d "parse_mode=Markdown" &>/dev/null &
+                -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+                --data-urlencode "chat_id=${chat_id}" \
+                --data-urlencode "text=${msg}" \
+                --data-urlencode "parse_mode=Markdown" &>/dev/null &
         fi
     fi
 }
@@ -299,6 +335,9 @@ cmd_run() {
         return 1
     fi
 
+    _research_assert_target_in_repo "$target_file" || return 1
+    _research_validate_eval_cmd "$eval_cmd" || return 1
+
     time_budget="${time_budget:-$DEFAULT_TIME_BUDGET}"
     direction="${direction:-lower}"
 
@@ -457,9 +496,10 @@ except:
         ui_info "Hypothesis: ${hypothesis}"
 
         # Apply the change
+        _research_assert_target_in_repo "$target_file" || { ui_fail "Refusing to write outside repository"; break; }
         echo "$new_code" > "$target_file"
         git add "$target_file" 2>/dev/null
-        git commit -m "research: ${hypothesis}" --no-verify 2>/dev/null
+        printf 'research: %s' "$hypothesis" | git commit -F - --no-verify 2>/dev/null
 
         # Run the experiment
         local experiment_metric
@@ -528,6 +568,9 @@ _${hypothesis}_"
 _run_single_experiment() {
     local eval_cmd="$1" metric_pattern="$2" time_budget="$3"
     local logfile="${RESEARCH_DIR}/experiment.log"
+
+    # eval_cmd is intentionally executed as a shell command (see program.md / init). Not AI-generated.
+    _research_validate_eval_cmd "$eval_cmd" || return 1
 
     ui_info "Running: ${eval_cmd}"
     timeout "${time_budget}" bash -c "$eval_cmd" > "$logfile" 2>&1

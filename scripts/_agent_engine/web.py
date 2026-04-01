@@ -1,6 +1,6 @@
 """Web UI — lightweight HTTP dashboard for the KmacAgent daemon.
 
-Serves a single-page dashboard at http://localhost:7890 showing
+Serves a single-page dashboard at http://localhost:7891 (default; see WEB_PORT) showing
 agent status, sessions, memories, tasks, and token usage.
 Uses only Python's built-in http.server — no external dependencies.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 
 log = logging.getLogger("kmac-agent")
 
-WEB_PORT = int(os.environ.get("KMAC_AGENT_WEB_PORT", "7890"))
+WEB_PORT = int(os.environ.get("KMAC_AGENT_WEB_PORT", "7891"))
 
 _DAEMON_REF = None
 

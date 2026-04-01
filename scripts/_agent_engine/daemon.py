@@ -48,6 +48,8 @@ class AgentDaemon:
         self._plugins: list[dict] = []
         self._heartbeats: dict[str, float] = {}
         self._heartbeat_timeout = 120
+        self._session_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._stopping = False
 
     # ── database helpers ─────────────────────────────────────────────
 
@@ -169,40 +171,44 @@ class AgentDaemon:
             yield {"type": "error", "message": "No message provided"}
             return
 
-        self._heartbeats[agent_name] = time.time()
-        db = self._get_db(agent_name)
-        agent_cfg = db.get_agent(agent_name) or {
-            "model": DEFAULT_MODEL,
-            "system_prompt": DEFAULT_SYSTEM_PROMPT,
-            "context": "",
-        }
+        sk = (agent_name, session_id or "")
+        if sk not in self._session_locks:
+            self._session_locks[sk] = asyncio.Lock()
+        async with self._session_locks[sk]:
+            self._heartbeats[agent_name] = time.time()
+            db = self._get_db(agent_name)
+            agent_cfg = db.get_agent(agent_name) or {
+                "model": DEFAULT_MODEL,
+                "system_prompt": DEFAULT_SYSTEM_PROMPT,
+                "context": "",
+            }
 
-        # Apply per-request model override
-        req_model = request.get("model")
-        if req_model:
-            agent_cfg = dict(agent_cfg)
-            agent_cfg["model"] = MODEL_SHORTCUTS.get(req_model, req_model)
+            # Apply per-request model override
+            req_model = request.get("model")
+            if req_model:
+                agent_cfg = dict(agent_cfg)
+                agent_cfg["model"] = MODEL_SHORTCUTS.get(req_model, req_model)
 
-        if session_id:
-            sess = db.get_session(session_id)
-            if sess:
-                messages = json.loads(sess["messages"])
+            if session_id:
+                sess = db.get_session(session_id)
+                if sess:
+                    messages = json.loads(sess["messages"])
+                else:
+                    sess = db.create_session(agent_name, session_id)
+                    messages = []
             else:
-                sess = db.create_session(agent_name, session_id)
+                sess = db.create_session(agent_name)
+                session_id = sess["id"]
                 messages = []
-        else:
-            sess = db.create_session(agent_name)
-            session_id = sess["id"]
-            messages = []
 
-        yield {"type": "session", "id": session_id}
+            yield {"type": "session", "id": session_id}
 
-        async for event in runtime.process_message(
-            message, agent_cfg, messages, db, agent_name
-        ):
-            yield event
+            async for event in runtime.process_message(
+                message, agent_cfg, messages, db, agent_name
+            ):
+                yield event
 
-        db.update_session(session_id, messages)
+            db.update_session(session_id, messages)
 
     # ── status ───────────────────────────────────────────────────────
 
@@ -452,7 +458,8 @@ class AgentDaemon:
             return {"type": "error", "message": f"Task {tid} not found"}
         if task["status"] not in ("pending", "approved"):
             return {"type": "error", "message": f"Task {tid} cannot run (status: {task['status']})"}
-        asyncio.ensure_future(self._execute_task(agent_name, task))
+        async_task = asyncio.ensure_future(self._execute_task(agent_name, task))
+        self._running_tasks[tid] = async_task
         return {"type": "result", "data": {"started": tid}}
 
     # ── task runner background loop ──────────────────────────────────
@@ -917,12 +924,18 @@ class AgentDaemon:
 
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.ensure_future(self.stop()))
+            loop.add_signal_handler(sig, self._request_stop)
 
         try:
             await self._server.serve_forever()
         except asyncio.CancelledError:
             pass
+
+    def _request_stop(self):
+        if self._stopping:
+            return
+        self._stopping = True
+        asyncio.ensure_future(self.stop())
 
     async def stop(self):
         log.info("Shutting down...")

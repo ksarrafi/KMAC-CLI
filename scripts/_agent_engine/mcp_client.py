@@ -56,7 +56,7 @@ class MCPServer:
                 self.command, *self.args,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
             )
             self._reader_task = asyncio.ensure_future(self._read_loop())
 

@@ -2,43 +2,17 @@
 
 ## 3.0.0 — 2026-03-29
 
-### New: KMac Assistant — Personal AI Gateway (`A` / `kmac assistant`)
-- **Always-on TypeScript service** on port 7891 with WebSocket control plane
-- **Claude agent with tool use**: bash execution, file operations, grep, web fetch, system info
-- **Multi-channel messaging**: Telegram and Discord adapters with chat commands (`/new`, `/status`, `/tools`, `/help`)
-- **Persistent sessions** with conversation history and context management
-- **Skills system**: loadable skill files from `~/.config/kmac/assistant/skills/`
-- **Cron scheduler** for recurring AI tasks
-- **REST API + WebSocket gateway** with token auth
-- **Browser dashboard** at service root URL showing live status and API reference
-- CLI: `kmac assistant start`, `kmac assistant chat`, `kmac assistant status`
-
-### New: KMac Orchestrator — Multi-Agent Task Management (`O` / `kmac orchestrator`)
-- **Agent adapters**: Claude Code, Cursor Agent, KMac Assistant, generic shell commands
-- **Task dispatch system** with status tracking (pending → running → completed/failed)
-- **Cost tracking**: per-task and per-agent token/USD spend with budget limits
-- **Approval workflow**: tasks can require human approval before execution
-- **Heartbeat monitoring**: periodic agent health checks with timeout detection
-- **REST API** on port 7892 with web dashboard
-- **Browser dashboard** showing agent status, task stats, and cost summary
-- CLI: `kmac orchestrator start`, `kmac orchestrator task`, `kmac orchestrator costs`
-
-### New: Skill Optimizer — Karpathy Autoresearch (`G` / `kmac skillopt`)
-- **Iterative skill improvement** using the Karpathy autoresearch pattern
-- **Automated eval generation**: point at a SKILL.md, generates test cases and criteria
-- **Judge LLM scoring**: evaluates skill output against criteria using Claude
-- **Self-healing loop**: baseline → refine → eval → keep/discard → repeat
-- **Version history**: tracks optimization iterations with before/after scores
-- CLI: `kmac skillopt init`, `kmac skillopt run`, `kmac skillopt status`
-
 ### Removed
-- **Paperclip** (`w`) and **OpenClaw** (`l`) external integrations — replaced by native KMac Assistant and Orchestrator
+- **TypeScript stacks** — KMac Assistant, KMac Orchestrator, and Skill Optimizer (former `assistant/` and `orchestrator/` trees). Functionality lives in **KmacAgent** (`scripts/agent`, `scripts/_agent_engine/`) instead.
+- **Paperclip** (`w`) and **OpenClaw** (`l`) external integrations — removed in favor of in-repo agent tooling.
+
+### Added / changed
+- **KmacAgent** (`A` in the menu / `kmac agent`) — Python daemon with tool use, profiles, memory, background and scheduled tasks, MCP integration, and an optional **web dashboard** (default **http://127.0.0.1:7891**, overridable with `KMAC_AGENT_WEB_PORT`).
+- **CLI compatibility** — `kmac assistant`, `kmac ai`, `kmac orchestrator` / `kmac orch`, and `kmac skillopt` are **aliases** that invoke the same entry point as `kmac agent`.
+- **Ports** — **Pilot** REST/WebSocket API remains on **7890** (`KMAC_PORT`). **KmacAgent** dashboard is **7891** by default (not Pilot).
 
 ### Improved
-- **Menu reorganization**: AI & Research section now includes Assistant, Orchestrator, and Skill Optimizer
-- **Browser landing pages**: Assistant and Orchestrator serve live dashboards at their root URLs
-- **Chrome DevTools**: `.well-known` probe returns 204 instead of 404 for both services
-- **Menu explanations**: Assistant and Orchestrator interactive menus include "What is this?" and "How to use it" sections
+- **Main menu** (`print_menu`) — three columns (AI & Research, Dev, Infra) plus System rows and numbered **Plugins** slots, aligned with current `toolkit.sh`.
 
 ## 2.9.0 — 2026-03-22
 

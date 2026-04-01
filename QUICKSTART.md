@@ -27,17 +27,22 @@ kmac help         # All CLI commands
 
 | Key | Action | Key | Action |
 |-----|--------|-----|--------|
-| `a` | Ask Claude | `r` | Remote Terminal |
-| `+` | Build a Tool (AI) | `d` | Docker Manager |
-| `p` | Project Launcher | `n` | Network Info |
-| `e` | Claude Code | `k` | Kill Port |
-| `x` | Cursor Agent | `S` | Storage Manager |
-| `v` | Code Review | `b` | Backup Dotfiles |
-| `c` | Smart Commit | `u` | Check Updates |
-| `P` | Pilot (remote agent) | `.` | Secrets & Keys |
-| `?` | Health Check | `q` | Connection QR |
-| `B` | Bootstrap Mac | `i` | Install/Update |
-| `o` | Ollama (Local AI) | `I` | Software Manager |
+| `a` | Ask Claude | `d` | Docker Manager |
+| `A` | KmacAgent (tools) | `r` | Remote Terminal |
+| `o` | Ollama (Local AI) | `P` | Pilot (remote) |
+| `+` | AI Toolmaker | `n` | Network Info |
+| `R` | Research (autorun) | `k` | Kill Port |
+| `p` | Project Launcher | `S` | Storage Manager |
+| `e` | Claude Code | `.` | Secrets & Keys |
+| `x` | Cursor Agent | `u` | Check Updates |
+| `v` | Code Review | `i` | Install / Bootstrap |
+| `c` | Smart Commit | `I` | Software Manager |
+| `?` | Health Check | `b` | Backup Dotfiles |
+| `/` | Aliases | `0` | Exit |
+
+**Plugins:** keys `1`–`7` when installed (e.g. System Cleanup, Wi‑Fi Password, Git Stats, Docker Notify, Git Guardian, Project Stats, Tmux Sessions).
+
+**Ports:** Pilot API server **7890** (`kmac pilot server start` / `kmac server start`). KmacAgent dashboard **7891** by default (`kmac agent web`).
 
 ## Everyday Commands
 
@@ -52,6 +57,8 @@ kmac storage big
 kmac make "a script that monitors SSL certs"
 kmac killport 3000
 kmac project
+kmac agent start              # KmacAgent daemon (menu A)
+kmac agent web                # Open agent dashboard (default :7891)
 ```
 
 ## Software Manager

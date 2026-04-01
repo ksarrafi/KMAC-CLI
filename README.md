@@ -13,7 +13,7 @@
 
 ---
 
-KMac-CLI is a portable macOS & Linux toolkit that puts AI coding assistants, Docker infrastructure, storage management, and remote agent control behind a single interactive terminal menu — or as direct CLI commands. It's built entirely in Bash (3.2-compatible) with a Python API server and a native iOS companion app. Install via Homebrew with `brew tap ksarrafi/kmac && brew install kmac`, or clone from GitHub as below.
+KMac-CLI is a portable macOS & Linux toolkit that puts AI coding assistants, Docker infrastructure, storage management, and remote agent control behind a single interactive terminal menu — or as direct CLI commands. The core is Bash (3.2-compatible), with a **Python Pilot API** (`server/`, default port **7890**), a **Python KmacAgent** daemon and optional web dashboard (default **7891**), and a native iOS companion app. No Node.js or npm is required for the toolkit itself. Install via Homebrew with `brew tap ksarrafi/kmac && brew install kmac`, or clone from GitHub as below.
 
 Type `kmac` and you get this:
 
@@ -29,19 +29,22 @@ Type `kmac` and you get this:
   ┌ services ──────────────────────────────────────────┐
   │  ● Remote Terminal   ● Docker (8)   ○ ngrok        │
   └────────────────────────────────────────────────────┘
+  (Live menu also shows a system row: disk, load, uptime, battery.)
 
     AI & Research              Dev                       Infra
     a  Ask Claude             p  Project Launcher       d  Docker Manager
-    o  Ollama (Local AI)      e  Claude Code            r  Remote Terminal
-    +  AI Toolmaker           x  Cursor Agent           P  Pilot (remote)
-    R  Research (autorun)     v  Code Review            n  Network Info
-    A  KMac Assistant         c  Smart Commit           k  Kill Port
-    O  KMac Orchestrator      G  Skill Optimizer
+    A  KmacAgent (tools)      e  Claude Code            r  Remote Terminal
+    o  Ollama (Local AI)      x  Cursor Agent           P  Pilot (remote)
+    +  AI Toolmaker           v  Code Review            n  Network Info
+    R  Research (autorun)     c  Smart Commit           k  Kill Port
 
     System
     S  Storage Manager        u  Check Updates          b  Backup Dotfiles
     .  Secrets & Keys         i  Install / Bootstrap    I  Software Manager
     ?  Health Check           /  Aliases
+
+    Plugins  1–7  System Cleanup, Wi-Fi Password, Git Stats, Docker Notify,
+               Git Guardian, Project Stats, Tmux Sessions
 
     0  Exit
 ```
@@ -148,36 +151,11 @@ Core capabilities:
 - **Export/import** — backup and restore agent profiles, memories, and schedules
 - **KMAC tool integration** — other scripts can `source _agent-hook.sh` for `agent_ask`, `agent_diagnose`, `agent_remember`, `agent_task`
 - **Pilot integration** — use KmacAgent as the AI backend for Telegram-based remote control
+- **Web dashboard** — `kmac agent web` opens the agent status UI (default **http://127.0.0.1:7891**; override with `KMAC_AGENT_WEB_PORT`)
+
+**Legacy CLI names** — for compatibility, `kmac assistant`, `kmac ai`, `kmac orchestrator` / `kmac orch`, and `kmac skillopt` are routed to **`kmac agent`** (same script). Prefer `kmac agent …` in new scripts and docs.
 
 **AI Self-Healing** — built into every tool. When a command fails, KMac catches the error output, sends it to Claude with context about what was attempted, and presents a suggested fix command. Handles shell environments like nvm and rvm automatically. You choose to apply the fix, retry, or skip.
-
-**KMac Assistant** (`A` / `kmac assistant`) — a personal AI gateway that runs as an always-on TypeScript service. Features a WebSocket control plane, Claude agent with tool use (bash, file ops, grep, web fetch, system info), persistent sessions, and multi-channel messaging. Message your AI from Telegram, Discord, or the CLI and get back tool-augmented responses.
-
-```bash
-kmac assistant start          # Start the gateway on :7891
-kmac assistant chat           # Interactive CLI chat with tool use
-kmac ai chat                  # Alias
-```
-
-Features: Telegram and Discord channel adapters with chat commands (`/new`, `/status`, `/compact`, `/help`, `/tools`, `/whoami`), skills system (`~/.config/kmac/assistant/skills/`), cron scheduler for recurring tasks, webhook endpoint for external triggers, REST API + WebSocket gateway with OpenClaw-compatible req/res/event protocol.
-
-**KMac Orchestrator** (`O` / `kmac orchestrator`) — a multi-agent task management platform. Dispatch tasks to Claude Code, Cursor Agent, KMac Assistant, or shell commands through a unified API. Built-in cost tracking, approval workflows, and heartbeat monitoring. Runs as a TypeScript service with a web dashboard.
-
-```bash
-kmac orchestrator start          # Start on :7892
-kmac orchestrator task "migrate auth to MSAL" --agent=claude-code
-kmac orchestrator agents         # List registered agents + status
-kmac orchestrator costs          # Token/USD spend summary
-kmac orchestrator approve <id>   # Approve a pending task
-```
-
-**Skill Optimizer** (`G` / `kmac skillopt`) — Karpathy-style autoresearch loop for iteratively improving AI skill files (SKILL.md). Generates test cases, evaluates skill performance with a judge LLM, and refines instructions until a target success rate is met.
-
-```bash
-kmac skillopt init <skill-dir>   # Generate eval config for a skill
-kmac skillopt run <skill-dir>    # Run optimization loop
-kmac skillopt status             # Show all skills + eval scores
-```
 
 ---
 
@@ -259,7 +237,7 @@ Run AI coding agents on your Mac and control them from anywhere — your phone, 
 
 Includes heartbeat streaming — periodic status updates with elapsed time and output preview so you can monitor progress without polling.
 
-**API Server** (`kmac pilot server start`) — Python aiohttp backend running on port 7890 with auto-generated token auth. Provides REST endpoints for system info, project discovery, file browsing, git operations, Docker management, and shell execution. Multi-session agent management via PTY-based streaming — run multiple agents concurrently with real-time output over WebSocket. ANSI escape code stripping for clean terminal output. Command execution uses an allowlist + blocklist security model (blocks destructive commands like `rm -rf /`, `sudo`, fork bombs, and piping curl to shell).
+**API Server** (`kmac pilot server start`) — Python aiohttp **Pilot** backend on port **7890** (set `KMAC_PORT` to change) with auto-generated token auth. This is separate from the **KmacAgent** web dashboard (**7891** by default). Provides REST endpoints for system info, project discovery, file browsing, git operations, Docker management, and shell execution. Multi-session agent management via PTY-based streaming — run multiple agents concurrently with real-time output over WebSocket. ANSI escape code stripping for clean terminal output. Command execution uses an allowlist + blocklist security model (blocks destructive commands like `rm -rf /`, `sudo`, fork bombs, and piping curl to shell).
 
 **iOS App** (KMacPilot) — native SwiftUI companion built with XcodeGen. Connects to the API server and provides:
 - Dashboard with system info, uptime, active agent, and session count
@@ -380,7 +358,7 @@ kmac dotbackup hook            # Install auto-backup on shell exit
 
 **Update Check** (`u` / `kmac update`) — checks for outdated Homebrew packages, npm globals (including Claude Code), and dotfile freshness. Animated spinner during version checks. Caches results for 4 hours to avoid redundant network calls. If a brew or npm update fails, offers AI-assisted diagnosis. Can actually run updates with `--update`.
 
-**Bootstrap Mac** (`B`) — new-machine setup in one command. Export your current Brewfile (captures every brew, cask, and tap), install from a Brewfile on a fresh Mac, apply macOS preferences (Dock auto-hide, key repeat speed, Finder path bar, screenshot location), or run the full bootstrap (all of the above plus the toolkit installer).
+**Install / Bootstrap** (`i` in the menu) — new-machine setup in one place. Export your current Brewfile (captures every brew, cask, and tap), install from a Brewfile on a fresh Mac, apply macOS preferences (Dock auto-hide, key repeat speed, Finder path bar, screenshot location), or run the full bootstrap (all of the above plus the toolkit installer).
 
 **New Mac Setup** (`scripts/setup-mac`) — end-to-end bootstrap for a fresh Mac. Installs Homebrew, Oh My Zsh with plugins, runs the KMac installer, restores your backed-up dotfiles, installs Brewfile packages, and launches the vault guided setup for API keys — all in one script.
 
@@ -416,7 +394,7 @@ Plugins can also declare lifecycle hooks via a header comment (comma-separated):
 
 **Plugin API v2 — lifecycle hooks.** Eleven hooks are available: `pre-commit`, `post-commit`, `pre-review`, `post-review`, `pre-deploy`, `post-deploy`, `on-error`, `on-startup`, `on-exit`, `session-start`, and `session-end`. They are wired into `aicommit`, `review`, and the toolkit main loop. Failed hooks log warnings and never block the main flow. See **`plugins/REGISTRY.md`** for the full plugin catalog, hook reference, and authoring guide.
 
-**Built-in plugins:** `git-stats` (repo insights), `git-guardian` (pre-commit secret scanning), `docker-notify` (container health alerts), `project-stats` (repo metrics), `tmux-session` (session manager), `cleanup` (system cleanup), `wifi-password`.
+**Built-in plugins** (menu keys `1`–`7` when present): **cleanup** (system cleanup), **wifi-password**, **git-stats**, **docker-notify**, **git-guardian**, **project-stats**, **tmux-session**.
 
 Plugins also work as CLI subcommands: `kmac git-guardian` will find and execute `plugins/git-guardian.sh`.
 
@@ -531,6 +509,7 @@ Configure your domain in `deploy/Caddyfile` for automatic Let's Encrypt TLS.
 │  │ ask      │  │ docker   │  │ storage  │  │ _pilot-bot.sh │  │
 │  │ review   │  │ docker-  │  │          │  │ _pilot-lib.sh │  │
 │  │ aicommit │  │  health  │  │          │  │ pilot (CLI)   │  │
+│  │ agent    │  │          │  │          │  │               │  │
 │  │ toolmaker│  │          │  │          │  │               │  │
 │  └──────────┘  └──────────┘  └──────────┘  └───────┬───────┘  │
 │       │              │             │                │          │
@@ -539,34 +518,18 @@ Configure your domain in `deploy/Caddyfile` for automatic Let's Encrypt TLS.
 │  └──────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────┬────────────────────────────┘
                                      │
-┌────────────────────────────────────┴────────────────────────────┐
-│  server/ (Python aiohttp)          port 7890                    │
-│  app.py ─┬─ session_manager.py     PTY agent streaming          │
-│          ├─ docker_ops.py          Container/image operations   │
-│          ├─ docker_dashboard.py    Health API + web UI          │
-│          ├─ projects.py            Deep git repo discovery      │
-│          ├─ git_ops.py             Diff, approve, reject        │
-│          ├─ system_ops.py          Disk, memory, processes      │
-│          └─ static/                Web dashboards               │
-└────────────────────────────────────┬────────────────────────────┘
+         ┌───────────────────────────┴───────────────────────────┐
+         │                                                       │
+┌────────┴────────────────────────────────────────┐  ┌───────────┴──────────────────────────────────┐
+│  server/ (Python aiohttp) — Pilot API           │  │  scripts/_agent_engine/ (Python) — KmacAgent │
+│  Default port 7890 (KMAC_PORT)                  │  │  Daemon + optional HTTP dashboard           │
+│  app.py, session_manager.py, docker_*, etc.     │  │  Default web UI port 7891 (KMAC_AGENT_WEB_PORT) │
+│  REST + WebSocket for iOS / remote control      │  │  Invoked via scripts/agent → toolkit menu A   │
+└─────────────────────────────────────────────────┘  └───────────────────────────────────────────────┘
                                      │
 ┌────────────────────────────────────┴────────────────────────────┐
-│  assistant/ (TypeScript)           port 7891                    │
-│  gateway.ts — WebSocket + REST API, Claude tool use, sessions   │
-│  channels/ — Telegram, Discord adapters                         │
-│  skills.ts — skill loading, cron.ts — scheduled tasks           │
-└────────────────────────────────────┬────────────────────────────┘
-                                     │
-┌────────────────────────────────────┴────────────────────────────┐
-│  orchestrator/ (TypeScript)        port 7892                    │
-│  server.ts — REST API, task dispatch, agent registry            │
-│  agents/ — claude-code, cursor, assistant, shell adapters       │
-│  costs.ts, approvals.ts, heartbeat.ts                           │
-└────────────────────────────────────┬────────────────────────────┘
-                                     │
-┌────────────────────────────────────┴────────────────────────────┐
-│  ios/KMacPilot/ (SwiftUI)                                       │
-│  Dashboard · Sessions · Terminal · Files · Git · Docker · Shell  │
+│  ios/KMacPilot/ (SwiftUI) — talks to Pilot server :7890         │
+│  Dashboard · Sessions · Terminal · Files · Git · Docker · Shell │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -623,34 +586,9 @@ KMac-CLI/
 │   ├── install-aicoder     AICoder global installer
 │   ├── server             Server lifecycle manager (start/stop/status/install)
 │   ├── remote-access      Secure remote access (Tailscale/Cloudflare/ngrok)
-│   ├── assistant           KMac Assistant manager (start|stop|chat|status)
-│   ├── orchestrator        KMac Orchestrator manager (start|stop|task|agents|costs)
-│   ├── skillopt            Skill Optimizer CLI (init|run|status)
-│   └── create-aicoder.sh   Create global 'aicoder' command
-├── assistant/              KMac Assistant (TypeScript)
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── src/
-│       ├── gateway.ts      WebSocket + REST gateway
-│       ├── config.ts       Configuration loader
-│       ├── types.ts        Type definitions
-│       ├── skills.ts       Skill loading system
-│       ├── cron.ts         Scheduled task runner
-│       ├── optimizer.ts    Skill Optimizer CLI (Karpathy loop)
-│       └── channels/       Telegram, Discord adapters
-├── orchestrator/           KMac Orchestrator (TypeScript)
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── src/
-│       ├── index.ts        Entry point
-│       ├── server.ts       REST API + web dashboard
-│       ├── types.ts        Core types
-│       ├── config.ts       Configuration
-│       ├── tasks.ts        Task store + dispatch
-│       ├── costs.ts        Cost tracking
-│       ├── approvals.ts    Approval workflow
-│       ├── heartbeat.ts    Agent health monitor
-│       └── agents/         Adapters (claude-code, cursor, assistant, shell)
+│   ├── agent              KmacAgent CLI (daemon, chat, tasks, memory, web UI)
+│   ├── create-aicoder.sh   Create global 'aicoder' command
+│   └── _agent_engine/      KmacAgent Python daemon, MCP, memory, web dashboard
 ├── deploy/
 │   ├── Caddyfile            Reverse proxy config (TLS termination)
 │   ├── com.kmac.pilot.plist macOS launchd service definition
@@ -685,20 +623,13 @@ KMac-CLI/
 
 ## API Endpoints
 
-The Python server exposes a REST + WebSocket API for the iOS app, web dashboards, and automation.
+The **Pilot** server (`server/`, default **7890**) exposes the REST + WebSocket API below for the iOS app, Docker web UI integration, and automation.
+
+**KmacAgent** serves a separate, minimal **dashboard** over HTTP on **7891** by default (`KMAC_AGENT_WEB_PORT`); open it with `kmac agent web`. It is not the same service as Pilot and does not share the table below.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/ping` | Health check (no auth) |
-| GET | `/health` (Assistant :7891) | Assistant health check |
-| GET | `/api/sessions` (Assistant) | List chat sessions |
-| POST | `/api/sessions/:id/message` | Send message to session |
-| GET | `/api/tools` (Assistant) | List available tools |
-| WS | `/ws` (Assistant) | WebSocket gateway |
-| GET | `/api/agents` (Orchestrator :7892) | List agents |
-| GET | `/api/tasks` (Orchestrator) | List tasks |
-| POST | `/api/tasks` (Orchestrator) | Create task |
-| GET | `/api/costs` (Orchestrator) | Cost summary |
 | GET | `/api/system` | Hostname, uptime, load, active agent |
 | GET | `/api/projects` | List discovered git repositories |
 | GET | `/api/files/tree` | File tree for a project |

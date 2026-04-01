@@ -114,14 +114,13 @@ _claude_ask() {
             --arg msg "$prompt" \
             '{model: $model, max_tokens: $max_tokens, messages: [{role: "user", content: $msg}]}')
     else
-        json_body=$(cat <<ENDJSON
-{
-    "model": "$model",
-    "max_tokens": $max_tokens,
-    "messages": [{"role": "user", "content": $(echo "$prompt" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')}]
-}
-ENDJSON
-)
+        json_body=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'model': sys.argv[1],
+    'max_tokens': int(sys.argv[2]),
+    'messages': [{'role': 'user', 'content': sys.stdin.read()}]
+}))" "$model" "$max_tokens" <<< "$prompt")
     fi
 
     local response
