@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "name": "KMAC comprehensive check (CI parity in Iso)",
+  "description": "bash -n, ShellCheck (same file set as .github/workflows/ci.yml), then full tests/run-tests.sh",
+  "steps": [
+    {
+      "name": "bash-syntax",
+      "run": "set -e; for f in toolkit.sh install.sh scripts/tron; do echo \"syntax: $f\"; bash -n \"$f\"; done; echo OK syntax"
+    },
+    {
+      "name": "shellcheck",
+      "run": "if command -v shellcheck >/dev/null 2>&1; then shellcheck --severity=error tests/run-tests.sh tests/test_toolkit.sh tests/test_ui.sh tests/test_vault.sh tests/test_software.sh tests/test_plugins.sh tests/test_dotbackup.sh tests/test_install.sh tests/test_tron.sh scripts/_ui.sh scripts/_vault.sh scripts/software scripts/dotbackup scripts/tron; else echo 'shellcheck not in image — skip'; fi"
+    },
+    {
+      "name": "smoke-tests",
+      "run": "bash tests/run-tests.sh"
+    }
+  ]
+}

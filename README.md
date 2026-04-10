@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 ![Docker](https://img.shields.io/badge/Docker-MCP%20Ready-2496ED)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/Tests-68%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-74%20passing-brightgreen)
 ![Homebrew](https://img.shields.io/badge/Homebrew-brew%20install%20kmac-FBB040)
 
 ---
@@ -235,7 +235,23 @@ kmac tron run -- your-command
 
 **Environment** — `KMAC_TRON_IMAGE` (default `kmac/tron-iso:latest`), `KMAC_TRON_POOL_ROOT` for pool state under `~/.cache/kmac/tron`. Image definition: `docker/tron/Dockerfile`.
 
-**CLI reference:** `kmac tron help`
+**CLI reference:** `kmac tron help` — see also [docs/TRON-SWARM.md](docs/TRON-SWARM.md) for swarm-style blueprints and **`kmac tron swarm`**.
+
+**Comprehensive check (CI parity in one Iso)** — same gates as GitHub Actions locally in Docker: `bash -n` on key scripts, **ShellCheck** on the CI file set, then **`tests/run-tests.sh`**:
+
+```bash
+kmac tron check                 # defaults to current directory (KMAC-CLI repo)
+kmac tron check ~/Projects/other-repo
+```
+
+**Blueprints** — JSON files with `name` and `steps[]` / `run` shell snippets, executed in order inside one Iso (`scripts/_tron/blueprints/` has `kmac-check.json` and `example.json`):
+
+```bash
+kmac tron blueprint scripts/_tron/blueprints/example.json
+kmac tron blueprint -w ~/Projects/MyApp my-blueprint.json
+```
+
+**Other commands:** `kmac tron swarm` (bundled quick scan blueprint), `kmac tron demo` (quick sanity), `kmac tron runs` (tail run history), `kmac tron run --secure -- …` (hardened container: read-only root, `no-new-privileges`, `cap-drop ALL`). Pool sync honors **`.tronignore`** (rsync exclude list). The Iso image includes **ripgrep** (`rg`) for fast code search inside Docker.
 
 ---
 
@@ -470,10 +486,11 @@ The **software installer** translates Homebrew-oriented commands to the **native
 
 ### 11. Testing & CI
 
-The repo ships **68 smoke tests** across **nine test files**, driven by a **lightweight Bash test runner** with **no extra dependencies**. **GitHub Actions** runs a **matrix** on **macOS and Ubuntu** and includes **ShellCheck**. Run the suite locally:
+The repo ships **74 bash smoke checks** across **nine test files**, plus **`server/test_smoke.py`** on CI. **GitHub Actions** runs the bash suite, **Pilot Python smoke**, and **ShellCheck** on selected scripts. Run locally:
 
 ```bash
 bash tests/run-tests.sh
+cd server && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/python test_smoke.py
 ```
 
 ---
@@ -588,6 +605,8 @@ KMac-CLI/
 ├── Brewfile                Homebrew package manifest for Bootstrap
 ├── VERSION                 Single source of truth for version
 ├── CHANGELOG.md
+├── docs/
+│   └── TRON-SWARM.md       Tron swarm / blueprint notes
 ├── .github/
 │   └── workflows/
 │       └── ci.yml          GitHub Actions CI
@@ -607,7 +626,8 @@ KMac-CLI/
 │   ├── pilot               Pilot CLI (start/stop/config/server/status)
 │   ├── docker              Docker Manager — Engine API + MCP + Compose
 │   ├── docker-health       Docker health report (--json, --history)
-│   ├── tron                Tron — Docker Isos (build, run, pool)
+│   ├── tron                Tron — Docker Isos (build, run, pool, blueprints, check)
+│   ├── _tron/blueprints/   Bundled JSON blueprints (kmac-check, swarm-review, …)
 │   ├── storage             Storage Manager — disk analysis + AI + iCloud
 │   ├── secrets             Credential manager + integration hub
 │   ├── software            Software installer & manager (30+ tools)
@@ -746,7 +766,7 @@ cd ios/KMacPilot && xcodegen generate && open KMacPilot.xcodeproj
 - **Plugin protocol** — three comment headers in a script. That's it. No registration, no config files, no compilation.
 - **Cross-platform** — `_platform.sh` provides a compatibility layer so the same scripts work on macOS and Linux. It wraps OS-specific operations (clipboard, keychain, notifications, package management) behind unified functions.
 - **Lifecycle hooks** — plugins can register for eleven lifecycle events without modifying core code. Failed hooks log warnings but never block the main flow.
-- **Tested** — 68 smoke tests run on every push via GitHub Actions across macOS and Ubuntu.
+- **Tested** — Bash smoke suite + Pilot `test_smoke.py` + ShellCheck on every push (macOS and Ubuntu).
 - **Portable** — works from a git clone or synced from iCloud Drive. The installer detects which and configures paths accordingly.
 
 ## Contributing

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "example",
+  "description": "Minimal two-step blueprint — copy to your repo and edit",
+  "steps": [
+    { "name": "where", "run": "pwd && ls -la | head -5" },
+    { "name": "git", "run": "git status -sb 2>/dev/null || echo '(no git)'" }
+  ]
+}

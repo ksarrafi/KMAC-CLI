@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# tron — Tron control plane: Docker-isolated Iso runs (one job per container by default;
-# optional warm pool with per-slot workspace reset). See: kmac tron help
+# tron — Tron control plane: Docker Isos (ephemeral runs, optional pool, blueprints, CI-parity checks).
 #
 # Env:
-#   KMAC_TRON_IMAGE       — image tag (default kmac/tron-iso:latest)
-#   KMAC_TRON_POOL_ROOT   — state dir (default ~/.cache/kmac/tron)
-#   KMAC_TRON_POOL_SIZE   — default slot count for `pool start` (default 2)
+#   KMAC_TRON_IMAGE          — image tag (default kmac/tron-iso:latest)
+#   KMAC_TRON_POOL_ROOT      — state dir (default ~/.cache/kmac/tron)
+#   KMAC_TRON_POOL_SIZE      — default slot count for pool start (default 2)
+#   KMAC_TRON_LOCK_TIMEOUT_SEC — pool slot wait (default 300)
+#   KMAC_TRON_NO_LOG         — set to 1 to disable run history logging
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLKIT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -15,7 +16,10 @@ source "$SCRIPT_DIR/_ui.sh"
 KMAC_TRON_IMAGE="${KMAC_TRON_IMAGE:-kmac/tron-iso:latest}"
 DOCKERFILE="$TOOLKIT_DIR/docker/tron/Dockerfile"
 POOL_ROOT="${KMAC_TRON_POOL_ROOT:-${HOME}/.cache/kmac/tron}"
+LOG_DIR="$POOL_ROOT/runs"
+BLUEPRINTS_DIR="$TOOLKIT_DIR/scripts/_tron/blueprints"
 _TRON_LOCK_DIR=""
+KMAC_TRON_LOCK_TIMEOUT_SEC="${KMAC_TRON_LOCK_TIMEOUT_SEC:-300}"
 
 tron_cleanup_lock() {
     if [[ -n "${_TRON_LOCK_DIR:-}" ]] && [[ -d "${_TRON_LOCK_DIR:-}" ]]; then
@@ -55,17 +59,29 @@ ensure_image() {
     cmd_build
 }
 
-# mkdir-based lock (macOS-friendly; no flock required)
+_tron_log_event() {
+    [[ "${KMAC_TRON_NO_LOG:-}" == "1" ]] && return 0
+    local event="$1"
+    local detail="${2:-}"
+    mkdir -p "$LOG_DIR"
+    local ts
+    ts=$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date)
+    printf '%s [%s] %s\n' "$ts" "$event" "$detail" >> "$LOG_DIR/history.log"
+}
+
+# mkdir-based lock (macOS-friendly)
 _acquire_pool_lock() {
     local slot="$1"
     local lockdir="$POOL_ROOT/locks/slot-$slot"
     local tries=0
+    local max
+    max=$(( KMAC_TRON_LOCK_TIMEOUT_SEC * 10 ))
     mkdir -p "$POOL_ROOT/locks"
     while ! mkdir "$lockdir" 2>/dev/null; do
-        sleep 0.15
+        sleep 0.1
         tries=$((tries + 1))
-        if (( tries > 2000 )); then
-            ui_fail "timeout waiting for pool slot $slot (another Iso holds the lock)"
+        if (( tries > max )); then
+            ui_fail "timeout waiting for pool slot $slot (${KMAC_TRON_LOCK_TIMEOUT_SEC}s)"
             return 1
         fi
     done
@@ -80,7 +96,6 @@ _release_pool_lock() {
 _reset_pool_workspace_host() {
     local pws="$1"
     mkdir -p "$pws"
-    # shellcheck disable=SC2115
     find "$pws" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
 }
 
@@ -88,7 +103,11 @@ _sync_workdir_to_pool() {
     local src="$1"
     local dst="$2"
     if command -v rsync &>/dev/null; then
-        rsync -a --delete "$src"/ "$dst"/
+        if [[ -f "$src/.tronignore" ]]; then
+            rsync -a --delete --exclude-from="$src/.tronignore" "$src"/ "$dst"/
+        else
+            rsync -a --delete "$src"/ "$dst"/
+        fi
     else
         _reset_pool_workspace_host "$dst"
         cp -a "$src"/. "$dst"/
@@ -98,9 +117,9 @@ _sync_workdir_to_pool() {
 cmd_pool_start() {
     local n="${1:-${KMAC_TRON_POOL_SIZE:-2}}"
     case "$n" in
-        ''|*[!0-9]*) ui_fail "pool size must be a number (1–32)"; return 1 ;;
+        '' | *[!0-9]*) ui_fail "pool size must be a number (1–32)"; return 1 ;;
     esac
-    (( n >= 1 && n <= 32 )) || {
+    ((n >= 1 && n <= 32)) || {
         ui_fail "pool size must be between 1 and 32"
         return 1
     }
@@ -117,6 +136,7 @@ cmd_pool_start() {
             continue
         fi
         docker run -d --name "$name" \
+            --security-opt no-new-privileges \
             -v "$ws:/workspace" \
             -w /workspace \
             "$KMAC_TRON_IMAGE" \
@@ -151,9 +171,9 @@ cmd_pool_status() {
     docker ps -a --filter "name=kmac-tron-pool-" --format "table {{.Names}}\t{{.Status}}\t{{.Mounts}}" 2>/dev/null || true
     echo ""
     ui_dim "pool root: $POOL_ROOT"
+    ui_dim "run logs: $LOG_DIR/history.log"
 }
 
-# pool_run SLOT WORKDIR [cmd ...]
 cmd_pool_run() {
     local slot="$1"
     local workdir="$2"
@@ -194,6 +214,8 @@ cmd_pool_run() {
     local ttyflag=()
     [[ -t 0 ]] && ttyflag=(-it)
 
+    _tron_log_event "pool-exec-start" "slot=$slot wd=$workdir cmd=${usercmd[*]}"
+
     docker exec "${ttyflag[@]}" \
         -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
         -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}" \
@@ -203,6 +225,7 @@ cmd_pool_run() {
         /usr/local/bin/iso-entry "${usercmd[@]}"
 
     local ec=$?
+    _tron_log_event "pool-exec-done" "exit=$ec slot=$slot"
     ui_info "post-run reset for slot $slot..."
     docker exec "$name" bash -c 'find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true' || true
     _release_pool_lock
@@ -210,11 +233,186 @@ cmd_pool_run() {
     return "$ec"
 }
 
-# Ephemeral Iso: new container per run (--rm)
+# Generate bash script from JSON blueprint (requires python3 on host)
+_blueprint_emit_script() {
+    local bpfile="$1"
+    command -v python3 &>/dev/null || {
+        ui_fail "python3 required on host to run blueprints"
+        return 1
+    }
+    BLUEPRINT_JSON="$bpfile" python3 <<'PY'
+import json, sys, re, os
+path = os.environ["BLUEPRINT_JSON"]
+with open(path, encoding="utf-8") as f:
+    data = json.load(f)
+lines = [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "cd /workspace",
+    'echo "══ Tron blueprint: %s ══"' % data.get("name", "unnamed"),
+]
+for i, st in enumerate(data.get("steps", []), 1):
+    name = st.get("name", str(i))
+    run = (st.get("run") or "").strip()
+    if not run:
+        continue
+    safe = re.sub(r"['\"\\\\]", "", name[:60])
+    lines.append("echo ''")
+    lines.append('echo ">>> Step %d: %s"' % (i, safe))
+    lines.append(run)
+print("\n".join(lines))
+PY
+}
+
+cmd_blueprint() {
+    local workdir="$PWD"
+    local bpfile=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -w | --workdir)
+                workdir="${2:-}"
+                [[ -n "$workdir" ]] || {
+                    ui_fail "--workdir needs a path"
+                    return 1
+                }
+                workdir="$(cd "$workdir" 2>/dev/null && pwd)" || {
+                    ui_fail "cannot cd to workdir: $workdir"
+                    return 1
+                }
+                shift 2
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                if [[ -z "$bpfile" ]]; then
+                    bpfile="$1"
+                    shift
+                    break
+                fi
+                ui_fail "unexpected argument: $1"
+                return 1
+                ;;
+        esac
+    done
+    [[ -n "$bpfile" ]] || {
+        ui_fail "usage: kmac tron blueprint [-w DIR] <file.json>"
+        return 1
+    }
+    if [[ "$bpfile" != /* ]]; then
+        bpfile="$workdir/$bpfile"
+    fi
+    [[ -f "$bpfile" ]] || {
+        ui_fail "blueprint not found: $bpfile"
+        return 1
+    }
+
+    docker_ok || return 1
+    ensure_image || return 1
+
+    local tf
+    tf=$(mktemp "${TMPDIR:-/tmp}/tron-bp.XXXXXX") || return 1
+    _blueprint_emit_script "$bpfile" >"$tf" || {
+        rm -f "$tf"
+        return 1
+    }
+    chmod +x "$tf"
+
+    local ttyflag=()
+    [[ -t 0 ]] && ttyflag=(-it)
+
+    _tron_log_event "blueprint-start" "file=$bpfile wd=$workdir"
+
+    docker run --rm "${ttyflag[@]}" \
+        --read-only \
+        --tmpfs /tmp:rw,exec,size=128m \
+        --security-opt no-new-privileges \
+        --cap-drop ALL \
+        -v "$workdir:/workspace:rw" \
+        -v "$tf:/tmp/tron-blueprint.sh:ro" \
+        -w /workspace \
+        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
+        -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}" \
+        -e "TERM=${TERM:-xterm-256color}" \
+        "$KMAC_TRON_IMAGE" \
+        bash /tmp/tron-blueprint.sh
+
+    local ec=$?
+    rm -f "$tf"
+    _tron_log_event "blueprint-done" "exit=$ec file=$bpfile"
+    return "$ec"
+}
+
+cmd_check() {
+    local wd="${1:-$PWD}"
+    wd="$(cd "$wd" 2>/dev/null && pwd)" || {
+        ui_fail "bad directory: $1"
+        return 1
+    }
+    local bp="$BLUEPRINTS_DIR/kmac-check.json"
+    [[ -f "$bp" ]] || {
+        ui_fail "bundled blueprint missing: $bp"
+        return 1
+    }
+    ui_info "Running comprehensive check (syntax + ShellCheck + tests) in Iso..."
+    cmd_blueprint -w "$wd" "$bp"
+}
+
+cmd_swarm() {
+    local wd="${1:-$PWD}"
+    wd="$(cd "$wd" 2>/dev/null && pwd)" || {
+        ui_fail "bad directory: $1"
+        return 1
+    }
+    local bp="$BLUEPRINTS_DIR/swarm-review.json"
+    [[ -f "$bp" ]] || {
+        ui_fail "bundled blueprint missing: $bp"
+        return 1
+    }
+    ui_info "Running swarm-style scan (TODO grep + size + hint) in Iso..."
+    cmd_blueprint -w "$wd" "$bp"
+}
+
+cmd_demo() {
+    docker_ok || return 1
+    ensure_image || return 1
+    local workdir
+    workdir="$(pwd)"
+    _tron_log_event "demo" "wd=$workdir"
+    ui_info "Tron demo — ephemeral Iso, one-shot..."
+    docker run --rm \
+        --read-only \
+        --tmpfs /tmp:rw,exec,size=64m \
+        --security-opt no-new-privileges \
+        --cap-drop ALL \
+        -v "$workdir:/workspace:rw" \
+        -w /workspace \
+        "$KMAC_TRON_IMAGE" \
+        bash -lc 'echo "✓ Iso OK  pwd=$(pwd)  uname=$(uname -s)"'
+    local ec=$?
+    _tron_log_event "demo-done" "exit=$ec"
+    return "$ec"
+}
+
+cmd_runs() {
+    local n="${1:-20}"
+    if [[ ! -f "$LOG_DIR/history.log" ]]; then
+        ui_info "no run history yet (LOG_DIR=$LOG_DIR)"
+        return 0
+    fi
+    echo ""
+    ui_info "last entries from history.log:"
+    echo ""
+    tail -n "$n" "$LOG_DIR/history.log"
+    echo ""
+}
+
 cmd_run() {
     local workdir="$PWD"
     local pool_slot=""
     local -a docker_extra=()
+    local secure_mode="0"
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -w | --workdir)
@@ -236,6 +434,14 @@ cmd_run() {
             --network)
                 docker_extra+=(--network "${2:-}")
                 shift 2
+                ;;
+            --env-file)
+                docker_extra+=(--env-file "${2:-}")
+                shift 2
+                ;;
+            --secure)
+                secure_mode="1"
+                shift
                 ;;
             --)
                 shift
@@ -268,33 +474,54 @@ cmd_run() {
     local ttyflag=()
     [[ -t 0 ]] && ttyflag=(-it)
 
+    if [[ "$secure_mode" == "1" ]]; then
+        docker_extra+=(--read-only --tmpfs /tmp:rw,exec,size=128m --security-opt no-new-privileges --cap-drop ALL)
+    fi
+
+    _tron_log_event "run-start" "wd=$workdir secure=$secure_mode cmd=${usercmd[*]}"
+
     docker run --rm "${ttyflag[@]}" "${docker_extra[@]}" \
-        -v "$workdir:/workspace" \
+        -v "$workdir:/workspace:rw" \
         -w /workspace \
         -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
         -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}" \
         -e "TERM=${TERM:-xterm-256color}" \
         "$KMAC_TRON_IMAGE" \
         "${usercmd[@]}"
+
+    local ec=$?
+    _tron_log_event "run-done" "exit=$ec"
+    return "$ec"
 }
 
 print_help() {
     title_box "Tron — Isos (Docker)" "◆"
-    echo -e "  ${DIM}Ephemeral default: one container per run (--rm). Optional warm pool:${NC}"
-    echo -e "  ${DIM}  pool start → run --pool N → pool stop. Workspace reset between pool runs.${NC}"
+    echo -e "  ${DIM}Ephemeral runs (default), warm pool, JSON blueprints, CI-parity check.${NC}"
     echo ""
-    echo -e "  ${BOLD}Usage:${NC}"
+    echo -e "  ${BOLD}Core${NC}"
     echo "    kmac tron build              Build Iso image ($KMAC_TRON_IMAGE)"
-    echo "    kmac tron run [-w DIR] [--] [command...]   Ephemeral Iso (default shell: bash -l)"
+    echo "    kmac tron run [-w DIR] [--secure] [--env-file F] [--network NAME] [--] cmd..."
     echo "    kmac tron iso ...            Alias for run"
     echo ""
-    echo "    kmac tron pool start [N]     Warm N slots (default \$KMAC_TRON_POOL_SIZE or 2)"
-    echo "    kmac tron pool status        Image + pool containers"
-    echo "    kmac tron pool stop          Remove all kmac-tron-pool-* containers"
-    echo "    kmac tron run --pool SLOT -w DIR [--] cmd   Run in slot (sync + lock + reset)"
+    echo -e "  ${BOLD}Blueprints${NC} ${DIM}(JSON: name, steps[].name, steps[].run)${NC}"
+    echo "    kmac tron blueprint [-w DIR] path/to.json"
+    echo "    kmac tron check [DIR]       Bundled kmac-check: bash -n + ShellCheck + tests"
+    echo "    kmac tron swarm [DIR]       Bundled swarm-review (scan + sizes + hint)"
+    echo "    kmac tron demo              Quick sanity check in Iso"
     echo ""
-    echo -e "  ${BOLD}Env:${NC} KMAC_TRON_IMAGE, ANTHROPIC_API_KEY, OPENAI_API_KEY"
-    echo -e "  ${DIM}Secrets: run ${NC}kmac secrets export${DIM} in the host shell before tron.${NC}"
+    echo -e "  ${BOLD}Pool${NC}"
+    echo "    kmac tron pool start [N]     Warm N slots"
+    echo "    kmac tron pool status"
+    echo "    kmac tron pool stop"
+    echo "    kmac tron run --pool SLOT -w DIR [--] cmd"
+    echo ""
+    echo -e "  ${BOLD}History${NC}"
+    echo "    kmac tron runs [N]           Tail last N lines of run log"
+    echo ""
+    echo -e "  ${DIM}Pool sync respects .tronignore in the source dir (rsync exclude).${NC}"
+    echo -e "  ${BOLD}--secure${NC} ${DIM}adds read-only root, tmpfs /tmp, no-new-privileges, cap-drop ALL.${NC}"
+    echo ""
+    echo -e "  ${BOLD}Bundled blueprints:${NC} $BLUEPRINTS_DIR"
     echo ""
 }
 
@@ -311,8 +538,23 @@ main() {
         run)
             cmd_run "$@"
             ;;
-        iso)
+        iso | exec)
             cmd_run "$@"
+            ;;
+        blueprint | bp)
+            cmd_blueprint "$@"
+            ;;
+        check)
+            cmd_check "$@"
+            ;;
+        swarm)
+            cmd_swarm "$@"
+            ;;
+        demo)
+            cmd_demo
+            ;;
+        runs | log | logs)
+            cmd_runs "${1:-20}"
             ;;
         pool)
             local sub="${1:-status}"
@@ -328,7 +570,7 @@ main() {
             esac
             ;;
         version)
-            echo "tron 1.0.0 (KMac-CLI)"
+            echo "tron 2.0.0 (KMac-CLI)"
             ;;
         *)
             ui_fail "unknown command: $cmd — try: kmac tron help"

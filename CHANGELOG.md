@@ -7,13 +7,19 @@
 - **Paperclip** (`w`) and **OpenClaw** (`l`) external integrations — removed in favor of in-repo agent tooling.
 
 ### Added / changed
-- **Tron — Docker Isos** (`t` in the menu / `kmac tron`) — control plane for disposable Docker jobs: build Iso image (`docker/tron/`), ephemeral `docker run --rm` by default, optional warm **pool** (`pool start|stop|status`) with per-slot workspace sync and reset. CLI: `kmac tron build`, `kmac tron run`, `kmac tron iso`, `kmac tron pool …`, `kmac tron help`.
+- **Tron — Docker Isos** (`t` in the menu / `kmac tron`) — control plane for disposable Docker jobs: Iso image (`docker/tron/`, ShellCheck + rsync inside), ephemeral runs, optional **pool**, **`.tronignore`** for pool rsync, run **history** (`~/.cache/kmac/tron/runs/history.log`). **Blueprints** (`kmac tron blueprint`): JSON `steps[].run` executed in one Iso. **`kmac tron check`**: bundled blueprint = `bash -n` + ShellCheck (CI file list) + full test suite. **`kmac tron demo`**, **`kmac tron runs`**, **`kmac tron run --secure`** (read-only root, `no-new-privileges`, `cap-drop ALL`). CLI: `kmac tron help`.
 - **KmacAgent** (`A` in the menu / `kmac agent`) — Python daemon with tool use, profiles, memory, background and scheduled tasks, MCP integration, and an optional **web dashboard** (default **http://127.0.0.1:7891**, overridable with `KMAC_AGENT_WEB_PORT`).
 - **CLI compatibility** — `kmac assistant`, `kmac ai`, `kmac orchestrator` / `kmac orch`, and `kmac skillopt` are **aliases** that invoke the same entry point as `kmac agent`.
 - **Ports** — **Pilot** REST/WebSocket API remains on **7890** (`KMAC_PORT`). **KmacAgent** dashboard is **7891** by default (not Pilot).
 
 ### Improved
 - **Main menu** (`print_menu`) — three columns (AI & Research, Dev, Infra) plus System rows and numbered **Plugins** slots, aligned with current `toolkit.sh`; **`t`** opens **Tron / Isos** instructions and quick actions.
+
+### Documentation & tooling (follow-up)
+- **CONTRIBUTING.md** — removed obsolete TypeScript `assistant/` / `orchestrator/` guidance; documented **Pilot** (`server/`), **`server/test_smoke.py`**, and **KmacAgent**.
+- **Homebrew formula** — stable tarball aligned to **v3.0.0** (sha256 for published archive).
+- **Pilot CI** — **`server/test_smoke.py`** runs on **macOS and Ubuntu** in GitHub Actions.
+- **Tron** — **`kmac tron swarm`**, **`scripts/_tron/blueprints/swarm-review.json`**, **`docs/TRON-SWARM.md`**; Iso image adds **ripgrep**.
 
 ## 2.9.0 — 2026-03-22
 

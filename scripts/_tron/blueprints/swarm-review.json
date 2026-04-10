@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "name": "Swarm-style repo scan (sequential steps in one Iso)",
+  "description": "TODO/FIXME grep, largest scripts, then reminder to run kmac tron check on the host",
+  "steps": [
+    {
+      "name": "todo-fixme-hits",
+      "run": "echo '=== TODO / FIXME / XXX (first 25, repo sources only) ===' && (grep -REIn '\\b(TODO|FIXME|XXX)\\b' --include='*.sh' --include='*.py' --include='*.md' --exclude-dir=.git --exclude-dir=.venv --exclude-dir=node_modules --exclude-dir=venv . 2>/dev/null | head -25) || true"
+    },
+    {
+      "name": "largest-scripts",
+      "run": "echo '=== Line counts (scripts/, top 10) ===' && wc -l scripts/* 2>/dev/null | sort -n | tail -10 || true"
+    },
+    {
+      "name": "next-step",
+      "run": "echo '' && echo 'Next on host: kmac tron check   # full CI-parity gate in Docker'"
+    }
+  ]
+}

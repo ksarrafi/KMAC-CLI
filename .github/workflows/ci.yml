@@ -33,6 +33,14 @@ jobs:
         run: ./tests/run-tests.sh
         working-directory: ${{ github.workspace }}
 
+      - name: Pilot server smoke (Python)
+        run: |
+          cd server
+          python3 -m venv .venv
+          .venv/bin/pip install -q -r requirements.txt
+          .venv/bin/python test_smoke.py
+        working-directory: ${{ github.workspace }}
+
       - name: ShellCheck (optional)
         run: |
           if command -v shellcheck >/dev/null 2>&1; then

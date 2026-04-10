@@ -53,17 +53,16 @@ Follow these conventions:
 - No `set -e` in interactive scripts (each tool handles its own errors).
 
 **Python (server)**
-- Python 3.9+ for the API server.
-- Use `aiohttp` for async routes.
-- JSON responses for all API endpoints.
+- Python 3.9+ for the **Pilot** API server (`server/`).
+- Use `aiohttp` for async routes; JSON responses for API endpoints.
+- Smoke test: from `server/`, create a venv, `pip install -r requirements.txt`, then `python test_smoke.py` (also run in CI).
 
-**TypeScript (assistant, orchestrator)**
-- TypeScript strict mode for `assistant/` and `orchestrator/` services.
-- Run with `tsx` (no build step needed for development).
-- Express.js for HTTP/REST, native `ws` for WebSocket.
-- Config stored in `~/.config/kmac/<service>/`.
-- PID files in `~/.config/kmac/<service>/` for process management.
-- Each service has a bash wrapper in `scripts/` (e.g., `scripts/assistant`, `scripts/orchestrator`).
+**Python (KmacAgent)**
+- **`scripts/_agent_engine/`** — daemon, tools, workflows; invoked by **`kmac agent`** (`scripts/agent`).
+- Tests: `scripts/_agent_engine/tests/` (run with `pytest` if you change the engine).
+
+**Deprecated removed stacks**
+- Older **TypeScript** `assistant/` and `orchestrator/` trees were removed; use **KmacAgent** instead. Do not reintroduce those paths in docs or scripts.
 
 **General**
 - No secrets, credentials, or machine-specific paths in committed code.
@@ -73,8 +72,11 @@ Follow these conventions:
 ### 4. Test
 
 ```bash
-# Run the full test suite (68 smoke tests)
+# Run the full test suite (74 bash smoke checks)
 bash tests/run-tests.sh
+
+# Pilot server smoke (aiohttp — from server/)
+cd server && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/python test_smoke.py && cd ..
 
 # Syntax-check all scripts
 for f in scripts/* toolkit.sh; do bash -n "$f" 2>/dev/null || echo "FAIL: $f"; done
@@ -113,6 +115,10 @@ Target your PR at `main`. Include:
 - What you changed and why
 - How to test it
 - Screenshots if it's UI-related
+
+## Large Bash scripts
+
+Some toolkit scripts are **very long** (`docker`, `storage`, `secrets`, `software`, etc.). Prefer **shared helpers** in `_*.sh` for new logic; splitting a giant script is a **large refactor**—open an issue or discuss in a PR before reorganizing whole files.
 
 ## Adding a Plugin
 

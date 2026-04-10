@@ -105,17 +105,23 @@ bash tests/run-tests.sh         # Run all smoke tests (nine test modules)
 Sandboxed commands in a container; repo mounted at `/workspace`. Requires Docker running.
 
 ```bash
-kmac tron build                 # Build Iso image (once)
+kmac tron build                 # Build Iso image (once; includes ShellCheck + rsync)
+kmac tron check                 # CI-parity: bash -n + ShellCheck + full tests/run-tests.sh
+kmac tron demo                  # Quick sanity Iso
 kmac tron run -- pwd            # Ephemeral Iso in current directory
+kmac tron run --secure -- ./tool  # Hardened: read-only root, cap-drop, no-new-privileges
+kmac tron blueprint path/to.json   # Multi-step JSON blueprint
+kmac tron swarm                 # Quick scan blueprint (see docs/TRON-SWARM.md)
+kmac tron runs                  # Tail run history (~/.cache/kmac/tron/runs/)
 kmac tron run -w ~/Projects/X -- git status
-kmac tron pool start 2          # Optional warm pool
+kmac tron pool start 2          # Optional warm pool (.tronignore = rsync excludes)
 kmac tron run --pool 1 -w . -- ./script.sh
 kmac tron pool stop
 eval "$(kmac secrets export)"   # Then run tron in the same shell for API keys
 kmac tron help                  # Full CLI
 ```
 
-Press **`t`** in the interactive menu for the same cheat sheet plus **b** (build), **s** (pool status), **r** (try Iso).
+Press **`t`** in the interactive menu: **b** build, **c** check, **d** demo, **s** pool status, **r** try Iso, **v** run log, **h** help.
 
 ## Docker Health
 

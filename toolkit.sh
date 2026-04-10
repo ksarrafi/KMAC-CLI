@@ -434,19 +434,24 @@ do_tron() {
     echo -e "  ${BOLD}Secrets${NC} ${DIM}(API keys inside the container):${NC}"
     echo -e "     ${GREEN}eval \"\$(kmac secrets export)\"${NC}   ${DIM}# then run tron in the same shell${NC}"
     echo ""
+    echo -e "  ${BOLD}Comprehensive check ${DIM}(in Docker)${NC} — ${GREEN}kmac tron check${NC} ${DIM}(bash -n + ShellCheck + full test suite)${NC}"
+    echo -e "  ${BOLD}Swarm scan ${DIM}(in Docker)${NC} — ${GREEN}kmac tron swarm${NC} ${DIM}(TODO/size scan — see docs/TRON-SWARM.md)${NC}"
     echo -e "  ${BOLD}CLI help:${NC} ${GREEN}kmac tron help${NC}   ${DIM}·${NC}   ${BOLD}Image:${NC} ${DIM}\$${NC}${BOLD}KMAC_TRON_IMAGE${NC} ${DIM}(default kmac/tron-iso:latest)${NC}"
     echo ""
-    echo -e "  ${GREEN}b${NC}) Build image now     ${GREEN}s${NC}) Pool status     ${GREEN}r${NC}) Try Iso ${DIM}(pwd)${NC}     ${GREEN}h${NC}) Print full help"
+    echo -e "  ${GREEN}b${NC}) Build     ${GREEN}c${NC}) Check ${DIM}(Iso)${NC}   ${GREEN}d${NC}) Demo   ${GREEN}s${NC}) Pool status   ${GREEN}r${NC}) Try Iso   ${GREEN}v${NC}) Run log   ${GREEN}h${NC}) Help"
     menu_back
     read -r -n1 -p "  > " _tronc
     echo ""
     case "$_tronc" in
         b | B) safe_run "Tron build" bash "$SCRIPTS_DIR/tron" build ;;
+        c | C) safe_run "Tron check" bash "$SCRIPTS_DIR/tron" check ;;
+        d | D) safe_run "Tron demo" bash "$SCRIPTS_DIR/tron" demo ;;
         s | S) bash "$SCRIPTS_DIR/tron" pool status ;;
         r | R) safe_run "Tron run" bash "$SCRIPTS_DIR/tron" run -- pwd ;;
+        v | V) bash "$SCRIPTS_DIR/tron" runs 25 ;;
         h | H) bash "$SCRIPTS_DIR/tron" help ;;
         m | M | "") return ;;
-        *) echo -e "  ${DIM}Unknown key — use b, s, r, h, or m for back.${NC}" ;;
+        *) echo -e "  ${DIM}Unknown key — b c d s r v h or m for back.${NC}" ;;
     esac
     pause
 }
@@ -1051,7 +1056,7 @@ if [[ $# -gt 0 ]]; then
             echo "    make \"description\"    Build a new tool with AI"
             echo "    research [cmd]        Autonomous experiment runner (init|run|status|review|stop)"
             echo "    ollama [cmd]          Local AI setup (install|models|serve|stop|status|chat)"
-            echo "    tron [cmd]            Docker Isos — build|run|pool (see tron help)"
+            echo "    tron [cmd]            Docker Isos — build|run|check|swarm|blueprint|pool|demo (see tron help)"
             echo ""
             echo -e "  ${BOLD}Dev${NC}"
             echo "    project               Project launcher with fzf"
