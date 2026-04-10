@@ -32,6 +32,7 @@ kmac help         # All CLI commands
 | `o` | Ollama (Local AI) | `P` | Pilot (remote) |
 | `+` | AI Toolmaker | `n` | Network Info |
 | `R` | Research (autorun) | `k` | Kill Port |
+| `t` | Tron / Isos (Docker) | — | — |
 | `p` | Project Launcher | `S` | Storage Manager |
 | `e` | Claude Code | `.` | Secrets & Keys |
 | `x` | Cursor Agent | `u` | Check Updates |
@@ -57,6 +58,7 @@ kmac storage big
 kmac make "a script that monitors SSL certs"
 kmac killport 3000
 kmac project
+kmac tron run -- pwd          # Tron: ephemeral Iso (menu t)
 kmac agent start              # KmacAgent daemon (menu A)
 kmac agent web                # Open agent dashboard (default :7891)
 ```
@@ -95,8 +97,25 @@ kmac ollama serve               # Start the Ollama server
 ## Run Tests
 
 ```bash
-bash tests/run-tests.sh         # Run all 60 smoke tests
+bash tests/run-tests.sh         # Run all smoke tests (nine test modules)
 ```
+
+## Tron — Docker Isos
+
+Sandboxed commands in a container; repo mounted at `/workspace`. Requires Docker running.
+
+```bash
+kmac tron build                 # Build Iso image (once)
+kmac tron run -- pwd            # Ephemeral Iso in current directory
+kmac tron run -w ~/Projects/X -- git status
+kmac tron pool start 2          # Optional warm pool
+kmac tron run --pool 1 -w . -- ./script.sh
+kmac tron pool stop
+eval "$(kmac secrets export)"   # Then run tron in the same shell for API keys
+kmac tron help                  # Full CLI
+```
+
+Press **`t`** in the interactive menu for the same cheat sheet plus **b** (build), **s** (pool status), **r** (try Iso).
 
 ## Docker Health
 

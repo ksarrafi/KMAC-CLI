@@ -7,12 +7,13 @@
 - **Paperclip** (`w`) and **OpenClaw** (`l`) external integrations — removed in favor of in-repo agent tooling.
 
 ### Added / changed
+- **Tron — Docker Isos** (`t` in the menu / `kmac tron`) — control plane for disposable Docker jobs: build Iso image (`docker/tron/`), ephemeral `docker run --rm` by default, optional warm **pool** (`pool start|stop|status`) with per-slot workspace sync and reset. CLI: `kmac tron build`, `kmac tron run`, `kmac tron iso`, `kmac tron pool …`, `kmac tron help`.
 - **KmacAgent** (`A` in the menu / `kmac agent`) — Python daemon with tool use, profiles, memory, background and scheduled tasks, MCP integration, and an optional **web dashboard** (default **http://127.0.0.1:7891**, overridable with `KMAC_AGENT_WEB_PORT`).
 - **CLI compatibility** — `kmac assistant`, `kmac ai`, `kmac orchestrator` / `kmac orch`, and `kmac skillopt` are **aliases** that invoke the same entry point as `kmac agent`.
 - **Ports** — **Pilot** REST/WebSocket API remains on **7890** (`KMAC_PORT`). **KmacAgent** dashboard is **7891** by default (not Pilot).
 
 ### Improved
-- **Main menu** (`print_menu`) — three columns (AI & Research, Dev, Infra) plus System rows and numbered **Plugins** slots, aligned with current `toolkit.sh`.
+- **Main menu** (`print_menu`) — three columns (AI & Research, Dev, Infra) plus System rows and numbered **Plugins** slots, aligned with current `toolkit.sh`; **`t`** opens **Tron / Isos** instructions and quick actions.
 
 ## 2.9.0 — 2026-03-22
 

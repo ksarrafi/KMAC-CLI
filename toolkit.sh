@@ -368,6 +368,7 @@ print_menu() {
     _mc "o" "Ollama (Local AI)"      "x" "Cursor Agent"         "P" "Pilot ${DIM}(remote)${NC}"
     _mc "+" "AI Toolmaker"           "v" "Code Review"          "n" "Network Info"
     _mc "R" "Research ${DIM}(autorun)${NC}" "c" "Smart Commit"        "k" "Kill Port"
+    _mc "t" "Tron / Isos ${DIM}(Docker)${NC}" "" ""
     echo ""
     echo -e "   ${YELLOW}${BOLD}System${NC}"
     echo -e "   ${DIM}──────${NC}"
@@ -409,6 +410,45 @@ print_menu() {
 
 do_docker() {
     bash "$SCRIPTS_DIR/docker" || { tool_error "Docker Manager error"; }
+}
+
+# Tron — Docker-isolated Iso runs (see scripts/tron)
+do_tron() {
+    title_box "Tron — Docker Isos" "◆"
+    echo -e "  ${DIM}Tron is the control plane; each Iso is one sandboxed job (container) with your${NC}"
+    echo -e "  ${DIM}project mounted at ${BOLD}/workspace${NC}${DIM}. Default: a fresh container per run.${NC}"
+    echo ""
+    echo -e "  ${BOLD}1. Build the Iso image once${NC} ${DIM}(after Docker is running):${NC}"
+    echo -e "     ${GREEN}kmac tron build${NC}"
+    echo ""
+    echo -e "  ${BOLD}2. Ephemeral Iso${NC} ${DIM}(safest — new container each time):${NC}"
+    echo -e "     ${GREEN}kmac tron run -- pwd${NC}"
+    echo -e "     ${GREEN}kmac tron run -w ~/path/to/repo -- git status${NC}"
+    echo -e "     ${GREEN}kmac tron iso -- make test${NC}   ${DIM}# same as run${NC}"
+    echo ""
+    echo -e "  ${BOLD}3. Warm pool${NC} ${DIM}(reuse slots; workspace is reset between runs):${NC}"
+    echo -e "     ${GREEN}kmac tron pool start 2${NC}"
+    echo -e "     ${GREEN}kmac tron run --pool 1 -w . -- ./scripts/ci.sh${NC}"
+    echo -e "     ${GREEN}kmac tron pool status${NC}   ${GREEN}kmac tron pool stop${NC}"
+    echo ""
+    echo -e "  ${BOLD}Secrets${NC} ${DIM}(API keys inside the container):${NC}"
+    echo -e "     ${GREEN}eval \"\$(kmac secrets export)\"${NC}   ${DIM}# then run tron in the same shell${NC}"
+    echo ""
+    echo -e "  ${BOLD}CLI help:${NC} ${GREEN}kmac tron help${NC}   ${DIM}·${NC}   ${BOLD}Image:${NC} ${DIM}\$${NC}${BOLD}KMAC_TRON_IMAGE${NC} ${DIM}(default kmac/tron-iso:latest)${NC}"
+    echo ""
+    echo -e "  ${GREEN}b${NC}) Build image now     ${GREEN}s${NC}) Pool status     ${GREEN}r${NC}) Try Iso ${DIM}(pwd)${NC}     ${GREEN}h${NC}) Print full help"
+    menu_back
+    read -r -n1 -p "  > " _tronc
+    echo ""
+    case "$_tronc" in
+        b | B) safe_run "Tron build" bash "$SCRIPTS_DIR/tron" build ;;
+        s | S) bash "$SCRIPTS_DIR/tron" pool status ;;
+        r | R) safe_run "Tron run" bash "$SCRIPTS_DIR/tron" run -- pwd ;;
+        h | H) bash "$SCRIPTS_DIR/tron" help ;;
+        m | M | "") return ;;
+        *) echo -e "  ${DIM}Unknown key — use b, s, r, h, or m for back.${NC}" ;;
+    esac
+    pause
 }
 
 do_remote_terminal() {
@@ -912,6 +952,7 @@ main() {
             +) clear; bash "$SCRIPTS_DIR/toolmaker" ;;
             o) clear; bash "$SCRIPTS_DIR/ollama-setup" ;;
             R) clear; bash "$SCRIPTS_DIR/research" ;;
+            t) clear; do_tron ;;
             # Dev
             p) clear; safe_run "Project Launcher" bash "$SCRIPTS_DIR/project" ;;
             e) clear; bash "$SCRIPTS_DIR/claudeme" ;;
@@ -979,6 +1020,7 @@ if [[ $# -gt 0 ]]; then
         research) exec bash "$SCRIPTS_DIR/research" "$@" ;;
         software|sw) exec bash "$SCRIPTS_DIR/software" "$@" ;;
         ollama) exec bash "$SCRIPTS_DIR/ollama-setup" "$@" ;;
+        tron) exec bash "$SCRIPTS_DIR/tron" "$@" ;;
         assistant|ai|orchestrator|orch|skillopt) exec bash "$SCRIPTS_DIR/agent" "$@" ;;
         version|-v|--version)
             print_logo
@@ -1009,6 +1051,7 @@ if [[ $# -gt 0 ]]; then
             echo "    make \"description\"    Build a new tool with AI"
             echo "    research [cmd]        Autonomous experiment runner (init|run|status|review|stop)"
             echo "    ollama [cmd]          Local AI setup (install|models|serve|stop|status|chat)"
+            echo "    tron [cmd]            Docker Isos — build|run|pool (see tron help)"
             echo ""
             echo -e "  ${BOLD}Dev${NC}"
             echo "    project               Project launcher with fzf"

@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 ![Docker](https://img.shields.io/badge/Docker-MCP%20Ready-2496ED)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/Tests-60%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-68%20passing-brightgreen)
 ![Homebrew](https://img.shields.io/badge/Homebrew-brew%20install%20kmac-FBB040)
 
 ---
@@ -37,6 +37,7 @@ Type `kmac` and you get this:
     o  Ollama (Local AI)      x  Cursor Agent           P  Pilot (remote)
     +  AI Toolmaker           v  Code Review            n  Network Info
     R  Research (autorun)     c  Smart Commit           k  Kill Port
+    t  Tron / Isos (Docker)
 
     System
     S  Storage Manager        u  Check Updates          b  Backup Dotfiles
@@ -196,7 +197,49 @@ kmac docker health --history     # 24h trend data with ASCII sparkline chart
 
 ---
 
-### 3. Storage Manager
+### 3. Tron — Docker Isos
+
+**Tron** is the control plane for **Isos**: disposable Docker jobs that mount your repo at `/workspace`. By default each run uses a **new container** (`docker run --rm`) for strong isolation; optionally you can start a **warm pool** of long-lived containers and run Isos in a slot (workspace is synced from the host and cleared after each run).
+
+**Menu** (`t`) — opens an instruction screen with shortcuts: build image, pool status, try an Iso (`pwd`), or print full CLI help.
+
+**Build the Iso image** (once, after Docker is running):
+
+```bash
+kmac tron build
+```
+
+**Ephemeral Iso** (one container per run — default):
+
+```bash
+kmac tron run -- pwd
+kmac tron run -w ~/Projects/MyApp -- git status
+kmac tron iso -- make test          # alias for run
+```
+
+**Warm pool** (reuse slots; faster repeat runs; workspace reset between jobs):
+
+```bash
+kmac tron pool start 2
+kmac tron run --pool 1 -w . -- ./scripts/ci.sh
+kmac tron pool status
+kmac tron pool stop
+```
+
+**Secrets inside the container** — export keys in the same shell before `tron`:
+
+```bash
+eval "$(kmac secrets export)"
+kmac tron run -- your-command
+```
+
+**Environment** — `KMAC_TRON_IMAGE` (default `kmac/tron-iso:latest`), `KMAC_TRON_POOL_ROOT` for pool state under `~/.cache/kmac/tron`. Image definition: `docker/tron/Dockerfile`.
+
+**CLI reference:** `kmac tron help`
+
+---
+
+### 4. Storage Manager
 
 Disk space analysis, AI-powered file identification, and cleanup tools designed for macOS — with iCloud Drive integration for migrating large directories off local storage.
 
@@ -214,7 +257,7 @@ Disk space analysis, AI-powered file identification, and cleanup tools designed 
 
 ---
 
-### 4. KMac Pilot — Remote AI Agent Control
+### 5. KMac Pilot — Remote AI Agent Control
 
 Run AI coding agents on your Mac and control them from anywhere — your phone, your couch, another machine. Three interfaces to the same backend: a Telegram bot, a REST/WebSocket API server, and a native iOS app.
 
@@ -256,7 +299,7 @@ cd ios/KMacPilot && xcodegen generate && open KMacPilot.xcodeproj
 
 ---
 
-### 5. Developer Workflow Tools
+### 6. Developer Workflow Tools
 
 Everyday utilities that speed up common development tasks.
 
@@ -292,7 +335,7 @@ kmac killport                  # List all listening ports
 
 ---
 
-### 6. Secrets & Integration Hub
+### 7. Secrets & Integration Hub
 
 A private credential vault that turns KMac into your personal command center — securely storing API keys for AI models, cloud providers, MCP servers, and any service you integrate with.
 
@@ -369,7 +412,7 @@ bash ~/Projects/KMac-CLI/scripts/setup-mac
 
 ---
 
-### 7. Plugin System & Extensibility
+### 8. Plugin System & Extensibility
 
 Extend the toolkit without touching core code. Drop an executable script into `plugins/` with three header comments and it appears in the interactive menu automatically:
 
@@ -407,7 +450,7 @@ Included plugins:
 
 ---
 
-### 8. Software Manager
+### 9. Software Manager
 
 Interactive software installation and updates from the toolkit menu (`I`) or the CLI. The manager organizes tools into **five categories**: **Dev Essentials**, **AI & Coding Agents**, **Editors & Apps**, **Infrastructure**, and **Shell & Productivity**. It covers **30+ tools** including git, node, python, rust, claude, chatgpt, gemini, ollama, aider, copilot, cursor, vscode, docker, kubectl, terraform, starship, and oh-my-zsh.
 
@@ -417,7 +460,7 @@ Each entry shows **installed vs not installed** status with **version numbers** 
 
 ---
 
-### 9. Cross-Platform Support
+### 10. Cross-Platform Support
 
 KMac uses **`scripts/_platform.sh`** as a cross-platform abstraction layer. It **detects the OS** (macOS vs Linux), **Linux distro** (Ubuntu, Fedora, Arch), and **package manager** (Homebrew, apt, dnf, or pacman). **Wrapper functions** unify clipboard access, desktop notifications, credential storage (**macOS Keychain** vs **`secret-tool`** on Linux), local IP discovery, and common file operations.
 
@@ -425,9 +468,9 @@ The **software installer** translates Homebrew-oriented commands to the **native
 
 ---
 
-### 10. Testing & CI
+### 11. Testing & CI
 
-The repo ships **60 smoke tests** across **eight test files**, driven by a **lightweight Bash test runner** with **no extra dependencies**. **GitHub Actions** runs a **matrix** on **macOS and Ubuntu** and includes **ShellCheck**. Run the suite locally:
+The repo ships **68 smoke tests** across **nine test files**, driven by a **lightweight Bash test runner** with **no extra dependencies**. **GitHub Actions** runs a **matrix** on **macOS and Ubuntu** and includes **ShellCheck**. Run the suite locally:
 
 ```bash
 bash tests/run-tests.sh
@@ -509,8 +552,8 @@ Configure your domain in `deploy/Caddyfile` for automatic Let's Encrypt TLS.
 │  │ ask      │  │ docker   │  │ storage  │  │ _pilot-bot.sh │  │
 │  │ review   │  │ docker-  │  │          │  │ _pilot-lib.sh │  │
 │  │ aicommit │  │  health  │  │          │  │ pilot (CLI)   │  │
-│  │ agent    │  │          │  │          │  │               │  │
-│  │ toolmaker│  │          │  │          │  │               │  │
+│  │ agent    │  │ tron     │  │          │  │               │  │
+│  │ toolmaker│  │ (Isos)   │  │          │  │               │  │
 │  └──────────┘  └──────────┘  └──────────┘  └───────┬───────┘  │
 │       │              │             │                │          │
 │  ┌────┴──────────────┴─────────────┴────────────────┴───────┐  │
@@ -551,7 +594,7 @@ KMac-CLI/
 ├── homebrew/
 │   └── Formula/
 │       └── kmac.rb         Homebrew formula
-├── tests/                  Test suite (8 test files + runner)
+├── tests/                  Test suite (9 test files + runner)
 ├── scripts/
 │   ├── _ui.sh              Shared UI — colors, title_box, pause, spinners
 │   ├── _vault.sh           Triple-backend secret vault (Keychain + AES-256 + Docker)
@@ -564,6 +607,7 @@ KMac-CLI/
 │   ├── pilot               Pilot CLI (start/stop/config/server/status)
 │   ├── docker              Docker Manager — Engine API + MCP + Compose
 │   ├── docker-health       Docker health report (--json, --history)
+│   ├── tron                Tron — Docker Isos (build, run, pool)
 │   ├── storage             Storage Manager — disk analysis + AI + iCloud
 │   ├── secrets             Credential manager + integration hub
 │   ├── software            Software installer & manager (30+ tools)
@@ -594,6 +638,8 @@ KMac-CLI/
 │   ├── com.kmac.pilot.plist macOS launchd service definition
 │   ├── kmac-pilot.service   Linux systemd service (security-hardened)
 │   └── kmac-vault.service   Docker vault systemd service
+├── docker/
+│   └── tron/               Iso sandbox image (Dockerfile + iso-entry)
 ├── docker-compose.yml       Full stack: pilot + vault + Caddy
 ├── server/
 │   ├── Dockerfile           Pilot API server container image
@@ -695,11 +741,12 @@ cd ios/KMacPilot && xcodegen generate && open KMacPilot.xcodeproj
 - **Bash 3.2** — macOS ships with Bash 3.2 (not 5+). No associative arrays, no namerefs, no `mapfile`. All scripts respect this constraint.
 - **Triple-backend vault** — secrets are stored in macOS Keychain (hardware-backed), an AES-256-CBC encrypted file (portable), or a Docker container vault (isolated, volume-portable). The `_vault.sh` library provides a unified API (`vault_get`, `vault_set`) so scripts don't need to know which backend is active. Secrets never touch disk as plaintext. The Docker backend runs a lightweight Python REST server inside a container with data encrypted in a named volume — ideal for users who want OS-independent, containerized secret storage with volume backup/restore portability.
 - **Docker Engine API** — direct unix socket calls via `curl --unix-socket` instead of parsing `docker` CLI output. Faster, more reliable, structured JSON.
+- **Tron / Isos** — optional Docker-isolated job runner (`kmac tron`): ephemeral containers by default, warm pool with per-slot workspace reset; image built from `docker/tron/`.
 - **No heavy dependencies** — the core toolkit needs nothing beyond what macOS provides. Optional tools enhance UX but aren't required.
 - **Plugin protocol** — three comment headers in a script. That's it. No registration, no config files, no compilation.
 - **Cross-platform** — `_platform.sh` provides a compatibility layer so the same scripts work on macOS and Linux. It wraps OS-specific operations (clipboard, keychain, notifications, package management) behind unified functions.
 - **Lifecycle hooks** — plugins can register for eleven lifecycle events without modifying core code. Failed hooks log warnings but never block the main flow.
-- **Tested** — 60 smoke tests run on every push via GitHub Actions across macOS and Ubuntu.
+- **Tested** — 68 smoke tests run on every push via GitHub Actions across macOS and Ubuntu.
 - **Portable** — works from a git clone or synced from iCloud Drive. The installer detects which and configures paths accordingly.
 
 ## Contributing

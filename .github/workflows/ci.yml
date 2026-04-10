@@ -47,10 +47,12 @@ jobs:
               tests/test_plugins.sh \
               tests/test_dotbackup.sh \
               tests/test_install.sh \
+              tests/test_tron.sh \
               scripts/_ui.sh \
               scripts/_vault.sh \
               scripts/software \
-              scripts/dotbackup
+              scripts/dotbackup \
+              scripts/tron
           else
             echo "shellcheck not available on this runner — skipping"
           fi

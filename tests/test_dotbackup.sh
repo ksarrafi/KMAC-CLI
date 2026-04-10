@@ -18,8 +18,8 @@ run_tests() {
   assert_contains "$out" "Usage: dotbackup [backup|restore|diff|hook]" "unknown action shows usage"
 
   # Subcommands are recognized in the case statement (default action is backup when omitted).
-  assert_contains "$(grep -E '^\s*(backup|restore|diff|hook)\)\s' "$db" || true)" "backup)" "case includes backup"
-  assert_contains "$(grep -E '^\s*(backup|restore|diff|hook)\)\s' "$db" || true)" "restore)" "case includes restore"
-  assert_contains "$(grep -E '^\s*(backup|restore|diff|hook)\)\s' "$db" || true)" "diff)" "case includes diff"
-  assert_contains "$(grep -E '^\s*(backup|restore|diff|hook)\)\s' "$db" || true)" "hook)" "case includes hook"
+  assert_contains "$(grep -E '^\s*(backup|restore|diff|hook)\)' "$db" || true)" "backup)" "case includes backup"
+  assert_contains "$(grep -E '^\s*(backup|restore|diff|hook)\)' "$db" || true)" "restore)" "case includes restore"
+  assert_contains "$(grep -E '^\s*(backup|restore|diff|hook)\)' "$db" || true)" "diff)" "case includes diff"
+  assert_contains "$(grep -E '^\s*(backup|restore|diff|hook)\)' "$db" || true)" "hook)" "case includes hook"
 }

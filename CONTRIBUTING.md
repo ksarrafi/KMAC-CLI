@@ -73,7 +73,7 @@ Follow these conventions:
 ### 4. Test
 
 ```bash
-# Run the full test suite (60 smoke tests)
+# Run the full test suite (68 smoke tests)
 bash tests/run-tests.sh
 
 # Syntax-check all scripts

@@ -1,0 +1,340 @@
+#!/usr/bin/env bash
+# tron — Tron control plane: Docker-isolated Iso runs (one job per container by default;
+# optional warm pool with per-slot workspace reset). See: kmac tron help
+#
+# Env:
+#   KMAC_TRON_IMAGE       — image tag (default kmac/tron-iso:latest)
+#   KMAC_TRON_POOL_ROOT   — state dir (default ~/.cache/kmac/tron)
+#   KMAC_TRON_POOL_SIZE   — default slot count for `pool start` (default 2)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLKIT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=scripts/_ui.sh
+source "$SCRIPT_DIR/_ui.sh"
+
+KMAC_TRON_IMAGE="${KMAC_TRON_IMAGE:-kmac/tron-iso:latest}"
+DOCKERFILE="$TOOLKIT_DIR/docker/tron/Dockerfile"
+POOL_ROOT="${KMAC_TRON_POOL_ROOT:-${HOME}/.cache/kmac/tron}"
+_TRON_LOCK_DIR=""
+
+tron_cleanup_lock() {
+    if [[ -n "${_TRON_LOCK_DIR:-}" ]] && [[ -d "${_TRON_LOCK_DIR:-}" ]]; then
+        rmdir "$_TRON_LOCK_DIR" 2>/dev/null || true
+    fi
+    _TRON_LOCK_DIR=""
+}
+
+docker_ok() {
+    command -v docker &>/dev/null || {
+        ui_fail "docker not found in PATH"
+        return 1
+    }
+    docker info &>/dev/null || {
+        ui_fail "Docker daemon not reachable — start Docker Desktop or the docker service"
+        return 1
+    }
+    return 0
+}
+
+cmd_build() {
+    docker_ok || return 1
+    if [[ ! -f "$DOCKERFILE" ]]; then
+        ui_fail "missing Dockerfile: $DOCKERFILE"
+        return 1
+    fi
+    ui_info "Building $KMAC_TRON_IMAGE ..."
+    docker build -t "$KMAC_TRON_IMAGE" -f "$DOCKERFILE" "$TOOLKIT_DIR/docker/tron"
+}
+
+ensure_image() {
+    docker_ok || return 1
+    if docker image inspect "$KMAC_TRON_IMAGE" &>/dev/null; then
+        return 0
+    fi
+    ui_warn "Image $KMAC_TRON_IMAGE not found — building from $DOCKERFILE"
+    cmd_build
+}
+
+# mkdir-based lock (macOS-friendly; no flock required)
+_acquire_pool_lock() {
+    local slot="$1"
+    local lockdir="$POOL_ROOT/locks/slot-$slot"
+    local tries=0
+    mkdir -p "$POOL_ROOT/locks"
+    while ! mkdir "$lockdir" 2>/dev/null; do
+        sleep 0.15
+        tries=$((tries + 1))
+        if (( tries > 2000 )); then
+            ui_fail "timeout waiting for pool slot $slot (another Iso holds the lock)"
+            return 1
+        fi
+    done
+    _TRON_LOCK_DIR="$lockdir"
+    return 0
+}
+
+_release_pool_lock() {
+    tron_cleanup_lock
+}
+
+_reset_pool_workspace_host() {
+    local pws="$1"
+    mkdir -p "$pws"
+    # shellcheck disable=SC2115
+    find "$pws" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+}
+
+_sync_workdir_to_pool() {
+    local src="$1"
+    local dst="$2"
+    if command -v rsync &>/dev/null; then
+        rsync -a --delete "$src"/ "$dst"/
+    else
+        _reset_pool_workspace_host "$dst"
+        cp -a "$src"/. "$dst"/
+    fi
+}
+
+cmd_pool_start() {
+    local n="${1:-${KMAC_TRON_POOL_SIZE:-2}}"
+    case "$n" in
+        ''|*[!0-9]*) ui_fail "pool size must be a number (1–32)"; return 1 ;;
+    esac
+    (( n >= 1 && n <= 32 )) || {
+        ui_fail "pool size must be between 1 and 32"
+        return 1
+    }
+    docker_ok || return 1
+    ensure_image || return 1
+    mkdir -p "$POOL_ROOT/ws"
+    local i name ws
+    for ((i = 1; i <= n; i++)); do
+        name="kmac-tron-pool-$i"
+        ws="$POOL_ROOT/ws/$i"
+        mkdir -p "$ws"
+        if docker inspect "$name" &>/dev/null; then
+            ui_warn "container $name already exists — skip (use: tron pool stop)"
+            continue
+        fi
+        docker run -d --name "$name" \
+            -v "$ws:/workspace" \
+            -w /workspace \
+            "$KMAC_TRON_IMAGE" \
+            tail -f /dev/null
+        ui_success "pool slot $i → $name (workspace $ws)"
+    done
+}
+
+cmd_pool_stop() {
+    docker_ok || return 1
+    local ids
+    ids=$(docker ps -aq --filter "name=kmac-tron-pool-" 2>/dev/null || true)
+    if [[ -z "$ids" ]]; then
+        ui_info "no kmac-tron-pool-* containers found"
+        return 0
+    fi
+    # shellcheck disable=SC2086
+    docker rm -f $ids
+    ui_success "removed pool containers"
+}
+
+cmd_pool_status() {
+    docker_ok || return 1
+    echo ""
+    ui_info "image: $KMAC_TRON_IMAGE"
+    if docker image inspect "$KMAC_TRON_IMAGE" &>/dev/null; then
+        ui_success "image present"
+    else
+        ui_warn "image not built — run: kmac tron build"
+    fi
+    echo ""
+    docker ps -a --filter "name=kmac-tron-pool-" --format "table {{.Names}}\t{{.Status}}\t{{.Mounts}}" 2>/dev/null || true
+    echo ""
+    ui_dim "pool root: $POOL_ROOT"
+}
+
+# pool_run SLOT WORKDIR [cmd ...]
+cmd_pool_run() {
+    local slot="$1"
+    local workdir="$2"
+    shift 2
+    local -a usercmd=("$@")
+    [[ "$slot" =~ ^[0-9]+$ ]] || {
+        ui_fail "pool slot must be numeric"
+        return 1
+    }
+    local name="kmac-tron-pool-$slot"
+    docker inspect "$name" &>/dev/null || {
+        ui_fail "no container $name — run: kmac tron pool start"
+        return 1
+    }
+    [[ -d "$workdir" ]] || {
+        ui_fail "workdir not found: $workdir"
+        return 1
+    }
+
+    docker_ok || return 1
+    ensure_image || return 1
+
+    local pws="$POOL_ROOT/ws/$slot"
+    mkdir -p "$POOL_ROOT/ws"
+
+    trap '_release_pool_lock; trap - RETURN' RETURN
+    _acquire_pool_lock "$slot" || return 1
+
+    ui_info "reset workspace for slot $slot..."
+    _reset_pool_workspace_host "$pws"
+    ui_info "sync $(basename "$workdir") → pool slot $slot..."
+    _sync_workdir_to_pool "$workdir" "$pws"
+
+    if [[ ${#usercmd[@]} -eq 0 ]]; then
+        usercmd=(bash -l)
+    fi
+
+    local ttyflag=()
+    [[ -t 0 ]] && ttyflag=(-it)
+
+    docker exec "${ttyflag[@]}" \
+        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
+        -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}" \
+        -e "TERM=${TERM:-xterm-256color}" \
+        -w /workspace \
+        "$name" \
+        /usr/local/bin/iso-entry "${usercmd[@]}"
+
+    local ec=$?
+    ui_info "post-run reset for slot $slot..."
+    docker exec "$name" bash -c 'find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true' || true
+    _release_pool_lock
+    trap - RETURN
+    return "$ec"
+}
+
+# Ephemeral Iso: new container per run (--rm)
+cmd_run() {
+    local workdir="$PWD"
+    local pool_slot=""
+    local -a docker_extra=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -w | --workdir)
+                workdir="${2:-}"
+                [[ -n "$workdir" ]] || {
+                    ui_fail "--workdir needs a path"
+                    return 1
+                }
+                workdir="$(cd "$workdir" 2>/dev/null && pwd)" || {
+                    ui_fail "cannot cd to workdir: $workdir"
+                    return 1
+                }
+                shift 2
+                ;;
+            --pool)
+                pool_slot="${2:-}"
+                shift 2
+                ;;
+            --network)
+                docker_extra+=(--network "${2:-}")
+                shift 2
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    local -a usercmd=("$@")
+
+    if [[ -n "$pool_slot" ]]; then
+        cmd_pool_run "$pool_slot" "$workdir" "${usercmd[@]}"
+        return $?
+    fi
+
+    [[ -d "$workdir" ]] || {
+        ui_fail "workdir not found: $workdir"
+        return 1
+    }
+
+    docker_ok || return 1
+    ensure_image || return 1
+
+    if [[ ${#usercmd[@]} -eq 0 ]]; then
+        usercmd=(bash -l)
+    fi
+
+    local ttyflag=()
+    [[ -t 0 ]] && ttyflag=(-it)
+
+    docker run --rm "${ttyflag[@]}" "${docker_extra[@]}" \
+        -v "$workdir:/workspace" \
+        -w /workspace \
+        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
+        -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}" \
+        -e "TERM=${TERM:-xterm-256color}" \
+        "$KMAC_TRON_IMAGE" \
+        "${usercmd[@]}"
+}
+
+print_help() {
+    title_box "Tron — Isos (Docker)" "◆"
+    echo -e "  ${DIM}Ephemeral default: one container per run (--rm). Optional warm pool:${NC}"
+    echo -e "  ${DIM}  pool start → run --pool N → pool stop. Workspace reset between pool runs.${NC}"
+    echo ""
+    echo -e "  ${BOLD}Usage:${NC}"
+    echo "    kmac tron build              Build Iso image ($KMAC_TRON_IMAGE)"
+    echo "    kmac tron run [-w DIR] [--] [command...]   Ephemeral Iso (default shell: bash -l)"
+    echo "    kmac tron iso ...            Alias for run"
+    echo ""
+    echo "    kmac tron pool start [N]     Warm N slots (default \$KMAC_TRON_POOL_SIZE or 2)"
+    echo "    kmac tron pool status        Image + pool containers"
+    echo "    kmac tron pool stop          Remove all kmac-tron-pool-* containers"
+    echo "    kmac tron run --pool SLOT -w DIR [--] cmd   Run in slot (sync + lock + reset)"
+    echo ""
+    echo -e "  ${BOLD}Env:${NC} KMAC_TRON_IMAGE, ANTHROPIC_API_KEY, OPENAI_API_KEY"
+    echo -e "  ${DIM}Secrets: run ${NC}kmac secrets export${DIM} in the host shell before tron.${NC}"
+    echo ""
+}
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+    case "$cmd" in
+        help | -h | --help)
+            print_help
+            ;;
+        build | image)
+            cmd_build
+            ;;
+        run)
+            cmd_run "$@"
+            ;;
+        iso)
+            cmd_run "$@"
+            ;;
+        pool)
+            local sub="${1:-status}"
+            shift || true
+            case "$sub" in
+                start | up) cmd_pool_start "${1:-}" ;;
+                stop | down) cmd_pool_stop ;;
+                status | st) cmd_pool_status ;;
+                *)
+                    ui_fail "unknown pool subcommand: $sub (start|stop|status)"
+                    return 1
+                    ;;
+            esac
+            ;;
+        version)
+            echo "tron 1.0.0 (KMac-CLI)"
+            ;;
+        *)
+            ui_fail "unknown command: $cmd — try: kmac tron help"
+            return 1
+            ;;
+    esac
+}
+
+main "$@"

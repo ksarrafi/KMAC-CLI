@@ -25,6 +25,7 @@ run_tests() {
   out=$(bash "$toolkit" help 2>&1) || true
   assert_contains "$out" "Usage: toolkit" "help shows usage"
   assert_contains "$out" "software" "help mentions software subcommand"
+  assert_contains "$out" "tron" "help mentions tron subcommand"
 
   assert_exit_code 1 bash "$toolkit" __not_a_real_subcommand__xyz__ 2>/dev/null
   out=$(bash "$toolkit" __not_a_real_subcommand__xyz__ 2>&1) || true

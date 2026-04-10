@@ -28,7 +28,7 @@ Every plugin needs these comment headers at the top. **Discovery** (`toolkit.sh`
 # TOOLKIT_HOOKS: pre-commit,on-startup  (optional, comma-separated)
 ```
 
-`TOOLKIT_KEY` is optional: if omitted, the menu assigns a numeric shortcut. Keys must not collide with built-in menu letters.
+`TOOLKIT_KEY` is optional: if omitted, the menu assigns a numeric shortcut. Keys must not collide with built-in menu letters (including **`t`** — reserved for **Tron / Docker Isos**).
 
 ### Available Hooks
 
