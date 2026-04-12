@@ -304,6 +304,9 @@ kmac vault get myproject:key  # Get a specific key value
   1. Which project? (choose existing or create new)
   2. What's the key for? (24 common types: OpenAI, Claude, Stripe, Database, etc.)
   3. Enter the value (hidden input)
+  - **Retry loops** — Invalid input prompts retry instead of canceling
+  - **Format hints** — Shows expected format for common key types
+  - **Validation warnings** — Alerts if key format looks incorrect
   
 - **Automatic Organization** — Keys auto-group by project namespace:
   ```
@@ -318,6 +321,21 @@ kmac vault get myproject:key  # Get a specific key value
 - **Timestamp Tracking** — Every key stores when it was created/updated
 
 - **Update Protection** — Shows current value and asks for confirmation before overwriting
+
+- **Smart Delete Confirmations** — Full preview before deletion:
+  - Shows key name, masked value, and creation timestamp
+  - Requires typing 'DELETE' to confirm (prevents accidents)
+  - "This action cannot be undone" warning
+
+- **Search & Navigation** — Find keys quickly:
+  - Press `/` to search/filter keys
+  - Real-time regex search across all keys
+  - Keyboard shortcuts: `h` for help, `r` to refresh, `q` to exit
+
+- **Empty State Guidance** — Helpful for first-time users:
+  - Clear instructions when vault is empty
+  - Suggests common first keys to add
+  - Getting started guide right in the interface
 
 - **Export to .env Files** — Perfect for local dev and AI tools:
   ```bash

@@ -1,5 +1,99 @@
 # Changelog
 
+## 3.3.0 — 2026-04-12
+
+### UX Improvements — Medium Priority
+- **Better delete confirmations** — Full preview before deletion
+  - Shows key name, masked value, and creation timestamp
+  - Requires typing 'DELETE' to confirm (not just 'y')
+  - "This action cannot be undone" warning
+  - Checks if key exists before showing delete screen
+  - Automatically cleans up metadata on deletion
+- **Reorganized menus** — Clearer hierarchy and better flow
+  - Main menu: Grouped into "Quick Actions" and "Project Management"
+  - Project menu: Grouped into "Manage Keys" and "Import/Export"
+  - More descriptive labels with hints
+  - Better visual separation between sections
+- **Visual consistency** — Unified styling across all views
+  - Consistent use of title boxes with emojis
+  - Uniform color scheme (green=success, yellow=warning, red=error, cyan=info)
+  - Better spacing and alignment throughout
+  - Loading messages with auto-clear
+  - Improved error messages with actionable steps
+
+### UX Improvements — Low Priority  
+- **Keyboard shortcuts** — Fast navigation
+  - `/` to search/filter keys
+  - `h` for context-sensitive help in all menus
+  - `r` to refresh views
+  - `q` to go back / exit
+- **Search/filter functionality** — Find keys quickly
+  - Real-time regex search across all keys
+  - Shows matched keys with masked values
+  - Accessible via `/` from main menu
+- **Context-sensitive help** — Press `h` anywhere
+  - Main menu help with CLI examples
+  - Project menu help with workflow tips
+  - Keyboard shortcuts guide included
+- **Improved get key view** — Better UX for retrieving values
+  - Shows first 10 available keys for reference
+  - Clear visual feedback during retrieval
+  - Cancel option with 'c'
+  - Loading indicator
+
+### Improved
+- All menus now have help accessible via `h`
+- Delete operations show full preview before confirmation
+- Project menu delete uses same preview as main delete
+- Menu organization makes common actions more discoverable
+- Search makes large vaults easier to navigate
+
+## 3.2.0 — 2026-04-12
+
+### UX Improvements — High Priority
+- **Retry loops on validation errors** — Wizard no longer exits on invalid input
+  - Project name validation loops until valid or cancelled
+  - Key type selection retries on invalid choice
+  - Value input retries on empty or invalid format
+  - Custom key name input has validation loop
+  - Format warnings offer retry option (y/N/r)
+- **Loading indicators** — Visual feedback for slow operations
+  - "Loading keys..." message in browse view (auto-clears when done)
+  - Import shows "⏳ Importing from..." with progress
+  - Export improved with better status messages
+- **Empty state guidance** — Helpful prompts for first-time users
+  - Browse shows "No keys stored yet" with getting started guide
+  - Suggests common first keys (OpenAI, Anthropic, databases)
+  - Clear instructions: "Press 'a' to add your first key"
+- **Documentation consolidation** — Removed duplication
+  - Deleted `QUICKSTART_VAULT.md` (redundant with README section 6)
+  - Deleted `VAULT_MANAGER.md` (implementation notes, not user-facing)
+  - Added comprehensive Table of Contents to `docs/VAULT_GUIDE.md`
+  - Updated `--help` to reference streamlined docs
+
+### Improved
+- All wizard validations now loop instead of cancel
+- Better error messages with actionable next steps
+- Clearer visual hierarchy in empty states
+
+## 3.1.1 — 2026-04-12
+
+### Critical Fixes
+- **Fixed reload plugin bug** — `~` menu option now correctly calls `discover_plugins` (was calling undefined `_discover_plugins`)
+- **Added `--help` support** — `kmac vault --help` now shows full command documentation
+- **Input validation** — Wizard validates project names (alphanumeric + hyphens/underscores only)
+- **Value validation** — Empty values rejected with helpful error messages
+- **Format hints** — Shows expected format for OpenAI, Anthropic, GitHub tokens
+- **Format warnings** — Warns if API key doesn't match expected pattern (with override option)
+- **Password verification** — First-time vault setup requires password confirmation to prevent typos
+- **Minimum password length** — Enforces 8+ character passwords on file vault creation
+- **Better Docker errors** — Clear diagnostics when Docker isn't running or container fails
+  - Detects missing Docker installation
+  - Detects stopped Docker daemon (with platform-specific fix instructions)
+  - Shows health check progress with visual feedback
+  - Provides troubleshooting commands for common failures
+- **Enhanced error messages** — All vault operations provide actionable recovery steps
+
 ## 3.1.0 — 2026-04-11
 
 ### New: Vault Manager — Project-Based Key Organization (`V` / `kmac vault`)

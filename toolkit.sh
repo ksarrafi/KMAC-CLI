@@ -924,7 +924,7 @@ main() {
                 
                 # Reload plugins
                 echo -e "  ${DIM}Scanning for plugins...${NC}"
-                _discover_plugins
+                discover_plugins
                 echo -e "  ${GREEN}✓${NC} Plugins (${#PLUGIN_NAMES[@]} found)"
                 
                 # Reload version

@@ -149,10 +149,42 @@ _vault_get_master() {
         return 0
     fi
     echo "" >&2
-    read -r -s -p "  Vault password: " _vault_master_password >&2
-    echo "" >&2
-    if [[ -z "$_vault_master_password" ]]; then
-        return 1
+    
+    # Check if this is first-time setup (file doesn't exist yet)
+    if [[ ! -f "$VAULT_FILE" ]]; then
+        echo -e "  ${CYAN}Creating new encrypted vault${NC}" >&2
+        echo "" >&2
+        read -r -s -p "  Enter password: " _vault_master_password >&2
+        echo "" >&2
+        
+        if [[ -z "$_vault_master_password" ]]; then
+            echo -e "  ${RED}✗ Password cannot be empty${NC}" >&2
+            return 1
+        fi
+        
+        if [[ ${#_vault_master_password} -lt 8 ]]; then
+            echo -e "  ${YELLOW}⚠ Password is too short (use 8+ characters)${NC}" >&2
+            return 1
+        fi
+        
+        # Verify password on first setup
+        local verify_password
+        read -r -s -p "  Verify password: " verify_password >&2
+        echo "" >&2
+        
+        if [[ "$_vault_master_password" != "$verify_password" ]]; then
+            echo -e "  ${RED}✗ Passwords do not match${NC}" >&2
+            _vault_master_password=""
+            return 1
+        fi
+        echo -e "  ${GREEN}✓ Password set${NC}" >&2
+    else
+        # Existing vault - just prompt for password
+        read -r -s -p "  Vault password: " _vault_master_password >&2
+        echo "" >&2
+        if [[ -z "$_vault_master_password" ]]; then
+            return 1
+        fi
     fi
 }
 
@@ -279,22 +311,55 @@ docker_vault_start() {
     if _docker_vault_running; then
         return 0
     fi
+    
+    # Check if Docker is available
+    if ! command -v docker &>/dev/null; then
+        echo -e "  ${RED}✗ Docker is not installed${NC}" >&2
+        echo "" >&2
+        echo -e "  ${BOLD}To fix:${NC}" >&2
+        echo -e "    • Install from: https://docker.com" >&2
+        echo "" >&2
+        return 1
+    fi
+    
+    # Check if Docker daemon is running
+    if ! docker ps &>/dev/null 2>&1; then
+        echo -e "  ${RED}✗ Docker daemon is not running${NC}" >&2
+        echo "" >&2
+        echo -e "  ${BOLD}To fix:${NC}" >&2
+        if [[ "$(uname)" == "Darwin" ]]; then
+            echo -e "    • Open Docker Desktop from Applications" >&2
+            echo -e "    • Wait for Docker to start (check menu bar icon)" >&2
+        else
+            echo -e "    • Run: ${CYAN}sudo systemctl start docker${NC}" >&2
+        fi
+        echo "" >&2
+        return 1
+    fi
+    
     mkdir -p "$VAULT_DIR"
     if [[ ! -f "$VAULT_DOCKER_TOKEN_FILE" ]]; then
         openssl rand -base64 32 | tr -d '\n' > "$VAULT_DOCKER_TOKEN_FILE"
         chmod 600 "$VAULT_DOCKER_TOKEN_FILE"
     fi
+    
     # Build image if it doesn't exist
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local vault_ctx="${script_dir}/../server/vault"
     if ! docker image inspect "$VAULT_DOCKER_IMAGE" &>/dev/null; then
-        echo "  Building Docker vault image..." >&2
-        docker build -t "$VAULT_DOCKER_IMAGE" "$vault_ctx" >/dev/null 2>&1 || {
-            echo "  Failed to build vault image." >&2
+        echo "  ${CYAN}⏳ Building Docker vault image...${NC}" >&2
+        if ! docker build -t "$VAULT_DOCKER_IMAGE" "$vault_ctx" >/dev/null 2>&1; then
+            echo -e "  ${RED}✗ Failed to build vault image${NC}" >&2
+            echo "" >&2
+            echo -e "  ${BOLD}Check:${NC}" >&2
+            echo -e "    • Dockerfile exists at: ${vault_ctx}/Dockerfile" >&2
+            echo -e "    • Run manually: ${CYAN}docker build -t $VAULT_DOCKER_IMAGE $vault_ctx${NC}" >&2
             return 1
-        }
+        fi
+        echo -e "  ${GREEN}✓ Image built${NC}" >&2
     fi
+    
     docker run -d \
         --name "$VAULT_DOCKER_CONTAINER" \
         --restart unless-stopped \
@@ -303,15 +368,38 @@ docker_vault_start() {
         -v "${VAULT_DOCKER_TOKEN_FILE}:/vault/token:ro" \
         "$VAULT_DOCKER_IMAGE" >/dev/null 2>&1 || {
         # Container might exist but be stopped
-        docker start "$VAULT_DOCKER_CONTAINER" >/dev/null 2>&1 || return 1
+        docker start "$VAULT_DOCKER_CONTAINER" >/dev/null 2>&1 || {
+            echo -e "  ${RED}✗ Failed to start container${NC}" >&2
+            echo "" >&2
+            echo -e "  ${BOLD}Diagnostics:${NC}" >&2
+            echo -e "    • View logs: ${CYAN}docker logs $VAULT_DOCKER_CONTAINER${NC}" >&2
+            echo -e "    • Check port: ${CYAN}lsof -i :$VAULT_DOCKER_PORT${NC}" >&2
+            echo -e "    • Remove & retry: ${CYAN}docker rm $VAULT_DOCKER_CONTAINER${NC}" >&2
+            echo "" >&2
+            return 1
+        }
     }
-    # Wait for it to become healthy
+    
+    # Wait for health check with progress
+    echo -n "  ${CYAN}⏳ Waiting for health check" >&2
     local i
     for i in 1 2 3 4 5; do
         sleep 0.5
-        curl -sf "$(_docker_vault_url)/health" >/dev/null 2>&1 && return 0
+        echo -n "." >&2
+        if curl -sf "$(_docker_vault_url)/health" >/dev/null 2>&1; then
+            echo -e " ${GREEN}✓${NC}" >&2
+            return 0
+        fi
     done
-    echo "  Docker vault failed to start." >&2
+    
+    echo -e " ${RED}✗${NC}" >&2
+    echo -e "  ${RED}✗ Health check failed${NC}" >&2
+    echo "" >&2
+    echo -e "  ${BOLD}Container is running but not responding. Try:${NC}" >&2
+    echo -e "    • Check logs: ${CYAN}docker logs $VAULT_DOCKER_CONTAINER${NC}" >&2
+    echo -e "    • Restart: ${CYAN}docker restart $VAULT_DOCKER_CONTAINER${NC}" >&2
+    echo -e "    • Port conflict? ${CYAN}lsof -i :$VAULT_DOCKER_PORT${NC}" >&2
+    echo "" >&2
     return 1
 }
 

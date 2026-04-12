@@ -1,5 +1,33 @@
 # KMac Vault Manager Guide
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Quick Start](#quick-start)
+- [Key Naming Convention](#key-naming-convention)
+- [Features](#features)
+  - [Browse All Keys](#1-browse-all-keys)
+  - [Add/Update Keys](#2-addupdate-keys)
+  - [Get Key Values](#3-get-key-values)
+  - [Project Key Manager](#4-project-key-manager)
+  - [Export to .env File](#5-export-to-env-file)
+  - [Import from .env File](#6-import-from-env-file)
+- [Common Workflows](#common-workflows)
+  - [Setting Up a New Project](#setting-up-a-new-project)
+  - [Working with Multiple Environments](#working-with-multiple-environments)
+  - [Sharing Keys with AI Tools (Safely)](#sharing-keys-with-ai-tools-safely)
+  - [Rotating Secrets](#rotating-secrets)
+  - [Deleting Keys](#deleting-keys)
+- [Integration with KMac Tools](#integration-with-kmac-tools)
+- [Backend Selection](#backend-selection)
+- [Security Best Practices](#security-best-practices)
+- [Troubleshooting](#troubleshooting)
+- [Examples](#examples)
+- [Advanced Usage](#advanced-usage)
+- [Need Help?](#need-help)
+
+---
+
 ## Overview
 
 The KMac Vault Manager provides a simple, secure way to manage API keys, tokens, and secrets for all your projects. Keys are stored in your vault backend (Keychain, encrypted file, or Docker) and organized by project namespaces.
