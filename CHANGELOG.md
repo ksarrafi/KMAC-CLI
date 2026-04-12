@@ -1,5 +1,42 @@
 # Changelog
 
+## 3.1.0 — 2026-04-11
+
+### New: Vault Manager — Project-Based Key Organization (`V` / `kmac vault`)
+- **3-step wizard interface** for adding keys — no typing formats, just answer questions
+- **Step 1**: Choose or create project (auto-lists existing projects)
+- **Step 2**: Select key type from 24 common options (OpenAI, Claude, Stripe, Database, OAuth, AWS, etc.)
+- **Step 3**: Enter value with hidden input
+- **Automatic organization** by project namespace (myproject/, staging/, production/)
+- **Timestamp tracking** — stores created/updated datetime for every key
+- **Update protection** — shows current value and asks confirmation before overwriting
+- **Export to .env files** — perfect for local development and AI tools
+- **Import from .env files** — bulk import existing environment variables
+- **Project manager** — interactive menu for managing all keys in a project
+- **Copy to clipboard** — quick export of all project keys as env vars
+- **Metadata display** — shows timestamps in browse view
+- **24 common key types**: AI APIs, payment processors, databases, OAuth, cloud providers, webhooks
+- **AI-friendly workflow** — export keys when AI needs them, delete when done
+- CLI: `kmac vault`, `kmac vault list`, `kmac vault set`, `kmac vault project myapp`
+
+### New: Live Reload Feature (`~` in menu)
+- **In-menu reload** — press `~` (tilde) to refresh all scripts without exiting
+- **Re-sources core libraries** — UI, vault, AI helpers, hooks, platform layer
+- **Rescans plugins** — new plugins appear immediately
+- **Clears caches** — ensures fresh state after updates
+- **Perfect for development** — see script changes without restarting
+- **After git pull** — refresh to see new features instantly
+
+### Improved
+- **Vault display** — fixed BASH_REMATCH bug where metadata regex overwrote key names
+- **Menu footer** — added reload option with clear indicator
+- **Documentation** — comprehensive vault guides (VAULT_GUIDE.md, VAULT_MANAGER.md, QUICKSTART_VAULT.md)
+
+### Fixed
+- **Vault key display bug** — metadata timestamps no longer show as key names
+- **ANSI escape codes** — now properly formatted instead of showing raw codes
+- **Regex variable preservation** — key names saved before metadata checks
+
 ## 3.0.0 — 2026-03-29
 
 ### New: KMac Assistant — Personal AI Gateway (`A` / `kmac assistant`)

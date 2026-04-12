@@ -1,0 +1,787 @@
+#!/bin/bash
+# vault — enhanced vault browser and project key manager
+# Usage: vault              (interactive browser)
+#        vault list         (show all keys)
+#        vault get <key>    (get a key value)
+#        vault set <key>    (set a key value)
+#        vault delete <key> (delete a key)
+#        vault project      (project-specific key manager)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_ui.sh"
+source "$SCRIPT_DIR/_vault.sh"
+
+# ─── Browse all vault keys (not just integrations) ───────────────────────────
+
+do_browse() {
+    title_box "Vault Key Browser" "🔐"
+    
+    local backend
+    backend=$(_vault_backend)
+    echo -e "  ${BOLD}Backend:${NC} ${CYAN}${backend}${NC}"
+    
+    if [[ "$backend" == "docker" ]]; then
+        if _docker_vault_running 2>/dev/null; then
+            echo -e "  ${GREEN}●${NC} ${DIM}Docker vault running on 127.0.0.1:${VAULT_DOCKER_PORT}${NC}"
+        else
+            echo -e "  ${YELLOW}○${NC} ${DIM}Docker vault not running${NC}"
+        fi
+    fi
+    echo ""
+    
+    # Get all keys (not just integrations), exclude metadata keys
+    local -a all_keys=()
+    while IFS= read -r key; do
+        [[ -n "$key" && ! "$key" =~ ^__meta__: ]] && all_keys+=("$key")
+    done < <(vault_list 2>/dev/null)
+    
+    if (( ${#all_keys[@]} == 0 )); then
+        echo -e "  ${DIM}No keys stored in vault.${NC}"
+        echo ""
+        return
+    fi
+    
+    # Organize by namespace (prefix before ':')
+    # Bash 3.2 compatible - no associative arrays
+    local -a namespaces=()
+    local -a ungrouped=()
+    
+    # First pass: collect unique namespaces
+    for key in "${all_keys[@]}"; do
+        if [[ "$key" =~ ^([^:]+):(.+)$ ]]; then
+            local ns="${BASH_REMATCH[1]}"
+            if [[ ! " ${namespaces[*]} " =~ " ${ns} " ]]; then
+                namespaces+=("$ns")
+            fi
+        else
+            ungrouped+=("$key")
+        fi
+    done
+    
+    # Display grouped by namespace
+    for ns in "${namespaces[@]}"; do
+        echo -e "  ${BOLD}${CYAN}${ns}/${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+        
+        # Second pass: show keys for this namespace
+        for key in "${all_keys[@]}"; do
+            if [[ "$key" =~ ^${ns}:(.+)$ ]]; then
+                local key_name="${BASH_REMATCH[1]}"  # Save key name before it gets overwritten
+                local val
+                val=$(vault_get "$key" 2>/dev/null)
+                local masked="••••••••"
+                if [[ -n "$val" && ${#val} -gt 8 ]]; then
+                    masked="${val:0:4}••••${val: -4}"
+                fi
+                
+                # Get metadata if available
+                local meta_date=""
+                local meta_key="__meta__:${key}"
+                if vault_has "$meta_key" 2>/dev/null; then
+                    local meta
+                    meta=$(vault_get "$meta_key" 2>/dev/null)
+                    if [[ "$meta" =~ created=([^|]+) ]]; then
+                        meta_date="${BASH_REMATCH[1]}"
+                    fi
+                fi
+                
+                # Display with or without timestamp
+                if [[ -n "$meta_date" ]]; then
+                    printf "  ${GREEN}  ├─${NC} %-30s ${DIM}%s  [%s]${NC}\n" "$key_name" "$masked" "$meta_date"
+                else
+                    printf "  ${GREEN}  ├─${NC} %-30s ${DIM}%s${NC}\n" "$key_name" "$masked"
+                fi
+            fi
+        done
+        echo ""
+    done
+    
+    # Display ungrouped keys
+    if (( ${#ungrouped[@]} > 0 )); then
+        echo -e "  ${BOLD}${YELLOW}Other Keys${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+        for key in "${ungrouped[@]}"; do
+            local val
+            val=$(vault_get "$key" 2>/dev/null)
+            local masked="••••••••"
+            if [[ -n "$val" && ${#val} -gt 8 ]]; then
+                masked="${val:0:4}••••${val: -4}"
+            fi
+            printf "  ${GREEN}  ├─${NC} %-40s ${DIM}%s${NC}\n" "$key" "$masked"
+        done
+        echo ""
+    fi
+    
+    echo -e "  ${BOLD}Total:${NC} ${#all_keys[@]} keys"
+    echo ""
+}
+
+# ─── Common key types for wizard ─────────────────────────────────────────────
+
+_get_common_key_types() {
+    cat << 'EOF'
+OpenAI API Key
+Anthropic (Claude) API Key
+Google AI (Gemini) Key
+Groq API Key
+Stripe Secret Key
+Stripe Publishable Key
+Database URL
+Database Password
+JWT Secret
+API Key (Generic)
+OAuth Client ID
+OAuth Client Secret
+Webhook URL
+SendGrid API Key
+Twilio Auth Token
+AWS Access Key
+AWS Secret Key
+GitHub Token
+GitLab Token
+Docker Hub Token
+Redis URL
+MongoDB URL
+PostgreSQL URL
+Other (Custom)
+EOF
+}
+
+# ─── Wizard: Add/Update Key ──────────────────────────────────────────────────
+
+do_set_key_wizard() {
+    local preset_project="$1"
+    
+    clear
+    title_box "Add/Update Vault Key" "🔐"
+    
+    # Step 1: Project name
+    local project=""
+    
+    if [[ -n "$preset_project" ]]; then
+        project="$preset_project"
+        echo ""
+        echo -e "  ${BOLD}Project:${NC} ${CYAN}${project}${NC}"
+        echo ""
+    else
+        echo ""
+        echo -e "  ${BOLD}Step 1 of 3: Project${NC}"
+        echo -e "  ${DIM}──────────────────────────────────────${NC}"
+        echo ""
+        
+        # Show existing projects
+        local -a existing_projects=()
+        while IFS= read -r key; do
+            if [[ "$key" =~ ^([^:]+): ]]; then
+                local proj="${BASH_REMATCH[1]}"
+                if [[ ! " ${existing_projects[*]} " =~ " ${proj} " ]]; then
+                    existing_projects+=("$proj")
+                fi
+            fi
+        done < <(vault_list 2>/dev/null)
+        
+        if (( ${#existing_projects[@]} > 0 )); then
+            echo -e "  ${DIM}Existing projects:${NC}"
+            for i in "${!existing_projects[@]}"; do
+                printf "    %2d) ${CYAN}%s${NC}\n" "$((i+1))" "${existing_projects[$i]}"
+            done
+            echo ""
+        fi
+        
+        echo -e "  ${DIM}Or type a new project name${NC}"
+        echo ""
+        read -r -p "  Project name [1-${#existing_projects[@]} or name]: " proj_input
+        
+        if [[ "$proj_input" =~ ^[0-9]+$ ]] && (( proj_input >= 1 && proj_input <= ${#existing_projects[@]} )); then
+            project="${existing_projects[$((proj_input-1))]}"
+        else
+            project="$proj_input"
+        fi
+        
+        [[ -z "$project" ]] && { echo -e "  ${DIM}Cancelled.${NC}"; return; }
+    fi
+    
+    # Step 2: Key type/purpose
+    clear
+    title_box "Add/Update Vault Key" "🔐"
+    echo ""
+    echo -e "  ${BOLD}Project:${NC} ${CYAN}${project}${NC}"
+    echo ""
+    echo -e "  ${BOLD}Step 2 of 3: What is this key for?${NC}"
+    echo -e "  ${DIM}──────────────────────────────────────${NC}"
+    echo ""
+    
+    local -a key_types
+    while IFS= read -r ktype; do
+        [[ -n "$ktype" ]] && key_types+=("$ktype")
+    done < <(_get_common_key_types)
+    
+    # Show in two columns
+    local mid=$(( (${#key_types[@]} + 1) / 2 ))
+    for i in $(seq 0 $((mid - 1))); do
+        local left=$((i + 1))
+        local right=$((i + mid + 1))
+        printf "    %2d) %-30s" "$left" "${key_types[$i]}"
+        if (( right <= ${#key_types[@]} )); then
+            printf "%2d) %s" "$right" "${key_types[$((i + mid))]}"
+        fi
+        echo ""
+    done
+    
+    echo ""
+    read -r -p "  Choose [1-${#key_types[@]}]: " type_choice
+    
+    if [[ ! "$type_choice" =~ ^[0-9]+$ ]] || (( type_choice < 1 || type_choice > ${#key_types[@]} )); then
+        echo -e "  ${DIM}Cancelled.${NC}"
+        return
+    fi
+    
+    local key_type="${key_types[$((type_choice - 1))]}"
+    
+    # Convert to key name
+    local key_name=""
+    case "$key_type" in
+        "OpenAI API Key") key_name="openai_key" ;;
+        "Anthropic (Claude) API Key") key_name="anthropic_key" ;;
+        "Google AI (Gemini) Key") key_name="google_ai_key" ;;
+        "Groq API Key") key_name="groq_key" ;;
+        "Stripe Secret Key") key_name="stripe_secret" ;;
+        "Stripe Publishable Key") key_name="stripe_publishable" ;;
+        "Database URL") key_name="database_url" ;;
+        "Database Password") key_name="db_password" ;;
+        "JWT Secret") key_name="jwt_secret" ;;
+        "API Key (Generic)") key_name="api_key" ;;
+        "OAuth Client ID") key_name="oauth_client_id" ;;
+        "OAuth Client Secret") key_name="oauth_client_secret" ;;
+        "Webhook URL") key_name="webhook_url" ;;
+        "SendGrid API Key") key_name="sendgrid_key" ;;
+        "Twilio Auth Token") key_name="twilio_token" ;;
+        "AWS Access Key") key_name="aws_access_key" ;;
+        "AWS Secret Key") key_name="aws_secret_key" ;;
+        "GitHub Token") key_name="github_token" ;;
+        "GitLab Token") key_name="gitlab_token" ;;
+        "Docker Hub Token") key_name="docker_token" ;;
+        "Redis URL") key_name="redis_url" ;;
+        "MongoDB URL") key_name="mongodb_url" ;;
+        "PostgreSQL URL") key_name="postgresql_url" ;;
+        "Other (Custom)")
+            echo ""
+            read -r -p "  Key name: " key_name
+            key_name=$(echo "$key_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '_')
+            ;;
+    esac
+    
+    [[ -z "$key_name" ]] && { echo -e "  ${DIM}Cancelled.${NC}"; return; }
+    
+    local full_key="${project}:${key_name}"
+    
+    # Check if key exists and show history
+    local is_update=false
+    if vault_has "$full_key" 2>/dev/null; then
+        is_update=true
+        local existing_value
+        existing_value=$(vault_get "$full_key" 2>/dev/null)
+        
+        clear
+        title_box "Update Existing Key" "🔐"
+        echo ""
+        echo -e "  ${YELLOW}This key already exists!${NC}"
+        echo ""
+        echo -e "  ${BOLD}Key:${NC} ${CYAN}${full_key}${NC}"
+        echo -e "  ${BOLD}Type:${NC} ${key_type}"
+        echo -e "  ${BOLD}Current Value:${NC} ${existing_value:0:4}••••${existing_value: -4}"
+        
+        # Try to get metadata
+        local meta_key="__meta__:${full_key}"
+        if vault_has "$meta_key" 2>/dev/null; then
+            local meta
+            meta=$(vault_get "$meta_key" 2>/dev/null)
+            if [[ -n "$meta" ]]; then
+                echo -e "  ${BOLD}Last Updated:${NC} ${DIM}${meta}${NC}"
+            fi
+        fi
+        
+        echo ""
+        echo -e "  ${YELLOW}Do you want to update this key?${NC}"
+        read -r -n1 -p "  (y/N): " confirm; echo ""
+        [[ "$confirm" != [yY] ]] && { echo -e "  ${DIM}Cancelled.${NC}"; return; }
+    fi
+    
+    # Step 3: Enter value
+    clear
+    title_box "Add/Update Vault Key" "🔐"
+    echo ""
+    echo -e "  ${BOLD}Project:${NC} ${CYAN}${project}${NC}"
+    echo -e "  ${BOLD}Type:${NC} ${key_type}"
+    echo -e "  ${BOLD}Key:${NC} ${full_key}"
+    echo ""
+    echo -e "  ${BOLD}Step 3 of 3: Enter the value${NC}"
+    echo -e "  ${DIM}──────────────────────────────────────${NC}"
+    echo ""
+    
+    read -r -s -p "  Value (hidden): " value
+    echo ""
+    
+    if [[ -z "$value" ]]; then
+        echo -e "  ${DIM}Cancelled.${NC}"
+        return
+    fi
+    
+    # Save the key
+    if vault_set "$full_key" "$value"; then
+        # Save metadata
+        local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+        local metadata="type=$key_type|created=$timestamp"
+        vault_set "__meta__:${full_key}" "$metadata" 2>/dev/null
+        
+        echo ""
+        if [[ "$is_update" == true ]]; then
+            echo -e "  ${GREEN}✓ Updated: ${BOLD}${full_key}${NC}"
+        else
+            echo -e "  ${GREEN}✓ Created: ${BOLD}${full_key}${NC}"
+        fi
+        echo -e "  ${DIM}Timestamp: ${timestamp}${NC}"
+    else
+        echo -e "  ${RED}✗ Failed to save${NC}"
+    fi
+}
+
+# ─── Legacy set (for CLI use) ────────────────────────────────────────────────
+
+do_set_key() {
+    local key="$1"
+    
+    # If no key provided, use wizard
+    if [[ -z "$key" ]]; then
+        do_set_key_wizard
+        return
+    fi
+    
+    # Direct set (for scripts/CLI)
+    if vault_has "$key" 2>/dev/null; then
+        local cur
+        cur=$(vault_get "$key" 2>/dev/null)
+        echo ""
+        echo -e "  ${DIM}Current: ${cur:0:4}••••${NC}"
+    fi
+    
+    echo ""
+    read -r -s -p "  Value (hidden): " value
+    echo ""
+    
+    if [[ -z "$value" ]]; then
+        echo -e "  ${DIM}Cancelled.${NC}"
+        return
+    fi
+    
+    if vault_set "$key" "$value"; then
+        # Save metadata
+        local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+        vault_set "__meta__:${key}" "created=$timestamp" 2>/dev/null
+        echo -e "  ${GREEN}✓ Saved: ${BOLD}${key}${NC}"
+    else
+        echo -e "  ${RED}✗ Failed to save${NC}"
+    fi
+}
+
+# ─── Get a key value ─────────────────────────────────────────────────────────
+
+do_get_key() {
+    local key="$1"
+    
+    if [[ -z "$key" ]]; then
+        read -r -p "  Key name: " key
+    fi
+    
+    [[ -z "$key" ]] && return
+    
+    local val
+    val=$(vault_get "$key" 2>/dev/null)
+    if [[ -n "$val" ]]; then
+        echo "$val"
+    else
+        echo -e "  ${RED}Key not found: ${key}${NC}" >&2
+        return 1
+    fi
+}
+
+# ─── Delete a key ────────────────────────────────────────────────────────────
+
+do_delete_key() {
+    local key="$1"
+    
+    # Get all keys
+    local -a all_keys=()
+    while IFS= read -r k; do
+        [[ -n "$k" ]] && all_keys+=("$k")
+    done < <(vault_list 2>/dev/null)
+    
+    if (( ${#all_keys[@]} == 0 )); then
+        echo -e "  ${DIM}No keys in vault.${NC}"
+        return
+    fi
+    
+    if [[ -z "$key" ]]; then
+        echo ""
+        echo -e "  ${BOLD}Delete Vault Key${NC}"
+        echo ""
+        
+        for i in "${!all_keys[@]}"; do
+            printf "  %2d) ${YELLOW}%s${NC}\n" "$((i+1))" "${all_keys[$i]}"
+        done
+        
+        echo ""
+        read -r -p "  Choose [1-${#all_keys[@]}] or key name: " choice
+        
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#all_keys[@]} )); then
+            key="${all_keys[$((choice-1))]}"
+        else
+            key="$choice"
+        fi
+    fi
+    
+    [[ -z "$key" ]] && return
+    
+    echo ""
+    echo -e "  ${YELLOW}Delete ${BOLD}${key}${NC}${YELLOW}?${NC}"
+    read -r -n1 -p "  Confirm (y/N): " yn; echo ""
+    
+    if [[ "$yn" == [yY] ]]; then
+        vault_del "$key"
+        echo -e "  ${GREEN}✓ Deleted: ${key}${NC}"
+    fi
+}
+
+# ─── Project-specific key manager ────────────────────────────────────────────
+
+do_project_keys() {
+    local project="$1"
+    
+    if [[ -z "$project" ]]; then
+        echo ""
+        echo -e "  ${BOLD}Project Key Manager${NC}"
+        echo ""
+        
+        # Get all unique project namespaces
+        local -a projects=()
+        while IFS= read -r key; do
+            if [[ "$key" =~ ^([^:]+): ]]; then
+                local proj="${BASH_REMATCH[1]}"
+                if [[ ! " ${projects[*]} " =~ " ${proj} " ]]; then
+                    projects+=("$proj")
+                fi
+            fi
+        done < <(vault_list 2>/dev/null)
+        
+        if (( ${#projects[@]} == 0 )); then
+            echo -e "  ${DIM}No projects with keys yet.${NC}"
+            echo -e "  ${DIM}Use format ${CYAN}project:keyname${DIM} when adding keys.${NC}"
+            echo ""
+            read -r -p "  Project name to create: " project
+            [[ -z "$project" ]] && return
+        else
+            echo -e "  ${DIM}Choose a project:${NC}"
+            echo ""
+            for i in "${!projects[@]}"; do
+                # Count keys for this project
+                local count=0
+                while IFS= read -r key; do
+                    [[ "$key" =~ ^${projects[$i]}: ]] && ((count++))
+                done < <(vault_list 2>/dev/null)
+                printf "  %2d) ${CYAN}%-20s${NC} ${DIM}(%d keys)${NC}\n" "$((i+1))" "${projects[$i]}" "$count"
+            done
+            echo ""
+            echo -e "  ${DIM}Or type a new project name${NC}"
+            echo ""
+            read -r -p "  Choose [1-${#projects[@]}] or name: " choice
+            
+            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#projects[@]} )); then
+                project="${projects[$((choice-1))]}"
+            else
+                project="$choice"
+            fi
+        fi
+    fi
+    
+    [[ -z "$project" ]] && return
+    
+    while true; do
+        clear
+        title_box "Project: $project" "📦"
+        
+        # Get all keys for this project
+        local -a proj_keys=()
+        while IFS= read -r key; do
+            [[ "$key" =~ ^${project}: ]] && proj_keys+=("$key")
+        done < <(vault_list 2>/dev/null)
+        
+        if (( ${#proj_keys[@]} > 0 )); then
+            echo -e "  ${BOLD}Keys:${NC}"
+            echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+            for key in "${proj_keys[@]}"; do
+                local val
+                val=$(vault_get "$key" 2>/dev/null)
+                local masked="••••••••"
+                if [[ -n "$val" && ${#val} -gt 8 ]]; then
+                    masked="${val:0:4}••••${val: -4}"
+                fi
+                local name="${key#*:}"
+                printf "  ${GREEN}✓${NC} %-30s ${DIM}%s${NC}\n" "$name" "$masked"
+            done
+        else
+            echo -e "  ${DIM}No keys yet for this project.${NC}"
+        fi
+        
+        echo ""
+        echo -e "  ${BOLD}Actions:${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+        echo -e "  ${GREEN}a${NC})  Add key"
+        echo -e "  ${GREEN}e${NC})  Edit key"
+        echo -e "  ${GREEN}d${NC})  Delete key"
+        echo -e "  ${GREEN}x${NC})  Export to .env file"
+        echo -e "  ${GREEN}i${NC})  Import from .env file"
+        echo -e "  ${GREEN}c${NC})  Copy all to clipboard"
+        echo -e "  ${GREEN}q${NC})  Back"
+        echo ""
+        read -r -n1 -p "  > " action; echo ""
+        
+        case "$action" in
+            a|A)
+                # Pre-fill project in wizard
+                do_set_key_wizard "$project"
+                ;;
+            e|E)
+                if (( ${#proj_keys[@]} == 0 )); then
+                    echo -e "  ${DIM}No keys to edit.${NC}"
+                else
+                    echo ""
+                    for i in "${!proj_keys[@]}"; do
+                        printf "  %2d) %s\n" "$((i+1))" "${proj_keys[$i]#*:}"
+                    done
+                    echo ""
+                    read -r -p "  Choose [1-${#proj_keys[@]}]: " choice
+                    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#proj_keys[@]} )); then
+                        do_set_key "${proj_keys[$((choice-1))]}"
+                    fi
+                fi
+                ;;
+            d|D)
+                if (( ${#proj_keys[@]} == 0 )); then
+                    echo -e "  ${DIM}No keys to delete.${NC}"
+                else
+                    echo ""
+                    for i in "${!proj_keys[@]}"; do
+                        printf "  %2d) ${YELLOW}%s${NC}\n" "$((i+1))" "${proj_keys[$i]#*:}"
+                    done
+                    echo ""
+                    read -r -p "  Choose [1-${#proj_keys[@]}]: " choice
+                    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#proj_keys[@]} )); then
+                        local key="${proj_keys[$((choice-1))]}"
+                        echo ""
+                        echo -e "  ${YELLOW}Delete ${BOLD}${key}${NC}${YELLOW}?${NC}"
+                        read -r -n1 -p "  Confirm (y/N): " yn; echo ""
+                        if [[ "$yn" == [yY] ]]; then
+                            vault_del "$key"
+                            echo -e "  ${GREEN}✓ Deleted${NC}"
+                        fi
+                    fi
+                fi
+                ;;
+            x|X)
+                _export_project_env "$project" "${proj_keys[@]}"
+                ;;
+            i|I)
+                _import_project_env "$project"
+                ;;
+            c|C)
+                _copy_project_env "$project" "${proj_keys[@]}"
+                ;;
+            q|Q|"")
+                return
+                ;;
+        esac
+        
+        echo ""
+        [[ "$action" != [qQ] ]] && { read -r -n1 -p "  Press any key..."; echo ""; }
+    done
+}
+
+# ─── Export project keys to .env file ────────────────────────────────────────
+
+_export_project_env() {
+    local project="$1"
+    shift
+    local -a keys=("$@")
+    
+    if (( ${#keys[@]} == 0 )); then
+        echo -e "  ${DIM}No keys to export.${NC}"
+        return
+    fi
+    
+    echo ""
+    local default_file="${project}.env"
+    read -r -p "  Save to file [${default_file}]: " envfile
+    envfile="${envfile:-$default_file}"
+    
+    # Resolve to absolute path
+    [[ "$envfile" != /* ]] && envfile="$PWD/$envfile"
+    
+    echo ""
+    echo -e "  ${DIM}Exporting ${#keys[@]} keys to ${envfile}...${NC}"
+    
+    {
+        echo "# Environment variables for: $project"
+        echo "# Generated: $(date)"
+        echo ""
+        for key in "${keys[@]}"; do
+            local val
+            val=$(vault_get "$key" 2>/dev/null)
+            if [[ -n "$val" ]]; then
+                # Convert project:key to KEY format
+                local envname="${key#*:}"
+                envname=$(echo "$envname" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+                echo "${envname}=${val}"
+            fi
+        done
+    } > "$envfile"
+    
+    chmod 600 "$envfile"
+    echo -e "  ${GREEN}✓ Exported to: ${envfile}${NC}"
+}
+
+# ─── Import from .env file ───────────────────────────────────────────────────
+
+_import_project_env() {
+    local project="$1"
+    
+    echo ""
+    read -r -p "  Path to .env file: " envfile
+    [[ -z "$envfile" ]] && return
+    
+    # Expand ~ and resolve path
+    envfile="${envfile/#\~/$HOME}"
+    [[ "$envfile" != /* ]] && envfile="$PWD/$envfile"
+    
+    if [[ ! -f "$envfile" ]]; then
+        echo -e "  ${RED}File not found: ${envfile}${NC}"
+        return
+    fi
+    
+    local count=0
+    echo ""
+    echo -e "  ${DIM}Importing from ${envfile}...${NC}"
+    echo ""
+    
+    while IFS='=' read -r key val; do
+        # Skip comments and empty lines
+        [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+        
+        # Convert KEY_NAME to key-name format
+        local vaultkey=$(echo "$key" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+        vaultkey="${project}:${vaultkey}"
+        
+        if vault_set "$vaultkey" "$val"; then
+            echo -e "  ${GREEN}✓${NC} $key → $vaultkey"
+            ((count++))
+        fi
+    done < "$envfile"
+    
+    echo ""
+    echo -e "  ${GREEN}✓ Imported ${count} keys${NC}"
+}
+
+# ─── Copy project env to clipboard ──────────────────────────────────────────
+
+_copy_project_env() {
+    local project="$1"
+    shift
+    local -a keys=("$@")
+    
+    if (( ${#keys[@]} == 0 )); then
+        echo -e "  ${DIM}No keys to copy.${NC}"
+        return
+    fi
+    
+    local envtext=""
+    for key in "${keys[@]}"; do
+        local val
+        val=$(vault_get "$key" 2>/dev/null)
+        if [[ -n "$val" ]]; then
+            local envname="${key#*:}"
+            envname=$(echo "$envname" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+            envtext+="${envname}=${val}"$'\n'
+        fi
+    done
+    
+    if command -v pbcopy &>/dev/null; then
+        echo -n "$envtext" | pbcopy
+        echo -e "  ${GREEN}✓ Copied ${#keys[@]} keys to clipboard${NC}"
+    else
+        echo -e "  ${YELLOW}Clipboard not available (pbcopy not found)${NC}"
+        echo ""
+        echo "$envtext"
+    fi
+}
+
+# ─── Interactive Menu ─────────────────────────────────────────────────────────
+
+do_menu() {
+    while true; do
+        clear
+        do_browse
+        
+        echo -e "  ${BOLD}Actions:${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+        echo -e "  ${GREEN}a${NC})  Add/update key ${DIM}(wizard)${NC}"
+        echo -e "  ${GREEN}d${NC})  Delete key"
+        echo -e "  ${GREEN}g${NC})  Get key value"
+        echo -e "  ${GREEN}p${NC})  Project key manager"
+        echo -e "  ${GREEN}r${NC})  Refresh"
+        echo -e "  ${GREEN}q${NC})  Back"
+        echo ""
+        read -r -n1 -p "  > " action; echo ""
+        
+        case "$action" in
+            a|A) do_set_key_wizard ;;
+            d|D) do_delete_key ;;
+            g|G) 
+                echo ""
+                do_get_key
+                ;;
+            p|P) do_project_keys ;;
+            r|R) continue ;;
+            q|Q|"") return ;;
+        esac
+        
+        echo ""
+        [[ "$action" != [qQrR] ]] && { read -r -n1 -p "  Press any key..."; echo ""; }
+    done
+}
+
+# ─── CLI Entry Point ─────────────────────────────────────────────────────────
+
+case "${1:-}" in
+    list|ls|browse)     
+        do_browse
+        ;;
+    get)                
+        do_get_key "$2"
+        ;;
+    set|add)
+        # Use wizard if no key provided, direct set if key is given
+        if [[ -z "$2" ]]; then
+            do_set_key_wizard
+        else
+            do_set_key "$2"
+        fi
+        ;;
+    delete|del|rm)      
+        do_delete_key "$2"
+        ;;
+    project|proj)       
+        do_project_keys "$2"
+        ;;
+    *)                  
+        do_menu
+        ;;
+esac

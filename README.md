@@ -40,13 +40,15 @@ Type `kmac` and you get this:
 
     System
     S  Storage Manager        u  Check Updates          b  Backup Dotfiles
-    .  Secrets & Keys         i  Install / Bootstrap    I  Software Manager
-    ?  Health Check           /  Aliases
+    V  Vault Manager          .  Secrets & Keys         i  Install / Bootstrap
+    I  Software Manager       ?  Health Check           /  Aliases
 
     0  Exit
 ```
 
 Every key is one keypress — no Enter needed. Or skip the menu entirely and use CLI commands like `kmac ask "..."`, `kmac docker health`, or `kmac pilot start`.
+
+**NEW: Live Reload** — Press `~` (tilde) in the main menu to reload all scripts without exiting. Perfect for development or after pulling updates. See changes immediately without restarting.
 
 ## Install
 
@@ -282,7 +284,81 @@ kmac killport                  # List all listening ports
 
 ---
 
-### 6. Secrets & Integration Hub
+### 6. Vault Manager — Project Key Organization
+
+**NEW!** A wizard-based vault manager for organizing API keys and secrets by project. Makes it easy to manage keys for multiple projects and export them for AI tools.
+
+**Vault Manager** (`V` / `kmac vault`) — organized, project-based secret management with an intuitive wizard interface:
+
+```bash
+kmac vault                    # Interactive vault browser
+kmac vault list               # Browse all keys organized by project
+kmac vault set                # Add key with wizard (3-step process)
+kmac vault project myapp      # Project-specific key manager
+kmac vault get myproject:key  # Get a specific key value
+```
+
+**Key Features:**
+
+- **3-Step Wizard** — No typing formats! Just answer:
+  1. Which project? (choose existing or create new)
+  2. What's the key for? (24 common types: OpenAI, Claude, Stripe, Database, etc.)
+  3. Enter the value (hidden input)
+  
+- **Automatic Organization** — Keys auto-group by project namespace:
+  ```
+  myproject/
+    ├─ openai_key            sk-p••••RssA  [2026-04-11 04:30:15]
+    ├─ database_url          post••••mydb
+  
+  staging/
+    ├─ stripe_secret         sk_t••••_456  [2026-04-11 04:25:10]
+  ```
+
+- **Timestamp Tracking** — Every key stores when it was created/updated
+
+- **Update Protection** — Shows current value and asks for confirmation before overwriting
+
+- **Export to .env Files** — Perfect for local dev and AI tools:
+  ```bash
+  kmac vault project myapp
+  # Press 'x' to export → creates myapp.env
+  # Use with AI: "Here are my keys in myapp.env"
+  # Clean up: rm myapp.env
+  ```
+
+- **Import from .env** — Bulk import existing keys from `.env` files
+
+- **Project Manager** — Interactive menu per project with:
+  - Add/edit/delete keys
+  - Export all keys to file
+  - Import from .env file
+  - Copy to clipboard
+
+**24 Common Key Types:**
+- AI: OpenAI, Anthropic (Claude), Google AI, Groq
+- Payment: Stripe (secret & publishable)
+- Database: PostgreSQL, MongoDB, Redis URLs, passwords
+- Auth: JWT secrets, OAuth (client ID & secret)
+- Cloud: AWS (access & secret keys), GitHub, GitLab, Docker Hub
+- Services: SendGrid, Twilio, webhooks
+- Generic: API keys, custom types
+
+**AI-Friendly Workflow:**
+```bash
+# When AI needs your keys:
+kmac vault project myapp
+# Press 'x' to export → myapp.env
+
+# Give to AI: "Use the keys in myapp.env"
+# When done: rm myapp.env
+```
+
+See `docs/VAULT_GUIDE.md` for complete documentation.
+
+---
+
+### 7. Secrets & Integration Hub
 
 A private credential vault that turns KMac into your personal command center — securely storing API keys for AI models, cloud providers, MCP servers, and any service you integrate with.
 
@@ -359,7 +435,7 @@ bash ~/Projects/KMac-CLI/scripts/setup-mac
 
 ---
 
-### 7. Plugin System & Extensibility
+### 8. Plugin System & Extensibility
 
 Extend the toolkit without touching core code. Drop an executable script into `plugins/` with three header comments and it appears in the interactive menu automatically:
 
@@ -397,7 +473,7 @@ Included plugins:
 
 ---
 
-### 8. Software Manager
+### 9. Software Manager
 
 Interactive software installation and updates from the toolkit menu (`I`) or the CLI. The manager organizes tools into **five categories**: **Dev Essentials**, **AI & Coding Agents**, **Editors & Apps**, **Infrastructure**, and **Shell & Productivity**. It covers **30+ tools** including git, node, python, rust, claude, chatgpt, gemini, ollama, aider, copilot, cursor, vscode, docker, kubectl, terraform, starship, and oh-my-zsh.
 
@@ -407,7 +483,7 @@ Each entry shows **installed vs not installed** status with **version numbers** 
 
 ---
 
-### 9. Cross-Platform Support
+### 10. Cross-Platform Support
 
 KMac uses **`scripts/_platform.sh`** as a cross-platform abstraction layer. It **detects the OS** (macOS vs Linux), **Linux distro** (Ubuntu, Fedora, Arch), and **package manager** (Homebrew, apt, dnf, or pacman). **Wrapper functions** unify clipboard access, desktop notifications, credential storage (**macOS Keychain** vs **`secret-tool`** on Linux), local IP discovery, and common file operations.
 
@@ -415,7 +491,7 @@ The **software installer** translates Homebrew-oriented commands to the **native
 
 ---
 
-### 10. Testing & CI
+### 11. Testing & CI
 
 The repo ships **60 smoke tests** across **eight test files**, driven by a **lightweight Bash test runner** with **no extra dependencies**. **GitHub Actions** runs a **matrix** on **macOS and Ubuntu** and includes **ShellCheck**. Run the suite locally:
 
