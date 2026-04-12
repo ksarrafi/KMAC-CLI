@@ -382,9 +382,9 @@ A private credential vault that turns KMac into your personal command center —
 
 **Secrets & Keys** (`.` / `kmac secrets`) — a full-featured secret management system with three backends:
 
-- **macOS Keychain** (default) — hardware-backed, OS-managed, unlocked by your login password. Secrets survive reboots and app reinstalls. The most secure option on macOS.
+- **Docker Vault** (default) — a containerized, isolated key-value store. Runs a lightweight Python server inside a Docker container with data encrypted in a Docker volume (`kmac-vault-data`). Only listens on `127.0.0.1` — never exposed to the network. Portable — back up or migrate the volume to move between machines. Ideal for users who already run Docker and want OS-independent secret storage.
+- **macOS Keychain** — hardware-backed, OS-managed, unlocked by your login password. Secrets survive reboots and app reinstalls. The most secure option on macOS.
 - **Encrypted File Vault** — AES-256-CBC encryption via `openssl` with PBKDF2 key derivation (100,000 iterations). Protected by a master password. Stored at `~/.config/kmac/vault.enc`. Portable — sync via iCloud, git, or USB to other machines.
-- **Docker Vault** — a containerized, isolated key-value store. Runs a lightweight Python server inside a Docker container with data encrypted in a Docker volume (`kmac-vault-data`). Only listens on `127.0.0.1` — never exposed to the network. Portable — back up or migrate the volume to move between machines. Ideal for users who already run Docker and want OS-independent secret storage.
 
 Secrets are *never* written as plaintext to disk or stored in environment files. All KMac tools look up credentials through the vault automatically.
 
@@ -824,7 +824,7 @@ cd ios/KMacPilot && xcodegen generate && open KMacPilot.xcodeproj
 ## Design Decisions
 
 - **Bash 3.2** — macOS ships with Bash 3.2 (not 5+). No associative arrays, no namerefs, no `mapfile`. All scripts respect this constraint.
-- **Triple-backend vault** — secrets are stored in macOS Keychain (hardware-backed), an AES-256-CBC encrypted file (portable), or a Docker container vault (isolated, volume-portable). The `_vault.sh` library provides a unified API (`vault_get`, `vault_set`) so scripts don't need to know which backend is active. Secrets never touch disk as plaintext. The Docker backend runs a lightweight Python REST server inside a container with data encrypted in a named volume — ideal for users who want OS-independent, containerized secret storage with volume backup/restore portability.
+- **Triple-backend vault** — secrets are stored in a Docker container vault (default, isolated, volume-portable), macOS Keychain (hardware-backed), or an AES-256-CBC encrypted file (portable). The `_vault.sh` library provides a unified API (`vault_get`, `vault_set`) so scripts don't need to know which backend is active. Secrets never touch disk as plaintext. The Docker backend (default since v3.3.0) runs a lightweight Python REST server inside a container with Fernet-encrypted data (AES-128-CBC + HMAC-SHA256) in a named volume — ideal for OS-independent, containerized secret storage with volume backup/restore portability.
 - **Docker Engine API** — direct unix socket calls via `curl --unix-socket` instead of parsing `docker` CLI output. Faster, more reliable, structured JSON.
 - **No heavy dependencies** — the core toolkit needs nothing beyond what macOS provides. Optional tools enhance UX but aren't required.
 - **Plugin protocol** — three comment headers in a script. That's it. No registration, no config files, no compilation.

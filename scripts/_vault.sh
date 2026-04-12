@@ -23,7 +23,7 @@ _VAULT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VAULT_DIR="${KMAC_VAULT_DIR:-$HOME/.config/kmac}"
 VAULT_FILE="$VAULT_DIR/vault.enc"
 VAULT_REGISTRY="$VAULT_DIR/integrations.json"
-VAULT_BACKEND="${KMAC_VAULT_BACKEND:-auto}"  # auto | keychain | file | docker
+VAULT_BACKEND="${KMAC_VAULT_BACKEND:-docker}"  # docker (default) | keychain | file | auto
 
 # ─── Backend Detection ───────────────────────────────────────────────────
 

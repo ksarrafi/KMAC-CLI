@@ -2,6 +2,22 @@
 
 ## 3.3.0 — 2026-04-12
 
+### Breaking Change: Docker Vault Default Backend
+- **Vault backend default changed from `auto` to `docker`**
+  - New installations now use Docker vault by default
+  - Existing users unaffected (backend preference persisted in `~/.config/kmac/backend`)
+  - Docker vault provides: containerized isolation, volume portability, REST API
+  - Auto-fallback to Keychain if Docker unavailable during first-run setup
+  - To opt out: `export KMAC_VAULT_BACKEND=keychain` or run `kmac secrets` → switch backend
+
+### Migration: Consolidated Central Vault
+- **All project secrets migrated to kmac-vault** (Docker container on port 9999)
+  - Deprecated: tron-vault (port 13001), fc-vault (port 8200)
+  - 11 keys migrated across 3 projects with namespace preservation
+  - Single source of truth for all KMac integrations
+  - REST API for consistent access: `/get/:key`, `/set`, `/list`, `/delete`
+  - See `VAULT_MIGRATION_NOTICE.md` for migration details
+
 ### UX Improvements — Medium Priority
 - **Better delete confirmations** — Full preview before deletion
   - Shows key name, masked value, and creation timestamp
