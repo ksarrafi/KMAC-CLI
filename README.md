@@ -241,6 +241,8 @@ Includes heartbeat streaming — periodic status updates with elapsed time and o
 - Docker container management
 - Settings with persistent server credentials and auto-reconnect
 
+See [docs/iOS_APP_GUIDE.md](docs/iOS_APP_GUIDE.md) for complete setup instructions.
+
 ```bash
 brew install xcodegen
 cd ios/KMacPilot && xcodegen generate && open KMacPilot.xcodeproj
