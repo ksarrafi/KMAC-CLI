@@ -372,9 +372,9 @@ print_menu() {
     echo ""
     echo -e "   ${YELLOW}${BOLD}System${NC}"
     echo -e "   ${DIM}──────${NC}"
-    _mc "S" "Storage Manager"     "u" "Check Updates"       "b" "Backup Dotfiles"
-    _mc "." "Secrets & Keys"      "i" "Install / Bootstrap" "I" "Software Manager"
-    _mc "?" "Health Check"        "/" "Aliases"             "" ""
+    echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}u${NC}  Check Updates          ${GREEN}b${NC}  Backup Dotfiles"
+    echo -e "   ${GREEN}V${NC}  Vault Manager          ${GREEN}.${NC}  Secrets & Keys         ${GREEN}i${NC}  Install / Bootstrap"
+    echo -e "   ${GREEN}I${NC}  Software Manager       ${GREEN}?${NC}  Health Check           ${GREEN}/${NC}  Aliases"
 
     # ─── Plugins (sorted by key, 3-column grid) ───
     if (( ${#PLUGIN_NAMES[@]} > 0 )); then
@@ -402,7 +402,7 @@ print_menu() {
     echo ""
     echo -e "  ${DIM}─────────────────────────────────────────────────────${NC}"
     random_tip
-    echo -e "   ${DIM}0  Exit${NC}"
+    echo -e "   ${CYAN}~${NC}  Reload Toolkit  ${DIM}(refresh scripts)${NC}     ${DIM}0  Exit${NC}"
     echo ""
 }
 
@@ -971,6 +971,7 @@ main() {
             n) clear; do_network ;;
             k) clear; echo -e "${BOLD}Kill Port:${NC} ${DIM}(Enter = list, m = back)${NC}"; read -r -p "  Port: " pt; [[ "$pt" == [mM] ]] && continue; safe_run "Kill Port" bash "$SCRIPTS_DIR/killport" "$pt"; pause ;;
             # System
+            V) clear; bash "$SCRIPTS_DIR/vault"; pause ;;
             .) clear; do_secrets ;;
             S) clear; bash "$SCRIPTS_DIR/storage" ;;
             b) clear; safe_run "Dotfile Backup" bash "$SCRIPTS_DIR/dotbackup"; pause ;;
@@ -979,7 +980,45 @@ main() {
             I) clear; bash "$SCRIPTS_DIR/software" ;;
             /) clear; do_aliases ;;
             \?) clear; do_health ;;
-            0) hooks_emit on-exit || true; echo -e "\n  ${C_TEAL}See you.${NC}\n"; exit 0 ;;
+            "~")
+                clear
+                echo ""
+                echo -e "  ${CYAN}${BOLD}🔄 Reloading KMac Toolkit...${NC}"
+                echo ""
+                
+                # Show what we're reloading
+                echo -e "  ${DIM}Re-sourcing core libraries...${NC}"
+                
+                # Re-source core libraries
+                source "$SCRIPTS_DIR/_ui.sh" 2>/dev/null
+                source "$SCRIPTS_DIR/_vault.sh" 2>/dev/null
+                source "$SCRIPTS_DIR/_ai-fix.sh" 2>/dev/null
+                source "$SCRIPTS_DIR/_hooks.sh" 2>/dev/null
+                
+                # Reload platform layer if it exists
+                [[ -f "$SCRIPTS_DIR/_platform.sh" ]] && source "$SCRIPTS_DIR/_platform.sh" 2>/dev/null
+                
+                echo -e "  ${GREEN}✓${NC} Core scripts"
+                
+                # Reload plugins
+                echo -e "  ${DIM}Scanning for plugins...${NC}"
+                discover_plugins
+                echo -e "  ${GREEN}✓${NC} Plugins (${#PLUGIN_NAMES[@]} found)"
+                
+                # Reload version
+                VERSION=$(git -C "$TOOLKIT_DIR" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+                [[ -z "$VERSION" ]] && VERSION=$(cat "$TOOLKIT_DIR/VERSION" 2>/dev/null || echo "unknown")
+                echo -e "  ${GREEN}✓${NC} Version ($VERSION)"
+                
+                # Clear any cached data
+                [[ -f "$KMAC_CACHE_DIR/.version" ]] && rm -f "$KMAC_CACHE_DIR/.version"
+                
+                echo ""
+                echo -e "  ${GREEN}${BOLD}✓ Toolkit refreshed!${NC} ${DIM}All changes are now active.${NC}"
+                echo ""
+                sleep 1.5
+                ;;
+            0) hooks_emit on-exit || true; echo -e "\n  ${C_TEAL}See you! ✌${NC}\n"; exit 0 ;;
             *)
                 # Check plugins
                 local matched=false
@@ -1019,6 +1058,7 @@ if [[ $# -gt 0 ]]; then
         doctor)     do_health ;;
         storage)    exec bash "$SCRIPTS_DIR/storage" "$@" ;;
         secrets)    exec bash "$SCRIPTS_DIR/secrets" "$@" ;;
+        vault)      exec bash "$SCRIPTS_DIR/vault" "$@" ;;
         docker)     exec bash "$SCRIPTS_DIR/docker" "$@" ;;
         docker-health) exec bash "$SCRIPTS_DIR/docker-health" "$@" ;;
         make|build|toolmaker) exec bash "$SCRIPTS_DIR/toolmaker" "$@" ;;
@@ -1076,6 +1116,7 @@ if [[ $# -gt 0 ]]; then
             echo -e "  ${BOLD}System${NC}"
             echo "    software [cmd]        Install dev tools & AI CLIs (list|install|update|search)"
             echo "    secrets [cmd]         Credential manager (list|get|set|export|add|backend)"
+            echo "    vault [cmd]           Project key manager (list|set|get|delete|project)"
             echo "    storage [cmd]         Disk usage analyzer + iCloud migration"
             echo "    dotbackup [cmd]       Backup/restore/diff/hook dotfiles"
             echo "    update                Check for updates"

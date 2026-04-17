@@ -1,5 +1,152 @@
 # Changelog
 
+## 3.3.0 — 2026-04-12
+
+### Breaking Change: Docker Vault Default Backend
+- **Vault backend default changed from `auto` to `docker`**
+  - New installations now use Docker vault by default
+  - Existing users unaffected (backend preference persisted in `~/.config/kmac/backend`)
+  - Docker vault provides: containerized isolation, volume portability, REST API
+  - Auto-fallback to Keychain if Docker unavailable during first-run setup
+  - To opt out: `export KMAC_VAULT_BACKEND=keychain` or run `kmac secrets` → switch backend
+
+### Migration: Consolidated Central Vault
+- **All project secrets migrated to kmac-vault** (Docker container on port 9999)
+  - Deprecated: tron-vault (port 13001), fc-vault (port 8200)
+  - 11 keys migrated across 3 projects with namespace preservation
+  - Single source of truth for all KMac integrations
+  - REST API for consistent access: `/get/:key`, `/set`, `/list`, `/delete`
+  - See `VAULT_MIGRATION_NOTICE.md` for migration details
+
+### UX Improvements — Medium Priority
+- **Better delete confirmations** — Full preview before deletion
+  - Shows key name, masked value, and creation timestamp
+  - Requires typing 'DELETE' to confirm (not just 'y')
+  - "This action cannot be undone" warning
+  - Checks if key exists before showing delete screen
+  - Automatically cleans up metadata on deletion
+- **Reorganized menus** — Clearer hierarchy and better flow
+  - Main menu: Grouped into "Quick Actions" and "Project Management"
+  - Project menu: Grouped into "Manage Keys" and "Import/Export"
+  - More descriptive labels with hints
+  - Better visual separation between sections
+- **Visual consistency** — Unified styling across all views
+  - Consistent use of title boxes with emojis
+  - Uniform color scheme (green=success, yellow=warning, red=error, cyan=info)
+  - Better spacing and alignment throughout
+  - Loading messages with auto-clear
+  - Improved error messages with actionable steps
+
+### UX Improvements — Low Priority  
+- **Keyboard shortcuts** — Fast navigation
+  - `/` to search/filter keys
+  - `h` for context-sensitive help in all menus
+  - `r` to refresh views
+  - `q` to go back / exit
+- **Search/filter functionality** — Find keys quickly
+  - Real-time regex search across all keys
+  - Shows matched keys with masked values
+  - Accessible via `/` from main menu
+- **Context-sensitive help** — Press `h` anywhere
+  - Main menu help with CLI examples
+  - Project menu help with workflow tips
+  - Keyboard shortcuts guide included
+- **Improved get key view** — Better UX for retrieving values
+  - Shows first 10 available keys for reference
+  - Clear visual feedback during retrieval
+  - Cancel option with 'c'
+  - Loading indicator
+
+### Improved
+- All menus now have help accessible via `h`
+- Delete operations show full preview before confirmation
+- Project menu delete uses same preview as main delete
+- Menu organization makes common actions more discoverable
+- Search makes large vaults easier to navigate
+
+## 3.2.0 — 2026-04-12
+
+### UX Improvements — High Priority
+- **Retry loops on validation errors** — Wizard no longer exits on invalid input
+  - Project name validation loops until valid or cancelled
+  - Key type selection retries on invalid choice
+  - Value input retries on empty or invalid format
+  - Custom key name input has validation loop
+  - Format warnings offer retry option (y/N/r)
+- **Loading indicators** — Visual feedback for slow operations
+  - "Loading keys..." message in browse view (auto-clears when done)
+  - Import shows "⏳ Importing from..." with progress
+  - Export improved with better status messages
+- **Empty state guidance** — Helpful prompts for first-time users
+  - Browse shows "No keys stored yet" with getting started guide
+  - Suggests common first keys (OpenAI, Anthropic, databases)
+  - Clear instructions: "Press 'a' to add your first key"
+- **Documentation consolidation** — Removed duplication
+  - Deleted `QUICKSTART_VAULT.md` (redundant with README section 6)
+  - Deleted `VAULT_MANAGER.md` (implementation notes, not user-facing)
+  - Added comprehensive Table of Contents to `docs/VAULT_GUIDE.md`
+  - Updated `--help` to reference streamlined docs
+
+### Improved
+- All wizard validations now loop instead of cancel
+- Better error messages with actionable next steps
+- Clearer visual hierarchy in empty states
+
+## 3.1.1 — 2026-04-12
+
+### Critical Fixes
+- **Fixed reload plugin bug** — `~` menu option now correctly calls `discover_plugins` (was calling undefined `_discover_plugins`)
+- **Added `--help` support** — `kmac vault --help` now shows full command documentation
+- **Input validation** — Wizard validates project names (alphanumeric + hyphens/underscores only)
+- **Value validation** — Empty values rejected with helpful error messages
+- **Format hints** — Shows expected format for OpenAI, Anthropic, GitHub tokens
+- **Format warnings** — Warns if API key doesn't match expected pattern (with override option)
+- **Password verification** — First-time vault setup requires password confirmation to prevent typos
+- **Minimum password length** — Enforces 8+ character passwords on file vault creation
+- **Better Docker errors** — Clear diagnostics when Docker isn't running or container fails
+  - Detects missing Docker installation
+  - Detects stopped Docker daemon (with platform-specific fix instructions)
+  - Shows health check progress with visual feedback
+  - Provides troubleshooting commands for common failures
+- **Enhanced error messages** — All vault operations provide actionable recovery steps
+
+## 3.1.0 — 2026-04-11
+
+### New: Vault Manager — Project-Based Key Organization (`V` / `kmac vault`)
+- **3-step wizard interface** for adding keys — no typing formats, just answer questions
+- **Step 1**: Choose or create project (auto-lists existing projects)
+- **Step 2**: Select key type from 24 common options (OpenAI, Claude, Stripe, Database, OAuth, AWS, etc.)
+- **Step 3**: Enter value with hidden input
+- **Automatic organization** by project namespace (myproject/, staging/, production/)
+- **Timestamp tracking** — stores created/updated datetime for every key
+- **Update protection** — shows current value and asks confirmation before overwriting
+- **Export to .env files** — perfect for local development and AI tools
+- **Import from .env files** — bulk import existing environment variables
+- **Project manager** — interactive menu for managing all keys in a project
+- **Copy to clipboard** — quick export of all project keys as env vars
+- **Metadata display** — shows timestamps in browse view
+- **24 common key types**: AI APIs, payment processors, databases, OAuth, cloud providers, webhooks
+- **AI-friendly workflow** — export keys when AI needs them, delete when done
+- CLI: `kmac vault`, `kmac vault list`, `kmac vault set`, `kmac vault project myapp`
+
+### New: Live Reload Feature (`~` in menu)
+- **In-menu reload** — press `~` (tilde) to refresh all scripts without exiting
+- **Re-sources core libraries** — UI, vault, AI helpers, hooks, platform layer
+- **Rescans plugins** — new plugins appear immediately
+- **Clears caches** — ensures fresh state after updates
+- **Perfect for development** — see script changes without restarting
+- **After git pull** — refresh to see new features instantly
+
+### Improved
+- **Vault display** — fixed BASH_REMATCH bug where metadata regex overwrote key names
+- **Menu footer** — added reload option with clear indicator
+- **Documentation** — comprehensive vault guides (VAULT_GUIDE.md, VAULT_MANAGER.md, QUICKSTART_VAULT.md)
+
+### Fixed
+- **Vault key display bug** — metadata timestamps no longer show as key names
+- **ANSI escape codes** — now properly formatted instead of showing raw codes
+- **Regex variable preservation** — key names saved before metadata checks
+
 ## 3.0.0 — 2026-03-29
 
 ### Removed

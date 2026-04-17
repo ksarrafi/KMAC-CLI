@@ -41,8 +41,8 @@ Type `kmac` and you get this:
 
     System
     S  Storage Manager        u  Check Updates          b  Backup Dotfiles
-    .  Secrets & Keys         i  Install / Bootstrap    I  Software Manager
-    ?  Health Check           /  Aliases
+    V  Vault Manager          .  Secrets & Keys         i  Install / Bootstrap
+    I  Software Manager       ?  Health Check           /  Aliases
 
     Plugins  1–7  System Cleanup, Wi-Fi Password, Git Stats, Docker Notify,
                Git Guardian, Project Stats, Tmux Sessions
@@ -51,6 +51,8 @@ Type `kmac` and you get this:
 ```
 
 Every key is one keypress — no Enter needed. Or skip the menu entirely and use CLI commands like `kmac ask "..."`, `kmac docker health`, or `kmac pilot start`.
+
+**NEW: Live Reload** — Press `~` (tilde) in the main menu to reload all scripts without exiting. Perfect for development or after pulling updates. See changes immediately without restarting.
 
 ## Install
 
@@ -308,6 +310,8 @@ Includes heartbeat streaming — periodic status updates with elapsed time and o
 - Docker container management
 - Settings with persistent server credentials and auto-reconnect
 
+See [docs/iOS_APP_GUIDE.md](docs/iOS_APP_GUIDE.md) for complete setup instructions.
+
 ```bash
 brew install xcodegen
 cd ios/KMacPilot && xcodegen generate && open KMacPilot.xcodeproj
@@ -351,15 +355,107 @@ kmac killport                  # List all listening ports
 
 ---
 
+### 6. Vault Manager — Project Key Organization
+
+**NEW!** A wizard-based vault manager for organizing API keys and secrets by project. Makes it easy to manage keys for multiple projects and export them for AI tools.
+
+**Vault Manager** (`V` / `kmac vault`) — organized, project-based secret management with an intuitive wizard interface:
+
+```bash
+kmac vault                    # Interactive vault browser
+kmac vault list               # Browse all keys organized by project
+kmac vault set                # Add key with wizard (3-step process)
+kmac vault project myapp      # Project-specific key manager
+kmac vault get myproject:key  # Get a specific key value
+```
+
+**Key Features:**
+
+- **3-Step Wizard** — No typing formats! Just answer:
+  1. Which project? (choose existing or create new)
+  2. What's the key for? (24 common types: OpenAI, Claude, Stripe, Database, etc.)
+  3. Enter the value (hidden input)
+  - **Retry loops** — Invalid input prompts retry instead of canceling
+  - **Format hints** — Shows expected format for common key types
+  - **Validation warnings** — Alerts if key format looks incorrect
+  
+- **Automatic Organization** — Keys auto-group by project namespace:
+  ```
+  myproject/
+    ├─ openai_key            sk-p••••RssA  [2026-04-11 04:30:15]
+    ├─ database_url          post••••mydb
+  
+  staging/
+    ├─ stripe_secret         sk_t••••_456  [2026-04-11 04:25:10]
+  ```
+
+- **Timestamp Tracking** — Every key stores when it was created/updated
+
+- **Update Protection** — Shows current value and asks for confirmation before overwriting
+
+- **Smart Delete Confirmations** — Full preview before deletion:
+  - Shows key name, masked value, and creation timestamp
+  - Requires typing 'DELETE' to confirm (prevents accidents)
+  - "This action cannot be undone" warning
+
+- **Search & Navigation** — Find keys quickly:
+  - Press `/` to search/filter keys
+  - Real-time regex search across all keys
+  - Keyboard shortcuts: `h` for help, `r` to refresh, `q` to exit
+
+- **Empty State Guidance** — Helpful for first-time users:
+  - Clear instructions when vault is empty
+  - Suggests common first keys to add
+  - Getting started guide right in the interface
+
+- **Export to .env Files** — Perfect for local dev and AI tools:
+  ```bash
+  kmac vault project myapp
+  # Press 'x' to export → creates myapp.env
+  # Use with AI: "Here are my keys in myapp.env"
+  # Clean up: rm myapp.env
+  ```
+
+- **Import from .env** — Bulk import existing keys from `.env` files
+
+- **Project Manager** — Interactive menu per project with:
+  - Add/edit/delete keys
+  - Export all keys to file
+  - Import from .env file
+  - Copy to clipboard
+
+**24 Common Key Types:**
+- AI: OpenAI, Anthropic (Claude), Google AI, Groq
+- Payment: Stripe (secret & publishable)
+- Database: PostgreSQL, MongoDB, Redis URLs, passwords
+- Auth: JWT secrets, OAuth (client ID & secret)
+- Cloud: AWS (access & secret keys), GitHub, GitLab, Docker Hub
+- Services: SendGrid, Twilio, webhooks
+- Generic: API keys, custom types
+
+**AI-Friendly Workflow:**
+```bash
+# When AI needs your keys:
+kmac vault project myapp
+# Press 'x' to export → myapp.env
+
+# Give to AI: "Use the keys in myapp.env"
+# When done: rm myapp.env
+```
+
+See `docs/VAULT_GUIDE.md` for complete documentation.
+
+---
+
 ### 7. Secrets & Integration Hub
 
 A private credential vault that turns KMac into your personal command center — securely storing API keys for AI models, cloud providers, MCP servers, and any service you integrate with.
 
 **Secrets & Keys** (`.` / `kmac secrets`) — a full-featured secret management system with three backends:
 
-- **macOS Keychain** (default) — hardware-backed, OS-managed, unlocked by your login password. Secrets survive reboots and app reinstalls. The most secure option on macOS.
+- **Docker Vault** (default) — a containerized, isolated key-value store. Runs a lightweight Python server inside a Docker container with data encrypted in a Docker volume (`kmac-vault-data`). Only listens on `127.0.0.1` — never exposed to the network. Portable — back up or migrate the volume to move between machines. Ideal for users who already run Docker and want OS-independent secret storage.
+- **macOS Keychain** — hardware-backed, OS-managed, unlocked by your login password. Secrets survive reboots and app reinstalls. The most secure option on macOS.
 - **Encrypted File Vault** — AES-256-CBC encryption via `openssl` with PBKDF2 key derivation (100,000 iterations). Protected by a master password. Stored at `~/.config/kmac/vault.enc`. Portable — sync via iCloud, git, or USB to other machines.
-- **Docker Vault** — a containerized, isolated key-value store. Runs a lightweight Python server inside a Docker container with data encrypted in a Docker volume (`kmac-vault-data`). Only listens on `127.0.0.1` — never exposed to the network. Portable — back up or migrate the volume to move between machines. Ideal for users who already run Docker and want OS-independent secret storage.
 
 Secrets are *never* written as plaintext to disk or stored in environment files. All KMac tools look up credentials through the vault automatically.
 
@@ -759,7 +855,7 @@ cd ios/KMacPilot && xcodegen generate && open KMacPilot.xcodeproj
 ## Design Decisions
 
 - **Bash 3.2** — macOS ships with Bash 3.2 (not 5+). No associative arrays, no namerefs, no `mapfile`. All scripts respect this constraint.
-- **Triple-backend vault** — secrets are stored in macOS Keychain (hardware-backed), an AES-256-CBC encrypted file (portable), or a Docker container vault (isolated, volume-portable). The `_vault.sh` library provides a unified API (`vault_get`, `vault_set`) so scripts don't need to know which backend is active. Secrets never touch disk as plaintext. The Docker backend runs a lightweight Python REST server inside a container with data encrypted in a named volume — ideal for users who want OS-independent, containerized secret storage with volume backup/restore portability.
+- **Triple-backend vault** — secrets are stored in a Docker container vault (default, isolated, volume-portable), macOS Keychain (hardware-backed), or an AES-256-CBC encrypted file (portable). The `_vault.sh` library provides a unified API (`vault_get`, `vault_set`) so scripts don't need to know which backend is active. Secrets never touch disk as plaintext. The Docker backend (default since v3.3.0) runs a lightweight Python REST server inside a container with Fernet-encrypted data (AES-128-CBC + HMAC-SHA256) in a named volume — ideal for OS-independent, containerized secret storage with volume backup/restore portability.
 - **Docker Engine API** — direct unix socket calls via `curl --unix-socket` instead of parsing `docker` CLI output. Faster, more reliable, structured JSON.
 - **Tron / Isos** — optional Docker-isolated job runner (`kmac tron`): ephemeral containers by default, warm pool with per-slot workspace reset; image built from `docker/tron/`.
 - **No heavy dependencies** — the core toolkit needs nothing beyond what macOS provides. Optional tools enhance UX but aren't required.

@@ -4,11 +4,11 @@ class Kmac < Formula
   desc "Portable macOS & Linux dev toolkit with AI, Docker, secrets vault, and remote agent control"
   homepage "https://github.com/ksarrafi/KMAC-CLI"
   license "MIT"
-  version "3.0.0"
+  version "3.3.0"
 
   # Stable tarball — sha256 is updated automatically by the release workflow.
-  url "https://github.com/ksarrafi/KMAC-CLI/archive/refs/tags/v3.0.0.tar.gz"
-  sha256 "c316a4c329353b8bc2407211eb18659158d080a4fce10f5630349a52834f1406"
+  url "https://github.com/ksarrafi/KMAC-CLI/archive/refs/tags/v3.3.0.tar.gz"
+  sha256 "45909a4146c56696467efcd74b9be1d221dae748409dcc5635173baa286fd9f5"
 
   head "https://github.com/ksarrafi/KMAC-CLI.git", branch: "main"
 

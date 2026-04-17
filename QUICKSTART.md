@@ -166,7 +166,8 @@ Press `.` in the menu, or use the CLI:
 kmac secrets                    # Interactive credential manager
 kmac secrets set anthropic      # Store your Anthropic API key
 kmac secrets set openai         # Store your OpenAI key
-kmac secrets backend            # Switch vault backend (Keychain / File / Docker)
+kmac secrets backend            # Switch vault backend (Docker / Keychain / File)
+# Default: Docker vault (containerized, portable, encrypted)
 ```
 
 ## Configuration
