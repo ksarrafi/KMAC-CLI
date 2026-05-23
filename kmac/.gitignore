@@ -21,7 +21,11 @@ Package.resolved
 *~
 
 # Build artifacts
+KMac.app/
 DerivedData/
+
+# Archived agent-generated docs / dead orphan sources (declutter, recoverable)
+_archive/
 .build
 *.o
 *.a

@@ -25,18 +25,23 @@ public struct FixExecutor {
         }
     }
     
-    /// Verifies if a fix would work by executing it with a dry-run or simulation
+    /// Checks whether a fix's command is syntactically valid WITHOUT running it.
+    /// Uses `bash -n` (no-exec syntax check) so verification can never mutate
+    /// the system. Returns false on a syntax error.
     /// - Parameter fix: The SuggestedFix to verify
-    /// - Returns: True if the fix appears viable
+    /// - Returns: True if the command parses as valid shell
     public static func verifyFix(_ fix: SuggestedFix) async -> Bool {
         do {
-            // Try to execute the command with a timeout check
-            let output = try await executeCommand(fix.command)
-            // If execution completes without error, fix is viable
+            _ = try await executeCommand("bash -n -c \(shellQuote(fix.command))")
             return true
         } catch {
             return false
         }
+    }
+
+    /// Single-quotes a string for safe embedding in a shell command.
+    private static func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
     
     /// Executes a fix with user confirmation and returns execution record

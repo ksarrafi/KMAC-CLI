@@ -229,11 +229,42 @@ struct KMacCLI {
     }
 
     private static func handleSpotlight() {
-        print("Launching Spotlight interface...")
-        // This will be handled by the visual interface app
-        // For now, just show usage info
-        print("The Spotlight visual interface can be activated with Cmd+K")
-        print("Or by running the KMacSpotlight app directly")
+        guard let appPath = locateSpotlightApp() else {
+            print("KMac.app not found.")
+            print("Build it first:  ./build-app.sh")
+            print("Then optionally: cp -r KMac.app /Applications/")
+            return
+        }
+
+        let open = Process()
+        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        open.arguments = [appPath]
+        do {
+            try open.run()
+            open.waitUntilExit()
+            print("Launched KMac.app — press ⌘K to open the Spotlight panel.")
+            print("(First run: grant Accessibility permission in System Settings")
+            print(" > Privacy & Security > Accessibility for the global ⌘K hotkey.)")
+        } catch {
+            print("Failed to launch KMac.app: \(error.localizedDescription)")
+        }
+    }
+
+    /// Searches the usual locations for the built menu-bar app bundle.
+    private static func locateSpotlightApp() -> String? {
+        let fm = FileManager.default
+        var candidates = ["/Applications/KMac.app"]
+
+        // Alongside the running CLI binary and its parent (repo checkout).
+        let exeDir = URL(fileURLWithPath: CommandLine.arguments[0])
+            .resolvingSymlinksInPath()
+            .deletingLastPathComponent()
+        candidates.append(exeDir.appendingPathComponent("KMac.app").path)
+        candidates.append(exeDir.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("KMac.app").path)
+        candidates.append(fm.currentDirectoryPath + "/KMac.app")
+
+        return candidates.first { fm.fileExists(atPath: $0) }
     }
 
     private static func printUsage() {
