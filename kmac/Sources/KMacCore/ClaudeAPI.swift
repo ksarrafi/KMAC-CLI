@@ -3,12 +3,14 @@ import Foundation
 public class ClaudeAPI: @unchecked Sendable {
     private let apiKey: String
     private let apiEndpoint = "https://api.anthropic.com/v1/messages"
-    private let modelId = "claude-3-5-sonnet-20241022"
-    
+    private let modelId: String
+
     // MARK: - Initialization
-    
+
     public init() throws {
         self.apiKey = try Self.loadAPIKey()
+        // Overridable so the model can be bumped without a rebuild.
+        self.modelId = ProcessInfo.processInfo.environment["KMAC_CLAUDE_MODEL"] ?? "claude-sonnet-4-6"
     }
     
     // MARK: - Public Methods
@@ -173,29 +175,79 @@ public class ClaudeAPI: @unchecked Sendable {
     
     // MARK: - Private Methods
     
-    /// Loads the Claude API key from environment or file
+    /// Resolves the Claude API key, in order:
+    /// 1. CLAUDE_API_KEY / ANTHROPIC_API_KEY environment variables
+    /// 2. The KMac vault (key `kmac:claude-api-key`, overridable via env)
+    /// 3. The legacy file ~/Library/Application Support/Claude/api.key
     private static func loadAPIKey() throws -> String {
-        // First, check environment variable
-        if let envKey = ProcessInfo.processInfo.environment["CLAUDE_API_KEY"],
-           !envKey.isEmpty {
-            return envKey
+        let env = ProcessInfo.processInfo.environment
+        for name in ["CLAUDE_API_KEY", "ANTHROPIC_API_KEY"] {
+            if let v = env[name]?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+                return v
+            }
         }
-        
-        // Then, check default file location
+
+        if let v = loadFromVault(), !v.isEmpty {
+            return v
+        }
+
         let fileManager = FileManager.default
-        let defaultKeyPath = "~/Library/Application Support/Claude/api.key"
-        let expandedPath = (defaultKeyPath as NSString).expandingTildeInPath
-        
-        if fileManager.fileExists(atPath: expandedPath),
-           let keyData = fileManager.contents(atPath: expandedPath),
+        let expandedPath = ("~/Library/Application Support/Claude/api.key" as NSString).expandingTildeInPath
+        if let keyData = fileManager.contents(atPath: expandedPath),
            let keyString = String(data: keyData, encoding: .utf8) {
             let trimmedKey = keyString.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedKey.isEmpty {
                 return trimmedKey
             }
         }
-        
+
         throw ClaudeAPIError.missingAPIKey
+    }
+
+    /// Reads the key from the KMac vault by sourcing `_vault.sh` and calling its
+    /// `vault_get` function, so the secret never lands in argv or this process's
+    /// environment. Returns nil if the vault or key cannot be found.
+    private static func loadFromVault() -> String? {
+        let env = ProcessInfo.processInfo.environment
+        let keyName = env["KMAC_VAULT_KEY"] ?? "kmac:claude-api-key"
+
+        let fm = FileManager.default
+        var dirs: [String] = []
+        if let override = env["KMAC_VAULT_DIR"], !override.isEmpty { dirs.append(override) }
+        let cwd = fm.currentDirectoryPath
+        dirs += [cwd + "/scripts", cwd + "/../scripts"]
+        if let home = env["HOME"] {
+            dirs.append(home + "/Projects/Utilities/KMac-CLI/scripts")
+        }
+        // Walk up from the running executable looking for a sibling scripts/ dir.
+        var exeDir = URL(fileURLWithPath: CommandLine.arguments.first ?? "")
+            .resolvingSymlinksInPath().deletingLastPathComponent()
+        for _ in 0..<6 {
+            dirs.append(exeDir.appendingPathComponent("scripts").path)
+            exeDir.deleteLastPathComponent()
+        }
+
+        guard let scriptsDir = dirs.first(where: { fm.fileExists(atPath: $0 + "/_vault.sh") }) else {
+            return nil
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = ["-c", "source \"$0/_vault.sh\" >/dev/null 2>&1; vault_get \"$1\"", scriptsDir, keyName]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let value = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (value?.isEmpty == false) ? value : nil
+        } catch {
+            return nil
+        }
     }
 }
 
@@ -210,7 +262,7 @@ public enum ClaudeAPIError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "Claude API key not found. Set CLAUDE_API_KEY environment variable or place key in ~/Library/Application Support/Claude/api.key"
+            return "Claude API key not found. Set CLAUDE_API_KEY, store it in the KMac vault as 'kmac:claude-api-key' (./scripts/vault set), or place it in ~/Library/Application Support/Claude/api.key"
         case .networkError(let message):
             return "Network error: \(message)"
         case .invalidResponse:
