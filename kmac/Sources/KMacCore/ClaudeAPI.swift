@@ -182,11 +182,14 @@ public class ClaudeAPI: @unchecked Sendable {
     private static func loadAPIKey() throws -> String {
         let env = ProcessInfo.processInfo.environment
         for name in ["CLAUDE_API_KEY", "ANTHROPIC_API_KEY"] {
-            if let v = env[name]?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+            if let v = env[name]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               isPlausibleKey(v) {
                 return v
             }
         }
 
+        // Vault is the source of truth; only a real-looking env var overrides it,
+        // so placeholders like "your-api-key-here" don't shadow the vault.
         if let v = loadFromVault(), !v.isEmpty {
             return v
         }
@@ -202,6 +205,12 @@ public class ClaudeAPI: @unchecked Sendable {
         }
 
         throw ClaudeAPIError.missingAPIKey
+    }
+
+    /// True only for values shaped like a real Anthropic key, so common
+    /// placeholders (your-api-key-here, changeme, empty) are rejected.
+    private static func isPlausibleKey(_ v: String) -> Bool {
+        v.hasPrefix("sk-") && v.count >= 20
     }
 
     /// Reads the key from the KMac vault by sourcing `_vault.sh` and calling its
