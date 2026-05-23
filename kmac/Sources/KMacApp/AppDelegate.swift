@@ -34,6 +34,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let m = localMonitor { NSEvent.removeMonitor(m) }
     }
 
+    /// Re-launching KMac while it's already running (e.g. picking it from
+    /// Spotlight or the Dock) opens the ⌘K panel instead of doing nothing.
+    /// This is how "⌘Space → kmac → Enter" surfaces the search panel.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        showPanel()
+        return true
+    }
+
+    /// First launch from Spotlight (no prior instance): also show the panel,
+    /// not just the menu-bar icon.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if panel == nil { showPanel() }
+    }
+
     // MARK: - Status item
 
     private func setupStatusItem() {
