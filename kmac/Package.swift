@@ -4,12 +4,16 @@ import PackageDescription
 let package = Package(
     name: "kmac-cli",
     platforms: [
-        .macOS(.v12)
+        .macOS(.v13)
     ],
     products: [
         .executable(
             name: "kmac",
             targets: ["kmac"]
+        ),
+        .executable(
+            name: "kmac-app",
+            targets: ["KMacApp"]
         ),
         .library(
             name: "KMacCore",
@@ -22,6 +26,11 @@ let package = Package(
             name: "kmac",
             dependencies: ["KMacCore"],
             path: "Sources/kmac"
+        ),
+        .executableTarget(
+            name: "KMacApp",
+            dependencies: ["KMacCore"],
+            path: "Sources/KMacApp"
         ),
         .target(
             name: "KMacCore",
