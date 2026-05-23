@@ -28,7 +28,15 @@ struct SpotlightView: View {
                     .font(.title3)
                     .focused($fieldFocused)
                     .onSubmit(ask)
-                if asking { ProgressView().controlSize(.small) }
+                if asking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    // Explicit Return-bound trigger: onSubmit alone is unreliable
+                    // for a TextField hosted in a borderless NSPanel.
+                    Button("Ask", action: ask)
+                        .keyboardShortcut(.return, modifiers: [])
+                        .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
 
             if !answer.isEmpty {
