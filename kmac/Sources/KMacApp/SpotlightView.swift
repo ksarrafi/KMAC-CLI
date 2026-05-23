@@ -78,6 +78,13 @@ struct SpotlightView: View {
                     .background(statusColor(status).opacity(0.2), in: Capsule())
                     .foregroundStyle(statusColor(status))
             }
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Close (Esc)")
         }
     }
 
@@ -103,7 +110,9 @@ struct SpotlightView: View {
         asking = true
         answer = ""
         let context = health.claudeContext
-        Task {
+        // Must run on the main actor: this mutates @State (answer/asking) as
+        // chunks stream in, and SwiftUI state must be updated on the main thread.
+        Task { @MainActor in
             do {
                 let api = try ClaudeAPI()
                 for await chunk in api.askClaude(query: q, systemContext: context) {
