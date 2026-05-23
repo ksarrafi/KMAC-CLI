@@ -1,0 +1,36 @@
+# Xcode
+.DS_Store
+.build/
+xcuserdata/
+*.xcodeproj/
+*.playground
+build/
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Build artifacts
+KMac.app/
+DerivedData/
+
+# Archived agent-generated docs / dead orphan sources (declutter, recoverable)
+_archive/
+.build
+*.o
+*.a
+*.so
+*.dylib
+
+# Test artifacts
+.testCaches/
