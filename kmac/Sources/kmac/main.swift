@@ -27,7 +27,8 @@ struct KMacCLI {
         case "monitor":
             await handleMonitor()
         case "spotlight":
-            handleSpotlight()
+            let question = arguments.count > 2 ? arguments[2...].joined(separator: " ") : ""
+            handleSpotlight(question: question)
         case "help":
             printUsage()
         case "version":
@@ -228,7 +229,7 @@ struct KMacCLI {
         print("\nMonitoring complete.")
     }
 
-    private static func handleSpotlight() {
+    private static func handleSpotlight(question: String = "") {
         guard let appPath = locateSpotlightApp() else {
             print("KMac.app not found.")
             print("Build it first:  ./build-app.sh")
@@ -236,17 +237,45 @@ struct KMacCLI {
             return
         }
 
-        let open = Process()
-        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        open.arguments = [appPath]
-        do {
-            try open.run()
-            open.waitUntilExit()
+        // Ensure the app is running (launching an already-running app just
+        // foregrounds it; harmless).
+        guard runOpen(arguments: [appPath]) else {
+            return
+        }
+
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
             print("Launched KMac.app — press ⌘K to open the Spotlight panel.")
             print("(First run: grant Accessibility permission in System Settings")
             print(" > Privacy & Security > Accessibility for the global ⌘K hotkey.)")
+            return
+        }
+
+        // Hand the question off to the running app via the kmac:// URL scheme,
+        // which opens the panel and auto-submits the question.
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&=+?#")
+        let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: allowed) ?? trimmed
+        let urlString = "kmac://ask?q=\(encoded)"
+
+        if runOpen(arguments: [urlString]) {
+            print("Asked KMac: \(trimmed)")
+        }
+    }
+
+    /// Runs `/usr/bin/open` with the given arguments. Returns true on success.
+    @discardableResult
+    private static func runOpen(arguments: [String]) -> Bool {
+        let open = Process()
+        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        open.arguments = arguments
+        do {
+            try open.run()
+            open.waitUntilExit()
+            return open.terminationStatus == 0
         } catch {
-            print("Failed to launch KMac.app: \(error.localizedDescription)")
+            print("Failed to launch: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -279,7 +308,7 @@ struct KMacCLI {
           fix                 Detect issues and get suggested fixes
           execute-fix <n>     Run suggested fix number <n> from last 'fix'
           monitor             Monitor system health (5 samples)
-          spotlight           Launch the Spotlight visual interface
+          spotlight [query]   Launch the Spotlight panel (optionally auto-ask a question)
           help                Show this help message
           version             Show version information
 
@@ -290,6 +319,7 @@ struct KMacCLI {
           kmac execute-fix 1
           kmac monitor
           kmac spotlight
+          kmac spotlight "why is my disk full"
         """)
     }
 }

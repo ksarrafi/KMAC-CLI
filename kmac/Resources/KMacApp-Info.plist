@@ -25,5 +25,17 @@
 	<!-- Menu-bar agent: no Dock icon, no app switcher entry. -->
 	<key>LSUIElement</key>
 	<true/>
+	<!-- Custom URL scheme so `kmac spotlight "question"` can hand off via open kmac://ask?q=… -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.kmac.app.url</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>kmac</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -6,6 +6,7 @@ import KMacCore
 /// HealthStore and ClaudeAPI.
 struct SpotlightView: View {
     @ObservedObject var health: HealthStore
+    @ObservedObject var input: PanelInput
     var onClose: () -> Void
 
     @State private var query: String = ""
@@ -43,7 +44,24 @@ struct SpotlightView: View {
         }
         .padding(16)
         .frame(width: 520)
-        .onAppear { fieldFocused = true }
+        .onAppear {
+            fieldFocused = true
+            consumePendingQuestion()
+        }
+        .onChange(of: input.pendingQuestion) { _ in
+            consumePendingQuestion()
+        }
+    }
+
+    /// When a question is pushed in from outside (e.g. a `kmac://ask?q=…` URL),
+    /// fill the field, submit it, and clear the channel.
+    private func consumePendingQuestion() {
+        guard let q = input.pendingQuestion else { return }
+        input.pendingQuestion = nil
+        let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        query = trimmed
+        ask()
     }
 
     private var statusHeader: some View {

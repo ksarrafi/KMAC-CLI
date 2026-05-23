@@ -10,6 +10,7 @@ final class SpotlightPanel: NSPanel {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let health = HealthStore()
+    private let input = PanelInput()
     private var statusItem: NSStatusItem?
     private var panel: SpotlightPanel?
     private var globalMonitor: Any?
@@ -22,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         health.startPolling()
         setupStatusItem()
         registerHotkey()
+        registerURLHandler()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -72,6 +74,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - URL scheme (kmac://ask?q=…)
+
+    private func registerURLHandler() {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleGetURL(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
+    @objc private func handleGetURL(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
+        guard
+            let urlString = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+            let url = URL(string: urlString)
+        else { return }
+        handle(url: url)
+    }
+
+    /// Parses `kmac://ask?q=<question>`, shows the panel, and injects the
+    /// question so SpotlightView auto-submits it.
+    private func handle(url: URL) {
+        guard url.scheme == "kmac" else { return }
+        showPanel()
+
+        // Accept the question from either the host or the path: kmac://ask?q=…
+        let isAsk = url.host == "ask" || url.path.contains("ask")
+        guard isAsk else { return }
+
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let question = components?.queryItems?.first(where: { $0.name == "q" })?.value
+        if let question, !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            input.submit(question)
+        }
+    }
+
     // MARK: - Panel
 
     @objc private func menuToggle() { togglePanel() }
@@ -93,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makePanel() -> SpotlightPanel {
-        let view = SpotlightView(health: health, onClose: { [weak self] in self?.hidePanel() })
+        let view = SpotlightView(health: health, input: input, onClose: { [weak self] in self?.hidePanel() })
         let hosting = NSHostingView(rootView: view)
 
         let panel = SpotlightPanel(

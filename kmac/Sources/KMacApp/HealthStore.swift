@@ -51,6 +51,19 @@ final class HealthStore: ObservableObject {
     }
 }
 
+/// Tiny shared channel for injecting a question into the Spotlight panel from
+/// outside the view (e.g. an incoming `kmac://ask?q=…` URL). SpotlightView
+/// observes `pendingQuestion`; when it becomes non-nil the view fills the field,
+/// submits, and clears it back to nil.
+@MainActor
+final class PanelInput: ObservableObject {
+    @Published var pendingQuestion: String?
+
+    func submit(_ question: String) {
+        pendingQuestion = question
+    }
+}
+
 extension SystemHealthStatus {
     var label: String {
         switch self {
