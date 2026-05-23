@@ -30,6 +30,12 @@ final class HealthStore: ObservableObject {
         pollTask = nil
     }
 
+    /// Restarts the polling loop at a new interval (used by Settings).
+    func restartPolling(interval: TimeInterval) {
+        stopPolling()
+        startPolling(interval: interval)
+    }
+
     /// Takes one snapshot now and publishes it.
     func refresh() async {
         let snap = await monitor.captureSnapshot()

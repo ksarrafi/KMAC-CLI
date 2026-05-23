@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let input = PanelInput()
     private var statusItem: NSStatusItem?
     private var panel: SpotlightPanel?
+    private var fixesWindow: NSWindow?
+    private var settingsWindow: NSWindow?
     private var globalMonitor: Any?
     private var localMonitor: Any?
 
@@ -40,6 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(withTitle: "Open KMac  (⌘K)", action: #selector(menuToggle), keyEquivalent: "")
+        menu.addItem(withTitle: "Issues & Fixes…", action: #selector(openFixes), keyEquivalent: "")
+        menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "")
         menu.addItem(.separator())
@@ -50,6 +54,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshNow() {
         Task { await health.refresh() }
+    }
+
+    // MARK: - Auxiliary windows
+
+    @objc private func openFixes() {
+        if fixesWindow == nil {
+            fixesWindow = makeWindow(title: "KMac — Issues & Fixes",
+                                     content: FixesView(health: health))
+        }
+        present(fixesWindow)
+    }
+
+    @objc private func openSettings() {
+        if settingsWindow == nil {
+            settingsWindow = makeWindow(title: "KMac — Settings",
+                                        content: SettingsView(health: health))
+        }
+        present(settingsWindow)
+    }
+
+    private func makeWindow<V: View>(title: String, content: V) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 460),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = title
+        window.contentView = NSHostingView(rootView: content)
+        window.isReleasedWhenClosed = false
+        window.center()
+        return window
+    }
+
+    private func present(_ window: NSWindow?) {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
     }
 
     // MARK: - Hotkey
