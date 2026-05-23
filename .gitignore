@@ -44,3 +44,4 @@ docker-vault-token
 
 # Deploy and local config
 deploy.sh
+/_archive/
