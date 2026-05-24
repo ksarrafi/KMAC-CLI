@@ -12,11 +12,11 @@ public struct FixExecutor {
     /// - Parameter command: The shell command to execute
     /// - Returns: The stdout output from the command
     /// - Throws: FixExecutionError if command fails or times out
-    public static func executeCommand(_ command: String) async throws -> String {
+    public static func executeCommand(_ command: String, timeout: TimeInterval = 30) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    let result = try executeCommandSync(command)
+                    let result = try executeCommandSync(command, timeout: timeout)
                     continuation.resume(returning: result)
                 } catch {
                     continuation.resume(throwing: error)
@@ -72,7 +72,7 @@ public struct FixExecutor {
     
     // MARK: - Private Methods
     
-    private static func executeCommandSync(_ command: String) throws -> String {
+    private static func executeCommandSync(_ command: String, timeout: TimeInterval = commandTimeout) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = ["-c", command]
@@ -85,7 +85,7 @@ public struct FixExecutor {
         
         // Set up a timer for command timeout
         var isTimedOut = false
-        let timer = Timer.scheduledTimer(withTimeInterval: commandTimeout, repeats: false) { _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { _ in
             isTimedOut = true
             process.terminate()
         }

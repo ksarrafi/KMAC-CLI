@@ -32,6 +32,15 @@ public enum Playbooks {
         all.first { $0.id == id }
     }
 
+    /// Resolves a user-typed identifier to a playbook: exact id, then id
+    /// prefix, then a word contained in the id (so "docker" -> "docker-restart").
+    public static func resolve(_ query: String) -> Playbook? {
+        let q = query.lowercased()
+        if let exact = all.first(where: { $0.id == q }) { return exact }
+        if let prefix = all.first(where: { $0.id.hasPrefix(q) }) { return prefix }
+        return all.first { $0.id.contains(q) }
+    }
+
     /// Disk cleanup — mirrors the safe, high-impact targets from `scripts/storage`
     /// (Xcode DerivedData, Homebrew cache, Trash). Deliberately conservative:
     /// it does NOT wipe ~/Library/Caches wholesale, which can break running apps.
