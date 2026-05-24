@@ -12,6 +12,9 @@ struct SpotlightView: View {
     @State private var query: String = ""
     @State private var answer: String = ""
     @State private var asking: Bool = false
+    @State private var fixes: [SuggestedFix] = []
+    @State private var confirming: SuggestedFix?
+    @State private var runResult: String?
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -39,25 +42,87 @@ struct SpotlightView: View {
                 }
             }
 
-            if !answer.isEmpty {
-                Divider()
-                ScrollView {
-                    Text(answer)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if answer.isEmpty {
+                        Text("Answers appear here. Type a question and press Return or click Ask.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(markdown(answer))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    if !fixes.isEmpty { fixesSection }
+
+                    if let runResult {
+                        Text(runResult)
+                            .font(.callout.monospaced())
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                    }
                 }
-                .frame(maxHeight: 220)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxHeight: .infinity, alignment: .top)
         }
         .padding(16)
-        .frame(width: 520)
+        .frame(width: 560, height: 460, alignment: .top)
         .onAppear {
             fieldFocused = true
             consumePendingQuestion()
         }
         .onChange(of: input.pendingQuestion) { _ in
             consumePendingQuestion()
+        }
+        .alert(item: $confirming) { fix in
+            Alert(
+                title: Text("Run this fix?"),
+                message: Text(fix.command),
+                primaryButton: .destructive(Text("Run")) { Task { await run(fix) } },
+                secondaryButton: .cancel()
+            )
+        }
+    }
+
+    /// Runnable fixes parsed from the answer — the actionable part: each has a
+    /// Run button that confirms then executes via KMacCore's FixExecutor.
+    private var fixesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+            Text("Runnable fixes").font(.caption.bold()).foregroundStyle(.secondary)
+            ForEach(Array(fixes.enumerated()), id: \.offset) { _, fix in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(fix.command)
+                        .font(.callout.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Run") { confirming = fix }
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+    }
+
+    private func markdown(_ s: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: s,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(s)
+    }
+
+    private func run(_ fix: SuggestedFix) async {
+        runResult = "Running: \(fix.command)…"
+        let record = try? await FixExecutor.executeFixWithConfirmation(fix)
+        if let record {
+            runResult = (record.success ? "✓ " : "✗ ") + (record.output.isEmpty ? "(done, no output)" : record.output)
+            await health.refresh()
+        } else {
+            runResult = "✗ Failed to start."
         }
     }
 
@@ -117,6 +182,8 @@ struct SpotlightView: View {
         guard !q.isEmpty, !asking else { return }
         asking = true
         answer = ""
+        fixes = []
+        runResult = nil
         let context = health.claudeContext
         // Must run on the main actor: this mutates @State (answer/asking) as
         // chunks stream in, and SwiftUI state must be updated on the main thread.
@@ -126,6 +193,7 @@ struct SpotlightView: View {
                 for await chunk in api.askClaude(query: q, systemContext: context) {
                     answer += chunk
                 }
+                fixes = api.parseSuggestedFixes(response: answer)
             } catch {
                 answer = "Error: \(error.localizedDescription)"
             }

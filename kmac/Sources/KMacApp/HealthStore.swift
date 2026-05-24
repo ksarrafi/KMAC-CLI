@@ -46,8 +46,9 @@ final class HealthStore: ObservableObject {
     /// System context string handed to Claude alongside a question.
     var claudeContext: String {
         guard let s = snapshot else { return "System metrics unavailable." }
+        let os = ProcessInfo.processInfo.operatingSystemVersionString
         return """
-        System Status:
+        Live system snapshot (macOS \(os)):
         CPU: \(String(format: "%.1f", s.cpuUsage))%
         Memory: \(String(format: "%.1f", s.memoryUsage))%
         Disk: \(String(format: "%.1f", s.diskUsage))%

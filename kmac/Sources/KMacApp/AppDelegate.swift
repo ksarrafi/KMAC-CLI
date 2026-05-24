@@ -190,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hosting = NSHostingView(rootView: view)
 
         let panel = SpotlightPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 120),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 360),
             styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false

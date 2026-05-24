@@ -13,8 +13,21 @@ public class ClaudeAPI: @unchecked Sendable {
         self.modelId = ProcessInfo.processInfo.environment["KMAC_CLAUDE_MODEL"] ?? "claude-sonnet-4-6"
     }
     
+    /// Persona shared by the CLI and the GUI. Forces macOS-specific, concise,
+    /// runnable answers so the response can be turned into executable fixes.
+    static let systemPreamble = """
+    You are KMac, a macOS system-health assistant running ON the user's Mac (Apple Silicon/Intel, zsh, Homebrew likely installed). You have a live system snapshot below.
+
+    Rules:
+    - The OS is macOS. NEVER suggest Linux tools (apt, yum, dnf, journalctl, systemctl). Use macOS/BSD tools and Homebrew (brew cleanup), and macOS paths (~/Library/Caches, ~/Library/Developer/Xcode/DerivedData, ~/Downloads, /private/var/folders).
+    - Be concise. Lead with the 2-3 highest-impact actions for the reported issue.
+    - For every fix you recommend, output the exact command in its own ```bash code block so it can be run directly. One command (or short pipeline) per block.
+    - Prefer safe, reversible commands. Never include destructive commands (rm -rf of broad paths, disk erase, sudo rm of system dirs). If something is risky, say so and give a safer inspection command first (e.g. du -sh before deleting).
+    - Tailor advice to the actual numbers in the snapshot; don't give generic checklists.
+    """
+
     // MARK: - Public Methods
-    
+
     /// Streams a response from Claude API for the given query
     /// Returns an async sequence of response chunks
     public func askClaude(
@@ -24,7 +37,7 @@ public class ClaudeAPI: @unchecked Sendable {
         let requestBody = ClaudeAPIRequest(
             model: modelId,
             max_tokens: 2048,
-            system: systemContext,
+            system: Self.systemPreamble + "\n\n" + systemContext,
             messages: [
                 ClaudeMessage(role: "user", content: query)
             ],
@@ -52,38 +65,23 @@ public class ClaudeAPI: @unchecked Sendable {
 
                     if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                         var body = ""
-                        for try await byte in bytes {
-                            body.append(Character(UnicodeScalar(byte)))
-                        }
+                        for try await line in bytes.lines { body += line + "\n" }
                         continuation.yield("[API error \(http.statusCode)] \(body)")
                         continuation.finish()
                         return
                     }
 
-                    var buffer = ""
-
-                    for try await byte in bytes {
-                        buffer.append(Character(UnicodeScalar(byte)))
-                        if buffer.hasSuffix("\n") {
-                            let line = buffer.trimmingCharacters(in: .whitespaces)
-                            buffer = ""
-
-                            if !line.isEmpty && !line.hasPrefix(":") {
-                                if line.hasPrefix("data: ") {
-                                    let dataString = String(line.dropFirst(6))
-                                    if let data = dataString.data(using: .utf8) {
-                                        do {
-                                            let streamResponse = try JSONDecoder().decode(ClaudeStreamResponse.self, from: data)
-                                            if let delta = streamResponse.delta,
-                                               let text = delta.text {
-                                                continuation.yield(text)
-                                            }
-                                        } catch {
-                                            // Skip parsing errors
-                                        }
-                                    }
-                                }
-                            }
+                    // Use the UTF-8-aware line sequence; decoding byte-by-byte as
+                    // Unicode scalars (the old approach) mangles multi-byte chars
+                    // like emoji into mojibake.
+                    for try await rawLine in bytes.lines {
+                        let line = rawLine.trimmingCharacters(in: .whitespaces)
+                        guard line.hasPrefix("data: ") else { continue }
+                        let dataString = String(line.dropFirst(6))
+                        guard let data = dataString.data(using: .utf8) else { continue }
+                        if let streamResponse = try? JSONDecoder().decode(ClaudeStreamResponse.self, from: data),
+                           let text = streamResponse.delta?.text {
+                            continuation.yield(text)
                         }
                     }
                     continuation.finish()
