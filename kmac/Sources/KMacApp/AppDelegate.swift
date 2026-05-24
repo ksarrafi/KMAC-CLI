@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var panel: SpotlightPanel?
     private var fixesWindow: NSWindow?
+    private var playbooksWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var globalMonitor: Any?
     private var localMonitor: Any?
@@ -56,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(withTitle: "Open KMac  (⌘K)", action: #selector(menuToggle), keyEquivalent: "")
+        menu.addItem(withTitle: "Playbooks…", action: #selector(openPlaybooks), keyEquivalent: "")
         menu.addItem(withTitle: "Issues & Fixes…", action: #selector(openFixes), keyEquivalent: "")
         menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: "")
         menu.addItem(.separator())
@@ -78,6 +80,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      content: FixesView(health: health))
         }
         present(fixesWindow)
+    }
+
+    @objc private func openPlaybooks() {
+        if playbooksWindow == nil {
+            playbooksWindow = makeWindow(title: "KMac — Playbooks",
+                                         content: PlaybooksView(health: health))
+        }
+        present(playbooksWindow)
     }
 
     @objc private func openSettings() {

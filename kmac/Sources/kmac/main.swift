@@ -26,6 +26,14 @@ struct KMacCLI {
             await handleExecuteFix(index: index)
         case "monitor":
             await handleMonitor()
+        case "playbooks":
+            handlePlaybooks()
+        case "run":
+            await handleRunPlaybook(id: arguments.count > 2 ? arguments[2] : nil)
+        case "clean":
+            await handleRunPlaybook(id: "disk-cleanup")
+        case "docker":
+            await handleRunPlaybook(id: "docker-restart")
         case "spotlight":
             let question = arguments.count > 2 ? arguments[2...].joined(separator: " ") : ""
             handleSpotlight(question: question)
@@ -229,6 +237,50 @@ struct KMacCLI {
         print("\nMonitoring complete.")
     }
 
+    private static func handlePlaybooks() {
+        print("Deterministic playbooks (no AI, repeatable):\n")
+        for p in Playbooks.all {
+            print("  \(p.id)\(p.destructive ? "  ⚠" : "")")
+            print("    \(p.title) — \(p.summary)")
+        }
+        print("\nRun: kmac run <id>   (shortcuts: kmac clean, kmac docker)")
+    }
+
+    private static func handleRunPlaybook(id: String?) async {
+        guard let id, let pb = Playbooks.find(id) else {
+            print("Unknown playbook. Available:")
+            for p in Playbooks.all { print("  \(p.id) — \(p.title)") }
+            return
+        }
+
+        print("▶ \(pb.title)\n\(pb.summary)\n")
+        print("Inspecting…\n")
+        print(await runShell(pb.inspect))
+
+        if pb.destructive {
+            print("\n⚠ This will modify/delete files. Proceed? [y/N] ", terminator: "")
+            guard let a = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                  a == "y" || a == "yes" else {
+                print("Aborted.")
+                return
+            }
+        }
+
+        print("\nApplying…\n")
+        print(await runShell(pb.apply))
+    }
+
+    /// Runs a shell snippet and returns combined output, regardless of exit code.
+    private static func runShell(_ command: String) async -> String {
+        do {
+            return try await FixExecutor.executeCommand(command)
+        } catch let FixExecutionError.commandFailed(_, output) {
+            return output
+        } catch {
+            return "Error: \(error.localizedDescription)"
+        }
+    }
+
     private static func handleSpotlight(question: String = "") {
         guard let appPath = locateSpotlightApp() else {
             print("KMac.app not found.")
@@ -304,22 +356,28 @@ struct KMacCLI {
 
         Commands:
           status              Show system status
-          ask <query>         Ask Claude about your system
-          fix                 Detect issues and get suggested fixes
+          playbooks           List deterministic fixes (no AI, repeatable)
+          run <id>            Run a playbook (inspect, confirm, apply)
+          clean               Shortcut: disk-cleanup playbook
+          docker              Shortcut: restart Docker
+          ask <query>         Ask Claude (fallback for novel issues)
+          fix                 Detect issues and get AI-suggested fixes
           execute-fix <n>     Run suggested fix number <n> from last 'fix'
           monitor             Monitor system health (5 samples)
-          spotlight [query]   Launch the Spotlight panel (optionally auto-ask a question)
+          spotlight [query]   Launch the Spotlight panel (optionally auto-ask)
           help                Show this help message
           version             Show version information
 
+        Deterministic playbooks run first (free, instant, repeatable);
+        'ask'/'fix' use Claude only for problems no playbook covers.
+
         Examples:
           kmac status
-          kmac ask "Why is my CPU high?"
-          kmac fix
-          kmac execute-fix 1
-          kmac monitor
-          kmac spotlight
-          kmac spotlight "why is my disk full"
+          kmac clean                 # disk cleanup (inspect then confirm)
+          kmac docker                # restart Docker
+          kmac playbooks             # list all
+          kmac ask "why is my CPU high?"
+          kmac spotlight "free up disk space"
         """)
     }
 }
