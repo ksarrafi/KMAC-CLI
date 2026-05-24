@@ -12,10 +12,14 @@ struct KMacCLI {
         }
 
         let command = arguments[1]
+        let json = arguments.contains("--json")
+        let assumeYes = arguments.contains("--yes") || arguments.contains("-y")
+        // First non-flag argument after the command (e.g. the playbook id).
+        let firstArg = arguments.dropFirst(2).first { !$0.hasPrefix("-") }
 
         switch command {
         case "status":
-            await handleStatus()
+            await handleStatus(json: json)
         case "ask":
             let query = arguments.count > 2 ? arguments[2...].joined(separator: " ") : ""
             await handleAsk(query: query)
@@ -27,13 +31,13 @@ struct KMacCLI {
         case "monitor":
             await handleMonitor()
         case "playbooks":
-            handlePlaybooks()
+            handlePlaybooks(json: json)
         case "run":
-            await handleRunPlaybook(id: arguments.count > 2 ? arguments[2] : nil)
+            await handleRunPlaybook(id: firstArg, assumeYes: assumeYes, json: json)
         case "clean":
-            await handleRunPlaybook(id: "disk-cleanup")
+            await handleRunPlaybook(id: "disk-cleanup", assumeYes: assumeYes, json: json)
         case "docker":
-            await handleRunPlaybook(id: "docker-restart")
+            await handleRunPlaybook(id: "docker-restart", assumeYes: assumeYes, json: json)
         case "spotlight":
             let question = arguments.count > 2 ? arguments[2...].joined(separator: " ") : ""
             handleSpotlight(question: question)
@@ -47,11 +51,24 @@ struct KMacCLI {
         }
     }
 
-    private static func handleStatus() async {
+    private static func handleStatus(json: Bool = false) async {
         let monitor = SystemMonitor()
         let snapshot = await monitor.captureSnapshot()
         let analyzer = HealthAnalyzer()
         let health = analyzer.getSeverity(snapshot)
+        let issuesList = analyzer.analyzeHealth(snapshot)
+
+        if json {
+            print(jsonObject([
+                "cpu": round1(snapshot.cpuUsage),
+                "memory": round1(snapshot.memoryUsage),
+                "disk": round1(snapshot.diskUsage),
+                "health": "\(health)",
+                "issues": issuesList,
+                "timestamp": ISO8601DateFormatter().string(from: snapshot.timestamp),
+            ]))
+            return
+        }
 
         print("KMac System Status")
         print("==================")
@@ -61,7 +78,7 @@ struct KMacCLI {
         print("Health:       \(health)")
         print("Timestamp:    \(snapshot.timestamp)")
 
-        let issues = analyzer.analyzeHealth(snapshot)
+        let issues = issuesList
         if !issues.isEmpty {
             print("\nIssues detected:")
             for issue in issues {
@@ -237,7 +254,14 @@ struct KMacCLI {
         print("\nMonitoring complete.")
     }
 
-    private static func handlePlaybooks() {
+    private static func handlePlaybooks(json: Bool = false) {
+        if json {
+            let arr = Playbooks.all.map { p in
+                "{\"id\":\(jsonString(p.id)),\"title\":\(jsonString(p.title)),\"summary\":\(jsonString(p.summary)),\"destructive\":\(p.destructive)}"
+            }
+            print("[\(arr.joined(separator: ","))]")
+            return
+        }
         print("Deterministic playbooks (no AI, repeatable):\n")
         for p in Playbooks.all {
             print("  \(p.id)\(p.destructive ? "  ⚠" : "")")
@@ -246,18 +270,27 @@ struct KMacCLI {
         print("\nRun: kmac run <id>   (shortcuts: kmac clean, kmac docker)")
     }
 
-    private static func handleRunPlaybook(id: String?) async {
-        guard let id, let pb = Playbooks.find(id) else {
+    private static func handleRunPlaybook(id: String?, assumeYes: Bool = false, json: Bool = false) async {
+        guard let id, let pb = Playbooks.resolve(id) else {
             print("Unknown playbook. Available:")
             for p in Playbooks.all { print("  \(p.id) — \(p.title)") }
             return
         }
 
-        print("▶ \(pb.title)\n\(pb.summary)\n")
-        print("Inspecting…\n")
-        print(await runShell(pb.inspect))
+        let inspect = await runShell(pb.inspect)
 
-        if pb.destructive {
+        // Destructive playbooks need confirmation unless --yes is passed
+        // (required for non-interactive/skill use).
+        if pb.destructive && !assumeYes {
+            if json {
+                print(jsonObject([
+                    "id": pb.id, "applied": false, "reason": "needs-confirmation",
+                    "inspect": inspect,
+                ]))
+                return
+            }
+            print("▶ \(pb.title)\n\(pb.summary)\n")
+            print("Inspecting…\n\(inspect)")
             print("\n⚠ This will modify/delete files. Proceed? [y/N] ", terminator: "")
             guard let a = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
                   a == "y" || a == "yes" else {
@@ -266,19 +299,57 @@ struct KMacCLI {
             }
         }
 
-        print("\nApplying…\n")
-        print(await runShell(pb.apply))
+        let applied = await runShell(pb.apply)
+
+        if json {
+            print(jsonObject(["id": pb.id, "applied": true, "inspect": inspect, "output": applied]))
+            return
+        }
+        if !pb.destructive || assumeYes {
+            print("▶ \(pb.title)\n\(pb.summary)\n")
+            print("Inspecting…\n\(inspect)\n")
+        }
+        print("Applying…\n\(applied)")
     }
 
     /// Runs a shell snippet and returns combined output, regardless of exit code.
     private static func runShell(_ command: String) async -> String {
         do {
-            return try await FixExecutor.executeCommand(command)
+            return try await FixExecutor.executeCommand(command, timeout: 180)
         } catch let FixExecutionError.commandFailed(_, output) {
             return output
         } catch {
             return "Error: \(error.localizedDescription)"
         }
+    }
+
+    // MARK: - JSON helpers (minimal, dependency-free)
+
+    private static func round1(_ d: Double) -> Double { (d * 10).rounded() / 10 }
+
+    private static func jsonString(_ s: String) -> String {
+        let escaped = s
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\t", with: "\\t")
+        return "\"\(escaped)\""
+    }
+
+    /// Encodes a flat dictionary of String/Double/Bool/[String] values to JSON.
+    private static func jsonObject(_ dict: [String: Any]) -> String {
+        let parts = dict.map { key, value -> String in
+            let v: String
+            switch value {
+            case let s as String: v = jsonString(s)
+            case let d as Double: v = "\(d)"
+            case let b as Bool: v = b ? "true" : "false"
+            case let arr as [String]: v = "[\(arr.map(jsonString).joined(separator: ","))]"
+            default: v = jsonString("\(value)")
+            }
+            return "\(jsonString(key)):\(v)"
+        }
+        return "{\(parts.joined(separator: ","))}"
     }
 
     private static func handleSpotlight(question: String = "") {
@@ -370,6 +441,9 @@ struct KMacCLI {
 
         Deterministic playbooks run first (free, instant, repeatable);
         'ask'/'fix' use Claude only for problems no playbook covers.
+
+        Flags: --json (machine-readable output, for the kmac Claude skill),
+               --yes/-y (apply a destructive playbook without prompting).
 
         Examples:
           kmac status
