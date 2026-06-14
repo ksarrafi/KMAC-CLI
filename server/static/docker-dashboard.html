@@ -91,12 +91,12 @@ tr:hover{background:#172033}
 
 <div class="section">
   <h2>Quick Actions</h2>
+  <p style="font-size:0.8rem;color:#64748b;margin-bottom:10px">Volumes are never pruned here — they often hold database data.</p>
   <div class="actions">
     <button class="btn" onclick="cleanup('containers')">Prune Containers</button>
     <button class="btn" onclick="cleanup('images')">Prune Images</button>
-    <button class="btn" onclick="cleanup('volumes')">Prune Volumes</button>
     <button class="btn" onclick="cleanup('cache')">Prune Build Cache</button>
-    <button class="btn danger" onclick="cleanup('all')">Prune Everything</button>
+    <button class="btn danger" onclick="cleanup('all')">Safe Full Prune</button>
   </div>
   <div id="cleanupResult" style="margin-top:8px;font-size:0.85rem"></div>
 </div>
@@ -105,6 +105,12 @@ tr:hover{background:#172033}
 
 <script>
 let token = localStorage.getItem('kmac_token') || '';
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('token')) {
+  token = urlParams.get('token').trim();
+  localStorage.setItem('kmac_token', token);
+  history.replaceState({}, '', window.location.pathname);
+}
 let chart = null;
 const tokenInput = document.getElementById('tokenInput');
 tokenInput.value = token;
@@ -159,7 +165,7 @@ function renderContainers(containers) {
     const cpuV = c.cpu_val||0, memV = c.mem_val||0;
     const cpuC = cpuV>80?'#ef4444':cpuV>50?'#facc15':'#4ade80';
     const memC = memV>90?'#ef4444':memV>75?'#facc15':'#4ade80';
-    return `<tr><td><strong>${c.name||''}</strong><br><span style="color:#64748b;font-size:0.75rem">${c.image||''}</span></td><td>${healthBadge(c.state==='running'?'healthy':'none')}</td><td style="color:${cpuC}">${(c.cpu_val||0).toFixed(1)}%</td><td style="color:${memC}">${(c.mem_val||0).toFixed(1)}%</td><td>${c.mem_usage||''}</td><td>${portLinks(c.ports)}</td></tr>`;
+    return `<tr><td><strong>${c.name||''}</strong><br><span style="color:#64748b;font-size:0.75rem">${c.image||''}</span></td><td>${healthBadge(c.health||'none')}</td><td style="color:${cpuC}">${(c.cpu_val||0).toFixed(1)}%</td><td style="color:${memC}">${(c.mem_val||0).toFixed(1)}%</td><td>${c.mem_usage||''}</td><td>${portLinks(c.ports)}</td></tr>`;
   }).join('');
 }
 
@@ -215,8 +221,8 @@ async function fetchAll() {
 }
 
 async function cleanup(type) {
-  if (type === 'all' && !confirm('This will remove ALL unused Docker resources. Continue?')) return;
-  if (!confirm(`Prune ${type}?`)) return;
+  if (type === 'all' && !confirm('Remove unused images, stopped containers, and build cache? Volumes are NOT removed.')) return;
+  if (type !== 'all' && !confirm(`Prune ${type}?`)) return;
   const r = await api('/api/docker/cleanup', {method:'POST', body:JSON.stringify({type})});
   document.getElementById('cleanupResult').innerHTML = r?.ok ? `<span style="color:#4ade80">✓ ${type} cleaned</span>` : `<span style="color:#ef4444">Error: ${r?.error||r?.output||'Failed'}</span>`;
   setTimeout(fetchAll, 2000);

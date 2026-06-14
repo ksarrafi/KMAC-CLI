@@ -62,6 +62,23 @@ def _parse_json_lines(output: str) -> list[dict]:
     return result
 
 
+def _disk_mount() -> str:
+    if os.path.isdir("/System/Volumes/Data"):
+        return "/System/Volumes/Data"
+    return "/"
+
+
+def _health_from_status(status: str) -> str:
+    s = status or ""
+    if "(healthy)" in s:
+        return "healthy"
+    if "(unhealthy)" in s:
+        return "unhealthy"
+    if "(health: starting)" in s:
+        return "starting"
+    return "none"
+
+
 async def collect_health() -> dict:
     """Collect comprehensive Docker health data."""
     ts = time.time()
@@ -69,7 +86,7 @@ async def collect_health() -> dict:
     # Host disk
     disk_info = {"pct": 0, "used": "?", "total": "?", "avail": "?", "status": "HEALTHY"}
     try:
-        out, rc = await _run(["df", "-h", "/"])
+        out, rc = await _run(["df", "-h", _disk_mount()])
         if rc == 0:
             lines = out.strip().splitlines()
             if len(lines) >= 2:
@@ -126,6 +143,13 @@ async def collect_health() -> dict:
         c["state"] = ps.get("state", "")
         c["ports"] = ps.get("ports", "")
         c["id"] = ps.get("id", "")
+        c["health"] = _health_from_status(ps.get("status", ""))
+
+    # Image count
+    img_count = 0
+    out, rc = await _run(["docker", "images", "-q"])
+    if rc == 0:
+        img_count = len([ln for ln in out.strip().splitlines() if ln.strip()])
 
     # Docker system df
     docker_disk = []
@@ -168,7 +192,7 @@ async def collect_health() -> dict:
         "docker": {
             "running": running,
             "stopped": stopped,
-            "images": len(ps_data),
+            "images": img_count,
         },
         "containers": containers,
         "docker_disk": docker_disk,
@@ -201,14 +225,19 @@ async def get_history(minutes: int = 60) -> list[dict]:
 
 
 async def run_cleanup(cleanup_type: str) -> dict:
-    """Run Docker cleanup operations."""
+    """Run Docker cleanup operations. Volumes are never pruned (database data)."""
     allowed = {
         "containers": ["docker", "container", "prune", "-f"],
         "images": ["docker", "image", "prune", "-a", "-f"],
-        "volumes": ["docker", "volume", "prune", "-f"],
         "cache": ["docker", "builder", "prune", "-f", "--filter", "until=168h"],
-        "all": ["docker", "system", "prune", "-a", "--volumes", "-f"],
+        "all": ["docker", "system", "prune", "-a", "-f"],
     }
+    if cleanup_type == "volumes":
+        return {
+            "ok": False,
+            "error": "Volume prune disabled — volumes may contain database data. Remove manually: docker volume rm <name>",
+            "type": cleanup_type,
+        }
     if cleanup_type not in allowed:
         return {"error": f"Invalid cleanup type: {cleanup_type}. Use: {', '.join(allowed.keys())}"}
 

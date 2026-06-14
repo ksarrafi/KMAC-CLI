@@ -231,3 +231,14 @@ platform_sed_inplace() {
         sed -i "$@"
     fi
 }
+
+# ─── Disk ────────────────────────────────────────────────────────────────────
+
+# Primary data volume on modern macOS (APFS); / elsewhere.
+platform_disk_mount() {
+    if [[ "$KMAC_OS" == macos && -d /System/Volumes/Data ]]; then
+        echo /System/Volumes/Data
+    else
+        echo /
+    fi
+}

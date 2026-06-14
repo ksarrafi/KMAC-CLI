@@ -4,6 +4,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh"
+source "$SCRIPT_DIR/_platform.sh" 2>/dev/null
 source "$SCRIPT_DIR/_auth-helper.sh" 2>/dev/null
 
 _KMAC_TMP="${HOME}/.cache/kmac"
@@ -15,17 +16,33 @@ ICLOUD_AVAIL=false
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
+_disk_target() {
+    platform_disk_mount 2>/dev/null || echo /
+}
+
 human_size() {
     local bytes=$1
     if (( bytes >= 1073741824 )); then
-        printf "%.1f GB" "$(awk "BEGIN {printf \"%.1f\", $bytes/1073741824}")"
+        awk -v b="$bytes" 'BEGIN {printf "%.1f GB", b/1073741824}'
     elif (( bytes >= 1048576 )); then
-        printf "%.1f MB" "$(awk "BEGIN {printf \"%.1f\", $bytes/1048576}")"
+        awk -v b="$bytes" 'BEGIN {printf "%.1f MB", b/1048576}'
     elif (( bytes >= 1024 )); then
-        printf "%.0f KB" "$(awk "BEGIN {printf \"%.0f\", $bytes/1024}")"
+        awk -v b="$bytes" 'BEGIN {printf "%.0f KB", b/1024}'
     else
-        printf "%d B" "$bytes"
+        printf '%d B' "$bytes"
     fi
+}
+
+_purgeable_bytes() {
+    local mount="$1" line bytes
+    line=$(diskutil info "$mount" 2>/dev/null | grep -i 'Purgeable Space' | head -1)
+    if [[ -n "$line" ]]; then
+        bytes=$(echo "$line" | sed -n 's/.*(\([0-9]*\) Bytes).*/\1/p')
+        [[ -n "$bytes" ]] && echo "$bytes" && return
+    fi
+    # Foundation API: important-usage capacity minus reported available (purgeable delta)
+    bytes=$(swift -e 'import Foundation; let u = URL(fileURLWithPath: "'"$mount"'"); guard let v = try? u.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey]), let i = v.volumeAvailableCapacityForImportantUsage, let a = v.volumeAvailableCapacity else { print(0); exit(0) }; let d = i - Int64(a); print(d > 0 ? d : 0)' 2>/dev/null)
+    [[ -n "$bytes" && "$bytes" -gt 0 ]] && echo "$bytes"
 }
 
 bar_graph() {
@@ -70,15 +87,18 @@ spinner() {
 do_overview() {
     title_box "Disk Usage Overview" "💾"
 
-    local disk_info
-    disk_info=$(df -H / 2>/dev/null | awk 'NR==2')
-    local total used avail pct
+    local mount vol_name disk_info total used avail pct
+    mount=$(_disk_target)
+    vol_name=$(diskutil info "$mount" 2>/dev/null | awk -F': *' '/Volume Name:/ {print $2; exit}')
+    [[ -z "$vol_name" ]] && vol_name="Macintosh HD"
+
+    disk_info=$(df -H "$mount" 2>/dev/null | awk 'NR==2')
     total=$(echo "$disk_info" | awk '{print $2}')
     used=$(echo "$disk_info" | awk '{print $3}')
     avail=$(echo "$disk_info" | awk '{print $4}')
     pct=$(echo "$disk_info" | awk '{gsub(/%/,""); print $5}')
 
-    echo -e "  ${BOLD}Macintosh HD${NC}"
+    echo -e "  ${BOLD}${vol_name}${NC}"
     echo ""
     printf "  Total: %-10s  Used: %-10s  Free: %-10s\n" "$total" "$used" "$avail"
     echo ""
@@ -93,12 +113,13 @@ do_overview() {
         echo -e "  ${GREEN}✓  Disk usage is healthy${NC}"
     fi
 
-    # APFS purgeable space
-    local apfs_purg
-    apfs_purg=$(diskutil apfs list 2>/dev/null | grep -i "FileVault\|Purgeable" | head -3)
-    if [[ -n "$apfs_purg" ]]; then
+    # APFS purgeable space (diskutil line if present, else Foundation API delta)
+    local purg_bytes purg_h
+    purg_bytes=$(_purgeable_bytes "$mount")
+    if [[ -n "$purg_bytes" && "$purg_bytes" -gt 0 ]]; then
+        purg_h=$(human_size "$purg_bytes")
         echo ""
-        echo -e "  ${DIM}APFS reports additional purgeable space that macOS can reclaim automatically.${NC}"
+        echo -e "  ${DIM}APFS purgeable:${NC} ${purg_h} ${DIM}(macOS can reclaim automatically when space is needed)${NC}"
     fi
     echo ""
 }
@@ -148,11 +169,11 @@ do_scan() {
         pids+=($!)
     done
 
-    # Spinner while waiting (with 30s timeout)
-    local deadline=$(( $(date +%s) + 30 ))
+    # Spinner while waiting (120s timeout; only kill slow jobs if deadline hit)
+    local deadline=$(( $(date +%s) + 120 ))
     local ci=0
     local done_count=0 total_count=${#pids[@]}
-    while (( $(date +%s) < deadline )); do
+    while true; do
         done_count=0
         local all_done=true
         for p in "${pids[@]}"; do
@@ -163,12 +184,15 @@ do_scan() {
             fi
         done
         $all_done && break
+        if (( $(date +%s) >= deadline )); then
+            for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
+            break
+        fi
         printf '\r\033[2K  \033[0;36m%s\033[0m Scanning directories... \033[2m(%d/%d)\033[0m ' "${_SPIN_CHARS[$ci]}" "$done_count" "$total_count"
         ci=$(( (ci + 1) % _SPIN_N ))
         sleep 0.1
     done
-    for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
-    wait 2>/dev/null
+    for p in "${pids[@]}"; do wait "$p" 2>/dev/null; done
     printf '\r\033[2K  \033[0;32m✓\033[0m Scanned %d directories\n' "$total_count"
 
     local -a results=()

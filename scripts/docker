@@ -4,6 +4,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh"
+source "$SCRIPT_DIR/_platform.sh" 2>/dev/null
 source "$SCRIPT_DIR/_auth-helper.sh" 2>/dev/null
 
 # ─── Docker Socket Discovery ────────────────────────────────────────────────
@@ -316,10 +317,11 @@ do_disk() {
     title_box "Docker Disk Monitor" "💾"
     _docker_ok || return
 
-    # Host disk context
+    # Host disk context (data volume on modern macOS)
     echo -e "  ${BOLD}Host Disk${NC}"
-    local disk_line
-    disk_line=$(df -h / 2>/dev/null | tail -1)
+    local disk_mount disk_line
+    disk_mount=$(platform_disk_mount 2>/dev/null || echo /)
+    disk_line=$(df -h "$disk_mount" 2>/dev/null | tail -1)
     local pct
     pct=$(echo "$disk_line" | awk '{print $5}' | tr -d '%')
     local used total avail
@@ -371,10 +373,10 @@ do_disk() {
         echo -e "  ${BOLD}Reclaimable${NC}"
         echo -e "  ${DIM}$(printf '─%.0s' {1..40})${NC}"
         (( dangling_imgs > 0 )) && echo -e "  ${YELLOW}${dangling_imgs} dangling image(s)${NC}"
-        (( dangling_vols > 0 )) && echo -e "  ${YELLOW}${dangling_vols} unused volume(s)${NC}"
+        (( dangling_vols > 0 )) && echo -e "  ${YELLOW}${dangling_vols} unused volume(s)${NC}  ${DIM}(not auto-removed — may hold DB data)${NC}"
         (( stopped > 0 ))       && echo -e "  ${YELLOW}${stopped} stopped container(s)${NC}"
         echo ""
-        echo -e "  Clean all reclaimable resources? (y/N)"
+        echo -e "  Clean stopped containers and dangling images? ${DIM}(volumes excluded)${NC} (y/N)"
         read -r -p "  > " yn
         if [[ "$yn" == [yY]* ]]; then
             echo ""
@@ -470,11 +472,11 @@ if ! docker info > /dev/null 2>&1; then
     echo "Docker not running, skipping." >> "$LOG"
     exit 0
 fi
+# Never prune volumes — they often contain database data.
 echo "--- Before ---" >> "$LOG"
 docker system df >> "$LOG" 2>&1
 docker container prune -f >> "$LOG" 2>&1
 docker image prune -f >> "$LOG" 2>&1
-docker volume prune -f >> "$LOG" 2>&1
 docker builder prune -f --filter "until=168h" >> "$LOG" 2>&1
 echo "--- After ---" >> "$LOG"
 docker system df >> "$LOG" 2>&1
@@ -597,7 +599,6 @@ do_mcp() {
     echo -e "   ${GREEN}2${NC})  Browse catalog categories"
     echo -e "   ${GREEN}3${NC})  Manage profiles"
     echo -e "   ${GREEN}4${NC})  Connect client (Cursor, Claude, VS Code)"
-    echo -e "   ${GREEN}5${NC})  AI-assisted Docker troubleshoot"
     echo -e "   ${GREEN}m${NC})  Back"
     echo ""
     read -r -p "  > " action
@@ -607,7 +608,6 @@ do_mcp() {
         2) _mcp_browse ;;
         3) _mcp_profiles ;;
         4) _mcp_connect ;;
-        5) _mcp_troubleshoot ;;
     esac
 }
 
@@ -722,6 +722,10 @@ _mcp_connect() {
 }
 
 _mcp_troubleshoot() {
+    do_troubleshoot
+}
+
+do_troubleshoot() {
     _docker_ok || return
 
     if ! type _ensure_claude_auth &>/dev/null || ! _ensure_claude_auth 2>/dev/null; then
@@ -783,13 +787,15 @@ do_quick_clean() {
     title_box "Quick Cleanup" "🧹"
     _docker_ok || return
 
+    echo -e "  ${DIM}Volumes are never pruned here — they often hold database data.${NC}"
+    echo -e "  ${DIM}To remove a specific unused volume: docker volume rm <name>${NC}"
+    echo ""
     echo -e "  ${BOLD}What to clean?${NC}"
     echo ""
     echo -e "   ${GREEN}1${NC})  Stopped containers only"
     echo -e "   ${GREEN}2${NC})  Unused images only"
-    echo -e "   ${GREEN}3${NC})  Unused volumes only"
-    echo -e "   ${GREEN}4${NC})  Build cache (older than 1 week)"
-    echo -e "   ${GREEN}5${NC})  Full cleanup (everything unused)"
+    echo -e "   ${GREEN}3${NC})  Build cache (older than 1 week)"
+    echo -e "   ${GREEN}4${NC})  Full safe cleanup (no volumes)"
     echo -e "   ${GREEN}m${NC})  Back"
     echo ""
     read -r -p "  > " choice
@@ -805,22 +811,17 @@ do_quick_clean() {
             [[ "$yn" == [yY]* ]] && docker image prune -a -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
             ;;
         3)
-            echo -e "  ${YELLOW}This removes all unused volumes.${NC}"
-            read -r -p "  Continue? (y/N) " yn
-            [[ "$yn" == [yY]* ]] && docker volume prune -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
-            ;;
-        4)
             docker builder prune -f --filter "until=168h" 2>&1 | while IFS= read -r line; do echo "  $line"; done
             echo -e "  ${GREEN}✓ Build cache cleaned${NC}"
             ;;
-        5)
-            echo -e "  ${YELLOW}${BOLD}This removes ALL unused resources:${NC}"
-            echo -e "  ${DIM}stopped containers, unused images, volumes, build cache${NC}"
-            read -r -p "  Are you sure? (y/N) " yn
+        4)
+            echo -e "  ${YELLOW}${BOLD}Removes unused images, stopped containers, and build cache.${NC}"
+            echo -e "  ${DIM}Volumes are excluded (database data).${NC}"
+            read -r -p "  Continue? (y/N) " yn
             if [[ "$yn" == [yY]* ]]; then
-                docker system prune -a --volumes -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
+                docker system prune -a -f 2>&1 | while IFS= read -r line; do echo "  $line"; done
                 echo ""
-                echo -e "  ${GREEN}✓ Full cleanup complete${NC}"
+                echo -e "  ${GREEN}✓ Safe cleanup complete${NC}"
                 echo ""
                 docker system df 2>/dev/null | while IFS= read -r line; do echo "  $line"; done
             fi
@@ -882,6 +883,7 @@ do_restart() {
 
 _open_web_dashboard() {
     local server_dir="$SCRIPT_DIR/../server"
+    local token_file="$HOME/.config/kmac-pilot/server_token"
     local port
     port=$(KMAC_SERVER_DIR="$server_dir" python3 <<'PYEOF' 2>/dev/null
 import sys, os
@@ -890,21 +892,29 @@ try:
     from config import PORT
     print(PORT)
 except Exception:
-    print(8888)
+    print(7890)
 PYEOF
 )
-    port="${port:-8888}"
+    port="${port:-7890}"
+
+    local token=""
+    [[ -f "$token_file" ]] && token=$(<"$token_file" tr -d '[:space:]')
 
     local url="http://localhost:${port}/docker-dashboard"
+    [[ -n "$token" ]] && url="${url}?token=${token}"
+
     echo -e "  ${DIM}Opening Docker Health Dashboard...${NC}"
-    echo -e "  ${BOLD}${url}${NC}"
+    echo -e "  ${BOLD}${url%%\?*}${NC}"
+    if [[ -z "$token" ]]; then
+        echo -e "  ${YELLOW}No pilot token found — paste token from ~/.config/kmac-pilot/server_token${NC}"
+    fi
 
     if curl -sf --max-time 2 "http://localhost:${port}/api/ping" &>/dev/null; then
         open "$url" 2>/dev/null
     else
         echo ""
         echo -e "  ${YELLOW}KMac Pilot Server not running.${NC}"
-        echo -e "  ${DIM}Start it with: cd server && python3 app.py${NC}"
+        echo -e "  ${DIM}Start it with: kmac server start${NC}"
         echo ""
         echo -e "  Start server now? (y/N)"
         read -r -p "  > " yn
@@ -946,6 +956,7 @@ do_menu() {
         echo -e "   ${GREEN}2${NC})  Crash Detective          ${DIM}find OOM kills & crashes${NC}"
         echo -e "   ${GREEN}3${NC})  Disk Monitor             ${DIM}images, volumes, reclaimable${NC}"
         echo -e "   ${GREEN}h${NC})  ${BOLD}Health Report${NC}            ${DIM}color-coded thresholds + history${NC}"
+        echo -e "   ${GREEN}t${NC})  ${BOLD}AI Troubleshoot${NC}          ${DIM}Claude analysis of Docker state${NC}"
         echo -e "   ${GREEN}w${NC})  ${BOLD}Web Dashboard${NC}            ${DIM}open in browser${NC}"
         echo ""
         echo -e "  ${DIM}── Manage ───────────────────────────${NC}"
@@ -970,6 +981,7 @@ do_menu() {
             2) do_crashes ;;
             3) do_disk ;;
             h|H) bash "$SCRIPT_DIR/docker-health" ;;
+            t|T) do_troubleshoot ;;
             w|W) _open_web_dashboard ;;
             4) do_compose ;;
             5) do_restart ;;
@@ -996,6 +1008,7 @@ case "${1:-}" in
     disk)                    do_disk; [[ -t 1 ]] && pause ;;
     compose)                 do_compose; [[ -t 1 ]] && pause ;;
     restart)                 do_restart; [[ -t 1 ]] && pause ;;
+    troubleshoot|diag)       do_troubleshoot; [[ -t 1 ]] && pause ;;
     clean|cleanup)           do_quick_clean; [[ -t 1 ]] && pause ;;
     scheduler|cron)          do_scheduler; [[ -t 1 ]] && pause ;;
     mcp)                     do_mcp; [[ -t 1 ]] && pause ;;

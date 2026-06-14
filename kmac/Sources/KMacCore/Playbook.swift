@@ -82,10 +82,18 @@ public enum Playbooks {
         fi
         """#,
         apply: #"""
-        echo "Quitting Docker…"; osascript -e 'quit app "Docker"' 2>/dev/null || true
+        echo "Quitting Docker…"
+        osascript -e 'quit app "Docker"' 2>/dev/null || killall "Docker Desktop" 2>/dev/null || true
         sleep 3
-        echo "Relaunching Docker…"; open -a Docker 2>/dev/null || true
-        echo "Docker is restarting (engine may take ~20s to be ready)."
+        pkill -9 -f "Docker.app" 2>/dev/null || true
+        echo "Relaunching Docker…"
+        open -a Docker 2>/dev/null || true
+        echo "Waiting for engine…"
+        for i in $(seq 1 60); do
+          if docker info &>/dev/null; then echo "✓ Docker ready"; docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | head -5; exit 0; fi
+          sleep 2
+        done
+        echo "Engine not ready after 2 minutes — try: kmac docker restart"
         """#,
         destructive: false
     )

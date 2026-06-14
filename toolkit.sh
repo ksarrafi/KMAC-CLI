@@ -51,6 +51,10 @@ source "$SCRIPTS_DIR/_ai-fix.sh" 2>/dev/null
 # shellcheck source=scripts/_hooks.sh
 source "$SCRIPTS_DIR/_hooks.sh"
 
+# ─── Platform (disk mount, OS detection) ───────────────────────────────────
+# shellcheck source=scripts/_platform.sh
+source "$SCRIPTS_DIR/_platform.sh" 2>/dev/null
+
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
 tool_error() {
@@ -309,8 +313,9 @@ print_menu() {
         fi
     fi
     # ─── System Stats ───
-    local _df_out _disk_used _disk_total _disk_pct _disk_num
-    _df_out=$(df -H / 2>/dev/null | tail -1)
+    local _df_out _disk_used _disk_total _disk_pct _disk_num _disk_mount
+    _disk_mount=$(platform_disk_mount 2>/dev/null || echo /)
+    _df_out=$(df -H "$_disk_mount" 2>/dev/null | tail -1)
     _disk_used=$(echo "$_df_out" | awk '{print $3}')
     _disk_total=$(echo "$_df_out" | awk '{print $2}')
     _disk_pct=$(echo "$_df_out" | awk '{print $5}')

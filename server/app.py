@@ -55,7 +55,7 @@ class WSClientState:
 
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
-    if request.path in ("/api/ping", "/ws") or request.path.startswith("/static/"):
+    if request.path in ("/api/ping", "/ws", "/docker-dashboard") or request.path.startswith("/static/"):
         return await handler(request)
 
     token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()

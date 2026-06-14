@@ -153,16 +153,16 @@ kmac skillopt status             # Show all skills + eval scores
 
 ### 2. Docker Management
 
-A full Docker operations center that connects directly to the Docker Engine API via unix socket — no CLI output parsing, no polling. Nine tools covering monitoring, crash analysis, cleanup, and AI-assisted troubleshooting.
+Docker operations center: Engine API for live monitoring, CLI for compose/cleanup/MCP, and a browser dashboard via the Pilot server. For a deterministic restart, use **`kmac-cli run docker-restart`**; for the full interactive flow with engine wait, use **`kmac docker restart`**.
 
-**Health Dashboard** (`kmac docker dashboard`) — live view of every running container with CPU%, memory usage, network I/O, health check status, and uptime. Shows Docker engine version, host CPU/RAM, and color-coded CPU alerts (yellow >50%, red >80%).
+**Health Dashboard** (`kmac docker dashboard`) — live view of running containers via Engine API: CPU%, memory, network I/O, Docker healthcheck status, and uptime. Shows host OS/kernel and CPU/RAM from `/info` (engine version is validated at connect, not shown in the table).
 
-**Health Report** (`kmac docker health`) — a focused status report with color-coded thresholds for disk and memory pressure. Outputs a progress bar for host disk, a per-container table, Docker disk breakdown (images, volumes, build cache), alerts section, and clickable port links for web-facing containers.
+**Health Report** (`kmac docker health`) — terminal report with color-coded host disk thresholds. Host disk reads **`/System/Volumes/Data`** on modern macOS (not the sealed `/` volume). Per-container table, Docker `system df` breakdown, alerts, and localhost port links.
 
 ```bash
 kmac docker health               # Terminal report with color coding
 kmac docker health --json        # Structured JSON for APIs and automation
-kmac docker health --history     # 24h trend data with ASCII sparkline chart
+kmac docker health --history     # 24h trend (file at ~/.cache/kmac/docker-history.json; needs repeated runs)
 ```
 
 | Status | Disk | Memory | Indicator |
@@ -172,37 +172,41 @@ kmac docker health --history     # 24h trend data with ASCII sparkline chart
 | Severe | 85-90% | — | 🟠 Orange |
 | Critical | >90% | >90% (OOM risk) | 🔴 Red |
 
-**Web Dashboard** (`kmac docker web`) — opens a dark-themed, mobile-responsive browser UI at `/docker-dashboard`. Status cards for running containers, disk usage, and alert count. Per-container table with health badges, CPU/memory gauges, and clickable port links. Docker disk pie chart. 60-minute trending graph (disk, CPU, memory) via Chart.js. One-click cleanup buttons with confirmation dialogs. Auto-refreshes every 10 seconds.
+**Web Dashboard** (`kmac docker web`) — browser UI at `http://localhost:7890/docker-dashboard` (Pilot server). HTML page is unauthenticated; API calls require the pilot token (auto-filled from `~/.config/kmac-pilot/server_token` when opened via `kmac docker web`). Status cards, container table with real healthcheck status, Docker disk table, 60-minute **line** trend chart (Chart.js), prune buttons with confirm. Polls every 10s. In-memory history resets on server restart.
 
-**Crash Detective** (`kmac docker crashes`) — inspects all exited containers via the Engine API. Categorizes each by exit code: OOM killed (exit 137), SIGKILL, SEGFAULT (139), application error (1), or clean exit (0). Shows the container name, image, exit timestamp, and a human-readable reason. Offers to view logs or restart.
+**Crash Detective** (`kmac docker crashes`) — exited containers via Engine API with exit-code categories (OOM 137, SIGKILL, SEGFAULT 139, etc.). View logs or restart interactively.
 
-**Disk Monitor** (`kmac docker disk`) — host disk bar graph, Docker resource table (`docker system df`), top 10 largest images sorted by size, volume details, and a count of reclaimable dangling images, unused volumes, and stopped containers with one-click prune.
+**Disk Monitor** (`kmac docker disk`) — host disk bar on data volume, `docker system df`, top images, volumes, reclaimable counts with optional prune.
 
-**Compose Manager** (`kmac docker compose`) — lists active Docker Compose projects with status and config file paths. View logs, stop, restart, or start new projects from a compose file.
+**Compose Manager** (`kmac docker compose`) — `docker compose ls` projects; logs, stop, restart; start from a compose file path.
 
-**MCP Toolkit** (`kmac docker mcp`) — integrates with Docker Desktop's Model Context Protocol. Search 300+ servers in the MCP catalog, browse categories, create and manage profiles, and connect AI clients (Cursor, Claude Desktop, VS Code). Includes AI-assisted troubleshooting that gathers Docker diagnostics and sends them to Claude for analysis.
+**MCP Toolkit** (`kmac docker mcp`) — requires Docker Desktop 4.62+ MCP Toolkit (`docker mcp`). Catalog search, profiles, client connect. Hidden from menu if MCP CLI is absent.
 
-**Quick Cleanup** (`kmac docker clean`) — interactive prune menu. Choose to clean stopped containers, unused images, unused volumes, build cache older than one week, or a full system prune. Each option explains what will be removed and asks for confirmation.
+**AI Troubleshoot** (`kmac docker troubleshoot`) — gathers Docker diagnostics and sends to Claude (Anthropic key required). **Not** gated on MCP.
 
-**Auto-Cleanup Scheduler** (`kmac docker scheduler`) — installs a cleanup script and schedules it via `crontab` for weekly (Sunday 2 AM) or daily (3 AM) execution. Logs results to `~/.docker-cleanup.log`. Shows current schedule status and last run timestamp.
+**Quick Cleanup** (`kmac docker clean`) — interactive prune menu. Cleans stopped containers, unused images, and build cache. **Never prunes volumes** (they often hold database data). Full safe prune uses `docker system prune -a` without `--volumes`.
+
+**Restart Docker Desktop** (`kmac docker restart`) — quit, relaunch, wait up to 2 minutes for engine readiness.
+
+**Auto-Cleanup Scheduler** (`kmac docker scheduler`) — installs `~/cleanup-docker.sh` and optional `crontab` (weekly/daily). Prunes containers, images, and build cache only — **never volumes**. Unreliable if Mac is asleep.
 
 ---
 
 ### 3. Storage Manager
 
-Disk space analysis, AI-powered file identification, and cleanup tools designed for macOS — with iCloud Drive integration for migrating large directories off local storage.
+Disk space analysis, AI-powered file identification, and cleanup tools designed for macOS — with iCloud Drive integration for migrating large directories off local storage. For canonical safe cleanup, use **`kmac-cli run disk-cleanup`** (the deterministic playbook); `kmac storage` is exploratory and partly interactive.
 
-**Overview** (`kmac storage overview`) — disk usage bar graph with percentage, used/total/free space, and APFS purgeable space (macOS-specific reclaimable storage that the system manages automatically).
+**Overview** (`kmac storage overview`) — reads `/System/Volumes/Data` for accurate APFS volume stats. Disk usage bar with used/total/free, plus real purgeable bytes from `diskutil` or the Foundation API (macOS reclaimable storage the system can free when needed).
 
-**Directory Scan** (`kmac storage scan`) — breaks down storage by major directories (Desktop, Downloads, Documents, Library, Projects, Applications, etc.) with animated progress spinners during scan. Displays size bars relative to the largest directory. Runs `du` in parallel with per-directory timeouts to handle large trees like `~/Library`.
+**Directory Scan** (`kmac storage scan`) — parallel `du` across major home directories (Downloads, Documents, Desktop, Projects, Library caches, Docker, etc.) with size bars relative to the largest. Global **120s timeout** kills slow jobs so large trees like `~/Library` do not hang indefinitely.
 
-**Big Files** (`kmac storage big`) — finds the largest files across your home directory and `~/.cursor`. Sends the file list to Claude Haiku for AI analysis — each file gets a plain-English description of what it is, a safety rating (SAFE TO DELETE / CAUTION / KEEP), and an actionable tip. Falls back to pattern-matching descriptions when offline. Presents numbered files for interactive actions: delete specific files (`d 1,3,5`), back up to iCloud and delete (`b 1,3,5`), or bulk-delete all SAFE files (`D`).
+**Big Files** (`kmac storage big`) — finds files >100MB across home and `~/.cursor`. Groups files by category; Claude Haiku analyzes **categories** (not each file individually) with descriptions, safety ratings (SAFE / CAUTION / KEEP), and tips. Pattern-matching fallback when offline. Numbered per-file actions: delete (`d 1,3,5`), backup to iCloud then delete (`b 1,3,5`), or bulk-delete all SAFE categories (`D`).
 
-**Cleanup** (`kmac storage clean`) — one-click removal of common disk waste: Homebrew cache, npm cache, pip cache, Xcode derived data, macOS system logs, application caches, and `.DS_Store` files. Shows a real-time progress spinner with the current target being cleaned and bytes freed.
+**Cleanup** (`kmac storage clean`) — **interactive menu**, not one-click: scans reclaimable caches and build artifacts (Xcode DerivedData, Homebrew, npm, pip, logs, Trash, Docker, simulators, etc.), then numbered quick actions (empty Trash, clear DerivedData, purge caches). Does **not** remove `.DS_Store` files.
 
-**iCloud Migration** (`kmac storage icloud`) — moves selected directories to iCloud Drive and creates symlinks in their original locations so apps continue to work transparently. Shows available iCloud storage before proceeding.
+**iCloud Migration** (`kmac storage icloud`) — analyzes migration candidates and can move a selected directory to iCloud Drive with a local symlink so apps keep working. Does **not** show iCloud quota. **Risky for dev projects** — git repos and `node_modules` do not sync well to iCloud.
 
-**Node Modules** (`kmac storage node`) — scans for `node_modules` directories with a spinner showing directories found. Lists each with size and last-modified date. Select which to delete.
+**Node Modules** (`kmac storage node`) — scans for `node_modules` under Projects, Developer, Desktop, and Documents. Lists each with size and last `package.json` date. Only bulk **remove stale (>30 days old)** — no per-directory pick list.
 
 ---
 

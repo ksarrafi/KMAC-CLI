@@ -4,6 +4,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_ui.sh"
+source "$SCRIPT_DIR/_platform.sh" 2>/dev/null
 
 _KMAC_TMP="${HOME}/.cache/kmac"
 [[ -d "$_KMAC_TMP" ]] || { mkdir -p "$_KMAC_TMP" && chmod 700 "$_KMAC_TMP"; }
@@ -85,9 +86,10 @@ print(f'{d.get(\"MemTotal\",0)/(1024**3):.1f}')
       read -r _cpus; read -r _mem_total; } <<< "$info"
     running=${running:-0}; stopped=${stopped:-0}; paused=${paused:-0}
 
-    # Host disk
-    local disk_line
-    disk_line=$(df -h / 2>/dev/null | tail -1)
+    # Host disk (data volume on modern macOS)
+    local disk_mount disk_line
+    disk_mount=$(platform_disk_mount 2>/dev/null || echo /)
+    disk_line=$(df -h "$disk_mount" 2>/dev/null | tail -1)
     local disk_total disk_used disk_avail disk_pct
     disk_total=$(echo "$disk_line" | awk '{print $2}')
     disk_used=$(echo "$disk_line" | awk '{print $3}')
