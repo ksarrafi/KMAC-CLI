@@ -1,6 +1,6 @@
 #!/bin/bash
-# vault — enhanced vault browser and project key manager
-# Usage: vault              (interactive browser)
+# vault — vault manager (action menu + optional full browse)
+# Usage: vault              (interactive action menu)
 #        vault list         (show all keys)
 #        vault get <key>    (get a key value)
 #        vault set <key>    (set a key value)
@@ -129,6 +129,74 @@ do_browse() {
     echo ""
 }
 
+# Compact home screen — summary + actions (not a wall of every key).
+do_dashboard() {
+    title_box "Vault Manager" "🔐"
+
+    local backend
+    backend=$(_vault_backend)
+    echo -e "  ${BOLD}Backend:${NC} ${CYAN}${backend}${NC}"
+
+    if [[ "$backend" == "docker" ]]; then
+        if _docker_vault_running 2>/dev/null; then
+            echo -e "  ${GREEN}●${NC} ${DIM}Running on 127.0.0.1:${VAULT_DOCKER_PORT}${NC}"
+        else
+            echo -e "  ${YELLOW}○${NC} ${DIM}Docker vault not running${NC}"
+        fi
+    fi
+    echo ""
+
+    local -a all_keys=()
+    while IFS= read -r key; do
+        [[ -n "$key" && ! "$key" =~ ^__meta__: ]] && all_keys+=("$key")
+    done < <(vault_list 2>/dev/null)
+
+    if (( ${#all_keys[@]} == 0 )); then
+        echo -e "  ${YELLOW}No keys stored yet${NC}"
+        echo ""
+        echo -e "  ${DIM}Press ${GREEN}a${DIM} to add your first key, or ${GREEN}p${DIM} to set up a project.${NC}"
+        echo ""
+        return
+    fi
+
+    _vault_collect_projects
+    local -a projects=("${VAULT_PICK_PROJECTS[@]}")
+    local proj_count=${#projects[@]}
+    local ungrouped=0
+    for key in "${all_keys[@]}"; do
+        [[ ! "$key" =~ : ]] && ((ungrouped++))
+    done
+
+    if (( proj_count > 0 )); then
+        echo -e "  ${BOLD}${#all_keys[@]} keys${NC} across ${BOLD}${proj_count}${NC} project(s)"
+    else
+        echo -e "  ${BOLD}${#all_keys[@]} keys${NC} ${DIM}(no project namespaces)${NC}"
+    fi
+    (( ungrouped > 0 )) && echo -e "  ${DIM}${ungrouped} ungrouped key(s)${NC}"
+    echo ""
+
+    if (( proj_count > 0 )); then
+        echo -e "  ${BOLD}Projects${NC} ${DIM}(press ${GREEN}p${DIM} to manage)${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..40})${NC}"
+        local max_show=8
+        local i shown=0
+        for i in "${!projects[@]}"; do
+            (( shown >= max_show )) && break
+            local count
+            count=$(_vault_project_key_count "${projects[$i]}")
+            printf "    ${CYAN}%-22s${NC} ${DIM}%d keys${NC}\n" "${projects[$i]}" "$count"
+            ((shown++))
+        done
+        if (( proj_count > max_show )); then
+            echo -e "    ${DIM}... and $((proj_count - max_show)) more${NC}"
+        fi
+        echo ""
+    fi
+
+    echo -e "  ${DIM}Full key listing: press ${GREEN}l${DIM}  ·  Search: ${GREEN}/${DIM}${NC}"
+    echo ""
+}
+
 # ─── Common key types for wizard ─────────────────────────────────────────────
 
 _get_common_key_types() {
@@ -160,7 +228,300 @@ Other (Custom)
 EOF
 }
 
-# ─── Wizard: Add/Update Key ──────────────────────────────────────────────────
+# ─── Shared pickers (list selection, not free-text guessing) ─────────────────
+
+_vault_mask_value() {
+    local val="$1"
+    if [[ -n "$val" && ${#val} -gt 8 ]]; then
+        echo "${val:0:4}••••${val: -4}"
+    else
+        echo "••••••••"
+    fi
+}
+
+_vault_collect_projects() {
+    local -a _out=()
+    while IFS= read -r key; do
+        [[ -n "$key" && ! "$key" =~ ^__meta__: ]] || continue
+        if [[ "$key" =~ ^([^:]+): ]]; then
+            local proj="${BASH_REMATCH[1]}"
+            if [[ ! " ${_out[*]} " =~ " ${proj} " ]]; then
+                _out+=("$proj")
+            fi
+        fi
+    done < <(vault_list 2>/dev/null)
+    if (( ${#_out[@]} > 0 )); then
+        local _sorted
+        _sorted=$(printf '%s\n' "${_out[@]}" | sort -f)
+        _out=()
+        while IFS= read -r _p; do
+            [[ -n "$_p" ]] && _out+=("$_p")
+        done <<< "$_sorted"
+    fi
+    VAULT_PICK_PROJECTS=("${_out[@]}")
+}
+
+_vault_project_key_count() {
+    local proj="$1"
+    local count=0
+    while IFS= read -r key; do
+        [[ "$key" =~ ^${proj}: ]] && ((count++))
+    done < <(vault_list 2>/dev/null)
+    echo "$count"
+}
+
+_vault_ungrouped_key_count() {
+    local count=0
+    while IFS= read -r key; do
+        [[ -n "$key" && ! "$key" =~ ^__meta__: && ! "$key" =~ : ]] && ((count++))
+    done < <(vault_list 2>/dev/null)
+    echo "$count"
+}
+
+# Sets VAULT_PICK_RESULT to project name, or empty on cancel.
+# allow_new: true = offer "create new project"; false = existing projects only.
+_vault_pick_project() {
+    local allow_new="${1:-true}"
+    VAULT_PICK_RESULT=""
+
+    _vault_collect_projects
+    local -a projects=("${VAULT_PICK_PROJECTS[@]}")
+    local ungrouped_count
+    ungrouped_count=$(_vault_ungrouped_key_count)
+
+    while true; do
+        clear
+        title_box "Select Project" "📦"
+        echo ""
+
+        local max_choice=0
+
+        if (( ${#projects[@]} > 0 )); then
+            echo -e "  ${BOLD}Your projects:${NC}"
+            echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+            local i
+            for i in "${!projects[@]}"; do
+                local count
+                count=$(_vault_project_key_count "${projects[$i]}")
+                printf "  %2d) ${CYAN}%-24s${NC} ${DIM}(%d keys)${NC}\n" "$((i+1))" "${projects[$i]}" "$count"
+            done
+            max_choice=${#projects[@]}
+            echo ""
+        else
+            echo -e "  ${DIM}No project namespaces yet.${NC}"
+            echo ""
+        fi
+
+        if (( ungrouped_count > 0 )); then
+            max_choice=$((max_choice + 1))
+            printf "  %2d) ${YELLOW}Other keys${NC}             ${DIM}(%d ungrouped)${NC}\n" "$max_choice" "$ungrouped_count"
+            echo ""
+        fi
+
+        if [[ "$allow_new" == true ]]; then
+            echo -e "  ${GREEN}0)${NC}  ${BOLD}+ Create new project${NC}"
+            echo ""
+        fi
+
+        if (( max_choice == 0 && allow_new != true )); then
+            echo -e "  ${DIM}No keys in any project.${NC}"
+            sleep 1.5
+            return
+        fi
+
+        echo -e "  ${DIM}Enter the number to select. 'c' = cancel.${NC}"
+        echo ""
+        read -r -p "  > " choice
+
+        [[ "$choice" == [cC] ]] && return
+
+        if [[ "$allow_new" == true && "$choice" == "0" ]]; then
+            echo ""
+            read -r -p "  New project name ('c' to cancel) > " project
+            [[ "$project" == [cC] || -z "$project" ]] && return
+            if [[ ! "$project" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+                echo ""
+                echo -e "  ${RED}✗ Use only letters, numbers, hyphens, and underscores${NC}"
+                sleep 1.5
+                continue
+            fi
+            VAULT_PICK_RESULT="$project"
+            return
+        fi
+
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#projects[@]} )); then
+            VAULT_PICK_RESULT="${projects[$((choice-1))]}"
+            return
+        fi
+
+        if (( ungrouped_count > 0 )) && [[ "$choice" =~ ^[0-9]+$ ]] && (( choice == max_choice )); then
+            VAULT_PICK_RESULT="__ungrouped__"
+            return
+        fi
+
+        echo ""
+        echo -e "  ${RED}✗ Pick a number from the list${NC}"
+        sleep 1
+    done
+}
+
+# Sets VAULT_PICK_RESULT to full key (project:key), or empty on cancel.
+# filter_project: project name, "__ungrouped__", or empty for all keys.
+_vault_pick_key() {
+    local filter_project="${1:-}"
+    local title="${2:-Select Key}"
+    VAULT_PICK_RESULT=""
+
+    local -a keys=()
+    while IFS= read -r key; do
+        [[ -n "$key" && ! "$key" =~ ^__meta__: ]] || continue
+        if [[ "$filter_project" == "__ungrouped__" ]]; then
+            [[ "$key" =~ : ]] && continue
+        elif [[ -n "$filter_project" ]]; then
+            [[ "$key" =~ ^${filter_project}: ]] || continue
+        fi
+        keys+=("$key")
+    done < <(vault_list 2>/dev/null)
+
+    if (( ${#keys[@]} == 0 )); then
+        echo -e "  ${DIM}No keys to select.${NC}"
+        return 1
+    fi
+
+    local scope_label=""
+    if [[ "$filter_project" == "__ungrouped__" ]]; then
+        scope_label="Other keys"
+    elif [[ -n "$filter_project" ]]; then
+        scope_label="$filter_project"
+    fi
+
+    while true; do
+        clear
+        if [[ -n "$scope_label" ]]; then
+            title_box "$title — $scope_label" "🔑"
+        else
+            title_box "$title" "🔑"
+        fi
+        echo ""
+        echo -e "  ${BOLD}Pick a key:${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+
+        local i
+        for i in "${!keys[@]}"; do
+            local val masked label="${keys[$i]}"
+            val=$(vault_get "${keys[$i]}" 2>/dev/null)
+            masked=$(_vault_mask_value "$val")
+            if [[ -n "$filter_project" && "$filter_project" != "__ungrouped__" && "$label" =~ ^${filter_project}:(.+)$ ]]; then
+                label="${BASH_REMATCH[1]}"
+            fi
+            printf "  %2d) ${CYAN}%-36s${NC} ${DIM}%s${NC}\n" "$((i+1))" "$label" "$masked"
+        done
+
+        echo ""
+        echo -e "  ${DIM}Enter the number to select. 'c' = cancel.${NC}"
+        echo ""
+        read -r -p "  > " choice
+
+        [[ "$choice" == [cC] ]] && return 1
+
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#keys[@]} )); then
+            VAULT_PICK_RESULT="${keys[$((choice-1))]}"
+            return 0
+        fi
+
+        echo ""
+        echo -e "  ${RED}✗ Pick a number from the list${NC}"
+        sleep 1
+    done
+}
+
+# Step 1: pick project. Step 2: pick key within that project.
+_vault_pick_key_via_project() {
+    local title="${1:-Select Key}"
+    VAULT_PICK_RESULT=""
+
+    _vault_pick_project false || return 1
+    local project="$VAULT_PICK_RESULT"
+    [[ -z "$project" ]] && return 1
+
+    _vault_pick_key "$project" "$title" || return 1
+    return 0
+}
+
+# Update an existing key — pick from list, enter new value only.
+do_update_key() {
+    local preset_key="$1"
+
+    local full_key="$preset_key"
+    if [[ -z "$full_key" ]]; then
+        _vault_pick_key_via_project "Update Key" || return
+        full_key="$VAULT_PICK_RESULT"
+    fi
+
+    [[ -z "$full_key" ]] && return
+
+    if ! vault_has "$full_key" 2>/dev/null; then
+        echo -e "  ${RED}✗ Key not found:${NC} ${full_key}"
+        return 1
+    fi
+
+    local existing_value key_type=""
+    existing_value=$(vault_get "$full_key" 2>/dev/null)
+
+    local meta_key="__meta__:${full_key}"
+    if vault_has "$meta_key" 2>/dev/null; then
+        local meta
+        meta=$(vault_get "$meta_key" 2>/dev/null)
+        [[ "$meta" =~ type=([^|]+) ]] && key_type="${BASH_REMATCH[1]}"
+    fi
+
+    clear
+    title_box "Update Key" "🔐"
+    echo ""
+    echo -e "  ${BOLD}Key:${NC} ${CYAN}${full_key}${NC}"
+    [[ -n "$key_type" ]] && echo -e "  ${BOLD}Type:${NC} ${key_type}"
+    echo -e "  ${BOLD}Current:${NC} $(_vault_mask_value "$existing_value")"
+    echo ""
+    echo -e "  ${DIM}Enter the new value below (leave blank to keep current).${NC}"
+    echo ""
+
+    local value=""
+    read -r -s -p "  New value (hidden, Enter = keep, 'c' = cancel) > " value
+    echo ""
+
+    if [[ "$value" == [cC] ]]; then
+        echo -e "  ${DIM}Cancelled.${NC}"
+        return
+    fi
+
+    if [[ -z "$value" ]]; then
+        echo -e "  ${DIM}No change — value kept.${NC}"
+        return
+    fi
+
+    if vault_set "$full_key" "$value"; then
+        local timestamp
+        timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+        if vault_has "$meta_key" 2>/dev/null; then
+            local old_meta
+            old_meta=$(vault_get "$meta_key" 2>/dev/null)
+            if [[ "$old_meta" =~ type=([^|]+) ]]; then
+                vault_set "$meta_key" "type=${BASH_REMATCH[1]}|created=$timestamp" 2>/dev/null
+            else
+                vault_set "$meta_key" "created=$timestamp" 2>/dev/null
+            fi
+        else
+            vault_set "$meta_key" "created=$timestamp" 2>/dev/null
+        fi
+        echo ""
+        echo -e "  ${GREEN}✓ Updated: ${BOLD}${full_key}${NC}"
+        echo -e "  ${DIM}Timestamp: ${timestamp}${NC}"
+    else
+        echo -e "  ${RED}✗ Failed to save${NC}"
+    fi
+}
+
+# ─── Wizard: Add Key (new keys only; use do_update_key to change values) ─────
 
 do_set_key_wizard() {
     local preset_project="$1"
@@ -171,105 +532,69 @@ do_set_key_wizard() {
     if [[ -n "$preset_project" ]]; then
         project="$preset_project"
     else
-        while true; do
-            clear
-            title_box "Add/Update Vault Key" "🔐"
-            echo ""
-            echo -e "  ${BOLD}Step 1 of 3: Project${NC}"
-            echo -e "  ${DIM}──────────────────────────────────────${NC}"
-            echo ""
-            
-            # Show existing projects
-            local -a existing_projects=()
-            while IFS= read -r key; do
-                if [[ "$key" =~ ^([^:]+): ]]; then
-                    local proj="${BASH_REMATCH[1]}"
-                    if [[ ! " ${existing_projects[*]} " =~ " ${proj} " ]]; then
-                        existing_projects+=("$proj")
-                    fi
-                fi
-            done < <(vault_list 2>/dev/null)
-            
-            if (( ${#existing_projects[@]} > 0 )); then
-                echo -e "  ${DIM}Existing projects:${NC}"
-                for i in "${!existing_projects[@]}"; do
-                    printf "    %2d) ${CYAN}%s${NC}\n" "$((i+1))" "${existing_projects[$i]}"
-                done
-                echo ""
-            fi
-            
-            echo -e "  ${DIM}Or type a new project name${NC}"
-            echo ""
-            read -r -p "  Project name [1-${#existing_projects[@]} or name, 'c' to cancel] > " proj_input
-            
-            # Handle cancel
-            if [[ "$proj_input" == [cC] ]]; then
-                echo -e "  ${DIM}Cancelled.${NC}"
-                return
-            fi
-            
-            # Parse input - number or name
-            if [[ "$proj_input" =~ ^[0-9]+$ ]] && (( proj_input >= 1 && proj_input <= ${#existing_projects[@]} )); then
-                project="${existing_projects[$((proj_input-1))]}"
-            else
-                project="$proj_input"
-            fi
-            
-            # Validate not empty
-            if [[ -z "$project" ]]; then
-                echo ""
-                echo -e "  ${RED}✗ Project name cannot be empty${NC}"
-                sleep 1
-                continue
-            fi
-            
-            # Validate format
-            if [[ ! "$project" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-                echo ""
-                echo -e "  ${RED}✗ Invalid project name${NC}"
-                echo -e "  ${DIM}Use only letters, numbers, hyphens, and underscores${NC}"
-                sleep 1.5
-                continue
-            fi
-            
-            # Valid project - break loop
-            break
-        done
+        _vault_pick_project true || return
+        project="$VAULT_PICK_RESULT"
+        [[ -z "$project" ]] && return
     fi
     
-    # Step 2: Key type/purpose (with retry loop)
+    # Step 2: Key type/purpose OR update existing key in this project
     local key_type=""
     local key_name=""
     
     while true; do
         clear
-        title_box "Add/Update Vault Key" "🔐"
+        title_box "Add Vault Key" "🔐"
         echo ""
         echo -e "  ${BOLD}Project:${NC} ${CYAN}${project}${NC}"
         echo ""
-        echo -e "  ${BOLD}Step 2 of 3: What is this key for?${NC}"
-        echo -e "  ${DIM}──────────────────────────────────────${NC}"
-        echo ""
+
+        # Existing keys in this project — offer update shortcut
+        local -a proj_existing=()
+        while IFS= read -r key; do
+            [[ "$key" =~ ^${project}: ]] && proj_existing+=("$key")
+        done < <(vault_list 2>/dev/null)
+
+        local type_offset=0
+        if (( ${#proj_existing[@]} > 0 )); then
+            echo -e "  ${BOLD}Existing keys${NC} ${DIM}(pick one to update its value)${NC}"
+            echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
+            local i
+            for i in "${!proj_existing[@]}"; do
+                local val masked name
+                val=$(vault_get "${proj_existing[$i]}" 2>/dev/null)
+                masked=$(_vault_mask_value "$val")
+                name="${proj_existing[$i]#*:}"
+                printf "  %2d) ${YELLOW}↻${NC} %-28s ${DIM}%s${NC}\n" "$((i+1))" "$name" "$masked"
+            done
+            type_offset=${#proj_existing[@]}
+            echo ""
+        fi
+
+        echo -e "  ${BOLD}Add a new key${NC}"
+        echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
         
         local -a key_types
+        key_types=()
         while IFS= read -r ktype; do
             [[ -n "$ktype" ]] && key_types+=("$ktype")
         done < <(_get_common_key_types)
         
         # Show in two columns
         local mid=$(( (${#key_types[@]} + 1) / 2 ))
+        local i
         for i in $(seq 0 $((mid - 1))); do
-            local left=$((i + 1))
-            local right=$((i + mid + 1))
+            local left=$((i + type_offset + 1))
+            local right=$((i + mid + type_offset + 1))
             printf "    %2d) %-30s" "$left" "${key_types[$i]}"
-            if (( right <= ${#key_types[@]} )); then
+            if (( i + mid < ${#key_types[@]} )); then
                 printf "%2d) %s" "$right" "${key_types[$((i + mid))]}"
             fi
             echo ""
         done
         
+        local max_choice=$((type_offset + ${#key_types[@]}))
         echo ""
-        read -r -p "  Choose [1-${#key_types[@]}] or 'c' to cancel > " type_choice
+        read -r -p "  Choose [1-${max_choice}] or 'c' to cancel > " type_choice
         
         # Handle cancel
         if [[ "$type_choice" == [cC] ]]; then
@@ -280,19 +605,25 @@ do_set_key_wizard() {
         # Validate input
         if [[ ! "$type_choice" =~ ^[0-9]+$ ]]; then
             echo ""
-            echo -e "  ${RED}✗ Please enter a number${NC}"
+            echo -e "  ${RED}✗ Please enter a number from the list${NC}"
             sleep 1
             continue
         fi
         
-        if (( type_choice < 1 || type_choice > ${#key_types[@]} )); then
+        if (( type_choice < 1 || type_choice > max_choice )); then
             echo ""
-            echo -e "  ${RED}✗ Invalid choice. Please choose 1-${#key_types[@]}${NC}"
+            echo -e "  ${RED}✗ Invalid choice. Please choose 1-${max_choice}${NC}"
             sleep 1
             continue
         fi
+
+        # Update existing key in this project
+        if (( type_choice <= type_offset )); then
+            do_update_key "${proj_existing[$((type_choice - 1))]}"
+            return
+        fi
         
-        key_type="${key_types[$((type_choice - 1))]}"
+        key_type="${key_types[$((type_choice - type_offset - 1))]}"
         
         # Convert to key name
         case "$key_type" in
@@ -531,34 +862,8 @@ do_get_key() {
     local key="$1"
     
     if [[ -z "$key" ]]; then
-        clear
-        title_box "Get Key Value" "🔑"
-        echo ""
-        
-        # List available keys for reference
-        local -a all_keys=()
-        while IFS= read -r k; do
-            [[ -n "$k" && ! "$k" =~ ^__meta__: ]] && all_keys+=("$k")
-        done < <(vault_list 2>/dev/null)
-        
-        if (( ${#all_keys[@]} > 0 )); then
-            echo -e "  ${DIM}Available keys:${NC}"
-            local count=0
-            for k in "${all_keys[@]}"; do
-                echo "    • $k"
-                ((count++))
-                # Limit display to first 10 keys
-                if (( count >= 10 )); then
-                    echo -e "    ${DIM}... and $((${#all_keys[@]} - 10)) more${NC}"
-                    break
-                fi
-            done
-            echo ""
-        fi
-        
-        read -r -p "  Key name ('c' to cancel) > " key
-        
-        [[ "$key" == [cC] ]] && return
+        _vault_pick_key_via_project "Get Key Value" || return
+        key="$VAULT_PICK_RESULT"
     fi
     
     [[ -z "$key" ]] && return
@@ -584,34 +889,9 @@ do_get_key() {
 do_delete_key() {
     local key="$1"
     
-    # Get all keys
-    local -a all_keys=()
-    while IFS= read -r k; do
-        [[ -n "$k" ]] && all_keys+=("$k")
-    done < <(vault_list 2>/dev/null)
-    
-    if (( ${#all_keys[@]} == 0 )); then
-        echo -e "  ${DIM}No keys in vault.${NC}"
-        return
-    fi
-    
     if [[ -z "$key" ]]; then
-        echo ""
-        echo -e "  ${BOLD}Delete Vault Key${NC}"
-        echo ""
-        
-        for i in "${!all_keys[@]}"; do
-            printf "  %2d) ${YELLOW}%s${NC}\n" "$((i+1))" "${all_keys[$i]}"
-        done
-        
-        echo ""
-        read -r -p "  Choose [1-${#all_keys[@]}] or key name: " choice
-        
-        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#all_keys[@]} )); then
-            key="${all_keys[$((choice-1))]}"
-        else
-            key="$choice"
-        fi
+        _vault_pick_key_via_project "Delete Key" || return
+        key="$VAULT_PICK_RESULT"
     fi
     
     [[ -z "$key" ]] && return
@@ -675,49 +955,8 @@ do_project_keys() {
     local project="$1"
     
     if [[ -z "$project" ]]; then
-        echo ""
-        echo -e "  ${BOLD}Project Key Manager${NC}"
-        echo ""
-        
-        # Get all unique project namespaces
-        local -a projects=()
-        while IFS= read -r key; do
-            if [[ "$key" =~ ^([^:]+): ]]; then
-                local proj="${BASH_REMATCH[1]}"
-                if [[ ! " ${projects[*]} " =~ " ${proj} " ]]; then
-                    projects+=("$proj")
-                fi
-            fi
-        done < <(vault_list 2>/dev/null)
-        
-        if (( ${#projects[@]} == 0 )); then
-            echo -e "  ${DIM}No projects with keys yet.${NC}"
-            echo -e "  ${DIM}Use format ${CYAN}project:keyname${DIM} when adding keys.${NC}"
-            echo ""
-            read -r -p "  Project name to create: " project
-            [[ -z "$project" ]] && return
-        else
-            echo -e "  ${DIM}Choose a project:${NC}"
-            echo ""
-            for i in "${!projects[@]}"; do
-                # Count keys for this project
-                local count=0
-                while IFS= read -r key; do
-                    [[ "$key" =~ ^${projects[$i]}: ]] && ((count++))
-                done < <(vault_list 2>/dev/null)
-                printf "  %2d) ${CYAN}%-20s${NC} ${DIM}(%d keys)${NC}\n" "$((i+1))" "${projects[$i]}" "$count"
-            done
-            echo ""
-            echo -e "  ${DIM}Or type a new project name${NC}"
-            echo ""
-            read -r -p "  Choose [1-${#projects[@]}] or name: " choice
-            
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#projects[@]} )); then
-                project="${projects[$((choice-1))]}"
-            else
-                project="$choice"
-            fi
-        fi
+        _vault_pick_project true || return
+        project="$VAULT_PICK_RESULT"
     fi
     
     [[ -z "$project" ]] && return
@@ -775,15 +1014,7 @@ do_project_keys() {
                 if (( ${#proj_keys[@]} == 0 )); then
                     echo -e "  ${DIM}No keys to edit.${NC}"
                 else
-                    echo ""
-                    for i in "${!proj_keys[@]}"; do
-                        printf "  %2d) %s\n" "$((i+1))" "${proj_keys[$i]#*:}"
-                    done
-                    echo ""
-                    read -r -p "  Choose [1-${#proj_keys[@]}]: " choice
-                    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#proj_keys[@]} )); then
-                        do_set_key "${proj_keys[$((choice-1))]}"
-                    fi
+                    _vault_pick_key "$project" "Update Key" && do_update_key "$VAULT_PICK_RESULT"
                 fi
                 ;;
             d|D)
@@ -792,19 +1023,7 @@ do_project_keys() {
                     echo -e "  ${DIM}No keys to delete.${NC}"
                     sleep 1
                 else
-                    echo ""
-                    for i in "${!proj_keys[@]}"; do
-                        printf "  %2d) ${YELLOW}%s${NC}\n" "$((i+1))" "${proj_keys[$i]#*:}"
-                    done
-                    echo ""
-                    read -r -p "  Choose [1-${#proj_keys[@]}], or 'c' to cancel > " choice
-                    
-                    if [[ "$choice" == [cC] ]]; then
-                        continue
-                    elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#proj_keys[@]} )); then
-                        local key="${proj_keys[$((choice-1))]}"
-                        do_delete_key "$key"
-                    fi
+                    _vault_pick_key "$project" "Delete Key" && do_delete_key "$VAULT_PICK_RESULT"
                 fi
                 ;;
             x|X)
@@ -976,30 +1195,38 @@ _copy_project_env() {
 do_menu() {
     while true; do
         clear
-        do_browse
+        do_dashboard
         
-        echo -e "  ${BOLD}Actions:${NC}"
+        echo -e "  ${BOLD}What do you want to do?${NC}"
         echo -e "  ${DIM}$(printf '─%.0s' {1..60})${NC}"
         echo -e "  ${CYAN}Quick Actions${NC}"
-        echo -e "    ${GREEN}a${NC})  Add/update key ${DIM}(wizard)${NC}"
-        echo -e "    ${GREEN}g${NC})  Get key value"
-        echo -e "    ${GREEN}d${NC})  Delete key ${DIM}(with preview)${NC}"
+        echo -e "    ${GREEN}a${NC})  Add new key ${DIM}(pick project + type)${NC}"
+        echo -e "    ${GREEN}u${NC})  Update key ${DIM}(project → key)${NC}"
+        echo -e "    ${GREEN}g${NC})  Get key value ${DIM}(project → key)${NC}"
+        echo -e "    ${GREEN}d${NC})  Delete key ${DIM}(project → key)${NC}"
         echo ""
-        echo -e "  ${CYAN}Project Management${NC}"
-        echo -e "    ${GREEN}p${NC})  Project key manager ${DIM}(organize by project)${NC}"
+        echo -e "  ${CYAN}Projects${NC}"
+        echo -e "    ${GREEN}p${NC})  Open project manager ${DIM}(pick project)${NC}"
         echo ""
-        echo -e "  ${GREEN}/${NC})  Search/Filter  ${GREEN}r${NC})  Refresh  ${GREEN}h${NC})  Help  ${GREEN}q${NC})  Back"
+        echo -e "  ${GREEN}l${NC})  List all keys  ${GREEN}/${NC})  Search  ${GREEN}h${NC})  Help  ${GREEN}q${NC})  Back"
         echo ""
         read -r -n1 -p "  > " action; echo ""
         
         case "$action" in
             a|A) do_set_key_wizard ;;
+            u|U) do_update_key ;;
             d|D) do_delete_key ;;
             g|G) 
                 echo ""
                 do_get_key
                 ;;
             p|P) do_project_keys ;;
+            l|L)
+                clear
+                do_browse
+                echo ""
+                read -r -n1 -p "  Press any key..."; echo ""
+                ;;
             r|R) continue ;;
             /)
                 echo ""
@@ -1042,9 +1269,10 @@ do_menu() {
                 title_box "Vault Manager Help" "❓"
                 echo ""
                 echo -e "  ${BOLD}Quick Start:${NC}"
-                echo -e "    • Press ${GREEN}a${NC} to add keys using the 3-step wizard"
+                echo -e "    • Press ${GREEN}a${NC} to add a new key (pick project + type from lists)"
+                echo -e "    • Press ${GREEN}u${NC} to update (pick project, then key)"
                 echo -e "    • Press ${GREEN}p${NC} to manage keys by project"
-                echo -e "    • Press ${GREEN}g${NC} to get a key value"
+                echo -e "    • Press ${GREEN}g${NC} to get a key value (pick project, then key)"
                 echo ""
                 echo -e "  ${BOLD}Key Format:${NC}"
                 echo -e "    project:keyname  ${DIM}(e.g., myapp:api_key)${NC}"
@@ -1056,8 +1284,8 @@ do_menu() {
                 echo -e "    kmac vault project myapp     ${DIM}# Project manager${NC}"
                 echo ""
                 echo -e "  ${BOLD}Keyboard Shortcuts:${NC}"
+                echo -e "    ${GREEN}l${NC}  List all keys (full browse)"
                 echo -e "    ${GREEN}/${NC}  Search/filter keys"
-                echo -e "    ${GREEN}r${NC}  Refresh view"
                 echo -e "    ${GREEN}h${NC}  Show this help"
                 echo -e "    ${GREEN}q${NC}  Go back / Exit"
                 echo ""
@@ -1083,7 +1311,8 @@ Usage: kmac vault [command] [options]
 
 Commands:
   list              Browse all keys organized by project
-  set [key]         Add/update a key (wizard if no key given)
+  set [key]         Add a new key (wizard if no key given)
+  update [key]      Update an existing key (pick from list if no key given)
   get <key>         Print key value to stdout
   delete <key>      Delete a key
   project [name]    Interactive project key manager
@@ -1128,6 +1357,9 @@ HELP
         ;;
     delete|del|rm)      
         do_delete_key "$2"
+        ;;
+    update|edit)        
+        do_update_key "$2"
         ;;
     project|proj)       
         do_project_keys "$2"
