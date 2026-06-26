@@ -1,6 +1,6 @@
 FROM python:3.12-alpine
 
-RUN apk add --no-cache git curl bash procps lsof && \
+RUN apk add --no-cache git curl bash procps lsof su-exec && \
     adduser -D -h /app kmacuser
 
 WORKDIR /app
@@ -8,12 +8,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN chown -R kmacuser:kmacuser /app
-
-USER kmacuser
+RUN chown -R kmacuser:kmacuser /app && \
+    chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 7890
 ENV KMAC_HOST=0.0.0.0
 ENV KMAC_PORT=7890
 
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["python3", "app.py"]

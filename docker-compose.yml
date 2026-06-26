@@ -12,6 +12,7 @@ services:
       - KMAC_PORT=7890
     volumes:
       - pilot-config:/app/.config/kmac-pilot
+      - ${HOME}/.config/kmac/docker-vault-token:/app/.config/kmac/docker-vault-token:ro
       - ${KMAC_PROJECTS_DIR:-~/Projects}:/projects:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:7890/api/ping"]
@@ -25,13 +26,16 @@ services:
     build:
       context: ./server/vault
       dockerfile: Dockerfile
+    image: kmac-vault:latest
     container_name: kmac-vault
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:9999:9999"
     volumes:
-      - vault-data:/vault/data
+      - kmac-vault-data:/vault/data
+      - ${HOME}/.config/kmac/docker-vault-token:/vault/token:ro
     networks:
       - kmac-net
-    # Internal only — not exposed to host
 
   caddy:
     image: caddy:2-alpine
@@ -51,7 +55,9 @@ services:
 
 volumes:
   pilot-config:
-  vault-data:
+  kmac-vault-data:
+    external: true
+    name: kmac-vault-data
   caddy-data:
   caddy-config:
 

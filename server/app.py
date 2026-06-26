@@ -31,6 +31,7 @@ from docker_ops import (
 )
 from docker_dashboard import register_routes as register_docker_health_routes
 from system_ops import disk_usage, memory_info, top_processes, network_info, services_status, homebrew_services
+from pdac.routes import register_pdac_routes
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class WSClientState:
 
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
-    if request.path in ("/api/ping", "/ws", "/docker-dashboard") or request.path.startswith("/static/"):
+    if request.path in ("/api/ping", "/ws", "/docker-dashboard") or request.path.startswith("/static/") or request.path.startswith("/api/pdac/"):
         return await handler(request)
 
     token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
@@ -1084,6 +1085,9 @@ def create_app() -> web.Application:
     app.router.add_get("/api/system/network", handle_network)
     app.router.add_get("/api/system/services", handle_services)
     app.router.add_get("/api/system/brew", handle_brew_services)
+
+    # PDAC Database
+    register_pdac_routes(app)
 
     # Run
     app.router.add_post("/api/run", handle_run)
