@@ -59,6 +59,34 @@ show_help_menu() {
     local filter="${1:-}"
     local selected_category=""
 
+    # If fzf available, offer fast search first
+    if command -v fzf &>/dev/null; then
+        clear
+        title_box "KMac Help" "❓"
+        echo ""
+        echo -e "  ${BOLD}Choose mode:${NC}"
+        echo ""
+        echo -e "    ${GREEN}f${NC})  ${BOLD}Fast search${NC} with fzf (recommended)"
+        echo -e "    ${GREEN}b${NC})  ${BOLD}Browse${NC} by category"
+        echo -e "    ${GREEN}a${NC})  ${BOLD}All commands${NC} (list view)"
+        echo -e "    ${GREEN}q${NC})  Quit"
+        echo ""
+        read -r -n1 -p "  Choose (f/b/a/q): " mode_choice; echo ""
+
+        case "$mode_choice" in
+            f|F)
+                source "${BASH_SOURCE%/*}/_help-fzf.sh" 2>/dev/null
+                search_help_with_fzf "$filter"
+                return
+                ;;
+            a|A)
+                selected_category="all"
+                ;;
+            q|Q) return ;;
+            b|B|*) ;;  # Fall through to category browse
+        esac
+    fi
+
     while true; do
         clear
         title_box "KMac Help" "❓"
