@@ -15,6 +15,12 @@
 
 KMac-CLI is a portable macOS & Linux toolkit that puts AI coding assistants, Docker infrastructure, storage management, and remote agent control behind a single interactive terminal menu — or as direct CLI commands. It's built entirely in Bash (3.2-compatible) with a Python API server and a native iOS companion app. Install via Homebrew with `brew tap ksarrafi/kmac && brew install kmac`, or clone from GitHub as below.
 
+### Quick Start
+- **New to KMac?** Start here → [**Your First 5 Minutes**](docs/FIRST_5_MINUTES.md) (5-min walkthrough)
+- **Which tool to use?** → [**Platform Guide**](docs/PLATFORM_GUIDE.md) (CLI vs menu vs app)
+- **Looking for a command?** → [**Command Taxonomy**](docs/COMMAND_TAXONOMY.md) (by category or task)
+- **Want everything?** → Continue below for full feature list
+
 Type `kmac` and you get this:
 
 ```

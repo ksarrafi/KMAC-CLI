@@ -36,6 +36,10 @@ unset _ver_cache _ver_mtime
 # shellcheck source=scripts/_ui.sh
 source "$SCRIPTS_DIR/_ui.sh"
 
+# ─── Help System (interactive, searchable) ────────────────────────────────
+# shellcheck source=scripts/_help.sh
+source "$SCRIPTS_DIR/_help.sh" 2>/dev/null
+
 # ─── Vault (secret management) ───────────────────────────────────────────
 # shellcheck source=scripts/_vault.sh
 source "$SCRIPTS_DIR/_vault.sh" 2>/dev/null
@@ -360,7 +364,7 @@ print_menu() {
     echo -e "   ${DIM}──────${NC}"
     echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}u${NC}  Check Updates          ${GREEN}b${NC}  Backup Dotfiles"
     echo -e "   ${GREEN}V${NC}  Vault Manager          ${GREEN}.${NC}  Secrets & Keys         ${GREEN}i${NC}  Install / Bootstrap"
-    echo -e "   ${GREEN}I${NC}  Software Manager       ${GREEN}?${NC}  Health Check           ${GREEN}/${NC}  Aliases"
+    echo -e "   ${GREEN}I${NC}  Software Manager       ${GREEN}h${NC}  Health Check           ${GREEN}/${NC}  Aliases"
 
     # ─── Plugins (sorted by key, 3-column grid) ───
     if (( ${#PLUGIN_NAMES[@]} > 0 )); then
@@ -383,7 +387,9 @@ print_menu() {
         (( _pcol % 3 != 0 )) && echo ""
     fi
 
-    # ─── Footer ───
+    # ─── Help Hint & Footer ───
+    echo ""
+    echo -e "  ${DIM}${BOLD}Tip:${NC}${DIM} Press ${CYAN}?${DIM} for help  •  Type ${CYAN}kmac ask \"question\"${DIM} to skip menu${NC}"
     echo ""
     echo -e "  ${DIM}─────────────────────────────────────────────────────${NC}"
     random_tip
@@ -906,7 +912,8 @@ main() {
             i) clear; do_install_bootstrap ;;
             I) clear; bash "$SCRIPTS_DIR/software" ;;
             /) clear; do_aliases ;;
-            \?) clear; do_health ;;
+            \?) clear; show_help_menu ;;
+            h|H) clear; do_health ;;
             "~")
                 clear
                 echo ""
@@ -975,6 +982,7 @@ if [[ $# -gt 0 ]]; then
         pilot)      exec bash "$SCRIPTS_DIR/pilot" "$@" ;;
         server)     # shellcheck source=scripts/server
                     source "$SCRIPTS_DIR/server" ;;
+        pdac)       exec bash "$SCRIPTS_DIR/pdac" "$@" ;;
         remote-access)
             # Optional add-on; not present in all trees — shellcheck cannot resolve path
             # shellcheck disable=SC1091
@@ -983,6 +991,8 @@ if [[ $# -gt 0 ]]; then
         update)     exec bash "$SCRIPTS_DIR/update-check" "$@" ;;
         doctor)     do_health ;;
         storage)    exec bash "$SCRIPTS_DIR/storage" "$@" ;;
+        houseclean|clean-house) exec bash "$SCRIPTS_DIR/houseclean" "$@" ;;
+        monitor|resources) exec bash "$SCRIPTS_DIR/resource-watch" "$@" ;;
         secrets)    exec bash "$SCRIPTS_DIR/secrets" "$@" ;;
         vault)      exec bash "$SCRIPTS_DIR/vault" "$@" ;;
         docker)     exec bash "$SCRIPTS_DIR/docker" "$@" ;;
@@ -1013,53 +1023,7 @@ if [[ $# -gt 0 ]]; then
             fi
             ;;
         help|-h|--help)
-            print_logo
-            echo ""
-            echo "Usage: toolkit [command] [args...]"
-            echo ""
-            echo -e "  ${BOLD}AI & Research${NC}"
-            echo "    ask \"question\"        Ask Claude (or -i for interactive, -m opus)"
-            echo "    make \"description\"    Build a new tool with AI"
-            echo "    research [cmd]        Autonomous experiment runner (init|run|status|review|stop)"
-            echo "    ollama [cmd]          Local AI setup (install|models|serve|stop|status|chat)"
-            echo ""
-            echo -e "  ${BOLD}Dev${NC}"
-            echo "    project               Project launcher with fzf"
-            echo "    review [--strict]     Code review (--quick, --staged)"
-            echo "    aicommit [--amend]    Smart commit message with scope detection"
-            echo "    cursoragent \"task\"     Cursor Agent task (alias: cask)"
-            echo "    sessions              Resume a Claude Code session"
-            echo ""
-            echo -e "  ${BOLD}Infra${NC}"
-            echo "    docker [cmd]          Docker Manager (dashboard|health|disk|compose|mcp)"
-            echo "    docker-health         Docker health report (--json, --history)"
-            echo "    pilot <cmd>           Remote AI agent via Telegram (start/stop/status)"
-            echo "    server <cmd>          Pilot server lifecycle (start|stop|restart|status|logs|token|install|docker-up|down)"
-            echo "    remote-access <cmd>   Pilot remote access (setup|start|stop|restart|status|url|qr)"
-            echo "    killport [port]       Kill process on port (blank = list all)"
-            echo ""
-            echo -e "  ${BOLD}System${NC}"
-            echo "    software [cmd]        Install dev tools & AI CLIs (list|install|update|search)"
-            echo "    secrets [cmd]         Credential manager (list|get|set|export|add|backend)"
-            echo "    vault [cmd]           Project key manager (list|set|get|delete|project)"
-            echo "    storage [cmd]         Disk usage analyzer + iCloud migration"
-            echo "    dotbackup [cmd]       Backup/restore/diff/hook dotfiles"
-            echo "    update                Check for updates"
-            echo "    doctor                Health check"
-            echo ""
-            echo -e "  ${BOLD}AI Services${NC}"
-            echo "    assistant [cmd]       KMac AI Assistant gateway (start|stop|chat|sessions|status)"
-            echo "    ai [cmd]              Alias for assistant"
-            echo "    orchestrator [cmd]    KMac Orchestrator (start|stop|status|task|agents|costs|approve)"
-            echo "    orch [cmd]            Alias for orchestrator"
-            echo "    skillopt [cmd]        Skill Optimizer (init|run|status) — Karpathy-style eval loops"
-            echo ""
-            echo -e "  ${BOLD}Meta${NC}"
-            echo "    help, -h              Show this help"
-            echo "    version, -v           Show version info"
-            echo "    whatsnew              Show latest changelog"
-            echo ""
-            echo -e "${DIM}Run 'toolkit' or 'kmac' with no args for the interactive menu.${NC}"
+            print_help_text
             ;;
         *)
             if [[ "$subcmd" == *"/"* || "$subcmd" == *".."* ]]; then
