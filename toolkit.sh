@@ -44,6 +44,10 @@ source "$SCRIPTS_DIR/_help.sh" 2>/dev/null
 # shellcheck source=scripts/_deps.sh
 source "$SCRIPTS_DIR/_deps.sh" 2>/dev/null
 
+# ─── Error Handling (contextual errors with recovery hints) ───────────────
+# shellcheck source=scripts/_errors.sh
+source "$SCRIPTS_DIR/_errors.sh" 2>/dev/null
+
 # ─── Vault (secret management) ───────────────────────────────────────────
 # shellcheck source=scripts/_vault.sh
 source "$SCRIPTS_DIR/_vault.sh" 2>/dev/null
