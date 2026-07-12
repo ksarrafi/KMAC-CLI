@@ -374,15 +374,16 @@ print_menu() {
 
     if (( ! _ADVANCED_MODE )); then
         # ─── CORE MENU (Quick Mode) ───
-        echo -e "   ${C_CYAN}${BOLD}Essential${NC}                  ${C_GREEN}${BOLD}System${NC}"
-        echo -e "   ${DIM}──────────${NC}                  ${DIM}──────${NC}"
-        echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}d${NC}  Docker Manager"
-        echo -e "   ${GREEN}v${NC}  Code Review            ${GREEN}S${NC}  Storage Manager"
-        echo -e "   ${GREEN}c${NC}  Smart Commit           ${GREEN}V${NC}  Vault Manager"
+        echo -e "   ${C_CYAN}${BOLD}Essential${NC}                    ${C_GREEN}${BOLD}System${NC}"
+        echo -e "   ${DIM}──────────${NC}                    ${DIM}──────${NC}"
+        echo -e "   ${GREEN}a${NC}  Ask Claude              ${GREEN}d${NC}  Docker Manager"
+        echo -e "   ${GREEN}v${NC}  Code Review             ${GREEN}S${NC}  Storage Manager"
+        echo -e "   ${GREEN}c${NC}  Smart Commit            ${GREEN}V${NC}  Vault Manager"
         echo ""
-        echo -e "   ${C_TEAL}${BOLD}Quick Access${NC}"
-        echo -e "   ${DIM}────────────${NC}"
-        echo -e "   ${GREEN}?${NC}  Help                   ${GREEN}h${NC}  Health Check           ${GREEN}~/{{NC}}  Reload"
+        echo -e "   ${C_TEAL}${BOLD}Other${NC}"
+        echo -e "   ${DIM}─────${NC}"
+        echo -e "   ${GREEN}?${NC}  Help / Browse           ${GREEN}h${NC}  Health Check"
+        echo -e "   ${GREEN}~${NC}  Reload Toolkit          ${GREEN}0${NC}  Exit"
     else
         # ─── FULL MENU (Advanced Mode) ───
         echo -e "   ${C_CYAN}${BOLD}AI & Research${NC}              ${C_TEAL}${BOLD}Dev${NC}                       ${C_GREEN}${BOLD}Infra${NC}"
