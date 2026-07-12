@@ -19,6 +19,7 @@ KMac-CLI is a portable macOS & Linux toolkit that puts AI coding assistants, Doc
 - **New to KMac?** Start here → [**Your First 5 Minutes**](docs/FIRST_5_MINUTES.md) (5-min walkthrough)
 - **Which tool to use?** → [**Platform Guide**](docs/PLATFORM_GUIDE.md) (CLI vs menu vs app)
 - **Looking for a command?** → [**Command Taxonomy**](docs/COMMAND_TAXONOMY.md) (by category or task)
+- **Confused about two CLIs?** → [**CLI Architecture**](docs/CLI_ARCHITECTURE.md) (Bash vs Swift; which to use)
 - **Want everything?** → Continue below for full feature list
 
 Type `kmac` and you get this:

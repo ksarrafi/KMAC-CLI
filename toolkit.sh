@@ -40,6 +40,10 @@ source "$SCRIPTS_DIR/_ui.sh"
 # shellcheck source=scripts/_help.sh
 source "$SCRIPTS_DIR/_help.sh" 2>/dev/null
 
+# ─── Dependency Checking ──────────────────────────────────────────────────
+# shellcheck source=scripts/_deps.sh
+source "$SCRIPTS_DIR/_deps.sh" 2>/dev/null
+
 # ─── Vault (secret management) ───────────────────────────────────────────
 # shellcheck source=scripts/_vault.sh
 source "$SCRIPTS_DIR/_vault.sh" 2>/dev/null
@@ -308,6 +312,11 @@ print_menu() {
 
     echo -e "  ${DIM}│${NC}  ${rt_label}    ${dk_label}    ${ng_label}             ${DIM}│${NC}"
 
+    # ─── Dependency warning ───
+    if [[ "${_SHOW_DEP_WARNING:-0}" == "1" ]]; then
+        echo -e "  ${DIM}│${NC}  ${RED}▸${NC} ${BOLD}Missing dependencies${NC} — press ${BOLD}h${NC} for ${DIM}Health Check${NC}     ${DIM}│${NC}"
+    fi
+
     local _cache="$KMAC_CACHE_DIR/last-check.json"
     if [[ -s "$_cache" ]]; then
         local _ucount
@@ -364,7 +373,8 @@ print_menu() {
     echo -e "   ${DIM}──────${NC}"
     echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}u${NC}  Check Updates          ${GREEN}b${NC}  Backup Dotfiles"
     echo -e "   ${GREEN}V${NC}  Vault Manager          ${GREEN}.${NC}  Secrets & Keys         ${GREEN}i${NC}  Install / Bootstrap"
-    echo -e "   ${GREEN}I${NC}  Software Manager       ${GREEN}h${NC}  Health Check           ${GREEN}/${NC}  Aliases"
+    echo -e "   ${GREEN}I${NC}  Software Manager       ${GREEN}h${NC}  Health Check           ${GREEN}D${NC}  Dependencies"
+    echo -e "                                      ${GREEN}/${NC}  Aliases"
 
     # ─── Plugins (sorted by key, 3-column grid) ───
     if (( ${#PLUGIN_NAMES[@]} > 0 )); then
@@ -879,6 +889,13 @@ main() {
     discover_plugins
     hooks_emit on-startup || true
 
+    # ─── Startup dependency check (warn if missing) ───
+    local _startup_missing_req
+    _startup_missing_req=$(startup_check; echo $?)
+    if (( _startup_missing_req > 0 )); then
+        _SHOW_DEP_WARNING=1
+    fi
+
     while true; do
         print_menu
         read -r -n1 -p "  > " choice; echo ""
@@ -911,6 +928,7 @@ main() {
             u) clear; safe_run "Update Check" bash "$SCRIPTS_DIR/update-check"; pause ;;
             i) clear; do_install_bootstrap ;;
             I) clear; bash "$SCRIPTS_DIR/software" ;;
+            D) clear; list_deps ;;
             /) clear; do_aliases ;;
             \?) clear; show_help_menu ;;
             h|H) clear; do_health ;;
