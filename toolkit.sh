@@ -217,6 +217,7 @@ discover_plugins() {
 
 # ─── Animated Intro ──────────────────────────────────────────────────────
 _INTRO_PLAYED=0
+_ADVANCED_MODE=0
 
 animate_intro() {
     (( _INTRO_PLAYED )) && return
@@ -362,23 +363,44 @@ print_menu() {
     echo -e "  ${DIM}│${NC}  Disk ${_disk_used}/${_disk_total} ${_disk_color}${_disk_pct}${NC}  ${DIM}·${NC}  Load ${_load}  ${DIM}·${NC}  Up ${_uptime}${_bat_str}${_spad}${DIM}│${NC}"
     echo -e "  ${DIM}└────────────────────────────────────────────────────┘${NC}"
 
-    # ─── Commands — 3-column layout ───
+    # ─── Mode indicator ───
     echo ""
-    echo -e "   ${C_CYAN}${BOLD}AI & Research${NC}              ${C_TEAL}${BOLD}Dev${NC}                       ${C_GREEN}${BOLD}Infra${NC}"
-    echo -e "   ${DIM}─────────────${NC}              ${DIM}───${NC}                       ${DIM}─────${NC}"
-    echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}p${NC}  Project Launcher       ${GREEN}d${NC}  Docker Manager"
-    echo -e "   ${GREEN}o${NC}  Ollama (Local AI)      ${GREEN}e${NC}  Claude Code            ${GREEN}r${NC}  Remote Terminal"
-    echo -e "   ${GREEN}+${NC}  AI Toolmaker           ${GREEN}x${NC}  Cursor Agent           ${GREEN}P${NC}  Pilot ${DIM}(remote)${NC}"
-    echo -e "   ${GREEN}R${NC}  Research ${DIM}(autorun)${NC}     ${GREEN}v${NC}  Code Review            ${GREEN}n${NC}  Network Info"
-    echo -e "   ${GREEN}A${NC}  KMac Assistant          ${GREEN}c${NC}  Smart Commit           ${GREEN}k${NC}  Kill Port"
-    echo -e "   ${GREEN}O${NC}  KMac Orchestrator      ${GREEN}G${NC}  Skill Optimizer"
+    if (( _ADVANCED_MODE )); then
+        echo -e "  ${YELLOW}${BOLD}⚙ ADVANCED MODE${NC}  ${DIM}(Press X to hide advanced)${NC}"
+    else
+        echo -e "  ${GREEN}${BOLD}✓ QUICK MODE${NC}  ${DIM}(Press X to show all commands)${NC}"
+    fi
     echo ""
-    echo -e "   ${YELLOW}${BOLD}System${NC}"
-    echo -e "   ${DIM}──────${NC}"
-    echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}u${NC}  Check Updates          ${GREEN}b${NC}  Backup Dotfiles"
-    echo -e "   ${GREEN}V${NC}  Vault Manager          ${GREEN}.${NC}  Secrets & Keys         ${GREEN}i${NC}  Install / Bootstrap"
-    echo -e "   ${GREEN}I${NC}  Software Manager       ${GREEN}h${NC}  Health Check           ${GREEN}D${NC}  Dependencies"
-    echo -e "                                      ${GREEN}/${NC}  Aliases"
+
+    if (( ! _ADVANCED_MODE )); then
+        # ─── CORE MENU (Quick Mode) ───
+        echo -e "   ${C_CYAN}${BOLD}Essential${NC}                  ${C_GREEN}${BOLD}System${NC}"
+        echo -e "   ${DIM}──────────${NC}                  ${DIM}──────${NC}"
+        echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}d${NC}  Docker Manager"
+        echo -e "   ${GREEN}v${NC}  Code Review            ${GREEN}S${NC}  Storage Manager"
+        echo -e "   ${GREEN}c${NC}  Smart Commit           ${GREEN}V${NC}  Vault Manager"
+        echo ""
+        echo -e "   ${C_TEAL}${BOLD}Quick Access${NC}"
+        echo -e "   ${DIM}────────────${NC}"
+        echo -e "   ${GREEN}?${NC}  Help                   ${GREEN}h${NC}  Health Check           ${GREEN}~/{{NC}}  Reload"
+    else
+        # ─── FULL MENU (Advanced Mode) ───
+        echo -e "   ${C_CYAN}${BOLD}AI & Research${NC}              ${C_TEAL}${BOLD}Dev${NC}                       ${C_GREEN}${BOLD}Infra${NC}"
+        echo -e "   ${DIM}─────────────${NC}              ${DIM}───${NC}                       ${DIM}─────${NC}"
+        echo -e "   ${GREEN}a${NC}  Ask Claude             ${GREEN}p${NC}  Project Launcher       ${GREEN}d${NC}  Docker Manager"
+        echo -e "   ${GREEN}o${NC}  Ollama (Local AI)      ${GREEN}e${NC}  Claude Code            ${GREEN}r${NC}  Remote Terminal"
+        echo -e "   ${GREEN}+${NC}  AI Toolmaker           ${GREEN}x${NC}  Cursor Agent           ${GREEN}P${NC}  Pilot ${DIM}(remote)${NC}"
+        echo -e "   ${GREEN}R${NC}  Research ${DIM}(autorun)${NC}     ${GREEN}v${NC}  Code Review            ${GREEN}n${NC}  Network Info"
+        echo -e "   ${GREEN}A${NC}  KMac Assistant          ${GREEN}c${NC}  Smart Commit           ${GREEN}k${NC}  Kill Port"
+        echo -e "   ${GREEN}O${NC}  KMac Orchestrator      ${GREEN}G${NC}  Skill Optimizer"
+        echo ""
+        echo -e "   ${YELLOW}${BOLD}System${NC}"
+        echo -e "   ${DIM}──────${NC}"
+        echo -e "   ${GREEN}S${NC}  Storage Manager        ${GREEN}u${NC}  Check Updates          ${GREEN}b${NC}  Backup Dotfiles"
+        echo -e "   ${GREEN}V${NC}  Vault Manager          ${GREEN}.${NC}  Secrets & Keys         ${GREEN}i${NC}  Install / Bootstrap"
+        echo -e "   ${GREEN}I${NC}  Software Manager       ${GREEN}h${NC}  Health Check           ${GREEN}D${NC}  Dependencies"
+        echo -e "                                      ${GREEN}/${NC}  Aliases"
+    fi
 
     # ─── Plugins (sorted by key, 3-column grid) ───
     if (( ${#PLUGIN_NAMES[@]} > 0 )); then
@@ -975,6 +997,9 @@ main() {
                 sleep 1.5
                 ;;
             0) hooks_emit on-exit || true; echo -e "\n  ${C_TEAL}See you! ✌${NC}\n"; exit 0 ;;
+            X|x)
+                (( _ADVANCED_MODE )) && _ADVANCED_MODE=0 || _ADVANCED_MODE=1
+                ;;
             *)
                 # Check plugins
                 local matched=false
